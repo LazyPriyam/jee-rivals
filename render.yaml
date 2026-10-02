@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: jee-rivals
+    runtime: docker
+    plan: free
+    region: oregon
+    envVars:
+      - key: PORT
+        value: 8000
+      - key: SECRET_KEY
+        generateValue: true
+      - key: ADMIN_SYNC_TOKEN
+        value: rivals_sync_admin_key_jee2026

@@ -1,0 +1,127 @@
+@import "tailwindcss";
+
+@layer base {
+  body {
+    background-color: #1e222d;
+    color: #f8fafc;
+    font-family: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+    overflow-x: hidden;
+  }
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 7px;
+  height: 7px;
+}
+::-webkit-scrollbar-track {
+  background: #181d28;
+}
+::-webkit-scrollbar-thumb {
+  background: #333a4c;
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #ea580c;
+}
+
+/* KaTeX custom tweaks & high-contrast visibility */
+.katex, .katex-html, .inline-math {
+  color: inherit !important;
+}
+
+.katex .sqrt svg {
+  fill: currentColor !important;
+  stroke: currentColor !important;
+  display: block !important;
+}
+
+.katex .sqrt .sqrt-sign {
+  fill: currentColor !important;
+  stroke: currentColor !important;
+}
+
+.katex-display {
+  margin: 0.5em 0 !important;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 0.25rem 0;
+  color: inherit !important;
+}
+
+/* Captivating Orange & White Glow Effects */
+.glow-orange {
+  box-shadow: 0 0 32px -4px rgba(255, 90, 31, 0.45);
+}
+.glow-orange-subtle {
+  box-shadow: 0 0 20px -2px rgba(255, 90, 31, 0.22);
+}
+.glow-white {
+  box-shadow: 0 0 25px -4px rgba(255, 255, 255, 0.2);
+}
+.glow-amber {
+  box-shadow: 0 0 25px -5px rgba(245, 158, 11, 0.35);
+}
+.glow-emerald {
+  box-shadow: 0 0 25px -5px rgba(16, 185, 129, 0.35);
+}
+
+/* Smooth Page Transitions */
+@keyframes pageFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.page-transition {
+  animation: pageFadeIn 0.22s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+/* Authentic NTA Question Palette Button Shapes */
+.nta-shape-not-visited {
+  background: #ffffff;
+  color: #1e293b;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+}
+
+.nta-shape-not-answered {
+  background: #ea580c;
+  color: #ffffff;
+  border-radius: 4px 4px 14px 14px;
+}
+
+.nta-shape-answered {
+  background: #16a34a;
+  color: #ffffff;
+  border-radius: 14px 14px 4px 4px;
+}
+
+.nta-shape-review {
+  background: #7c3aed;
+  color: #ffffff;
+  border-radius: 9999px;
+}
+
+.nta-shape-ans-review {
+  background: #7c3aed;
+  color: #ffffff;
+  border-radius: 9999px;
+  position: relative;
+}
+.nta-shape-ans-review::after {
+  content: '';
+  position: absolute;
+  bottom: 0px;
+  right: 0px;
+  width: 9px;
+  height: 9px;
+  background-color: #22c55e;
+  border-radius: 9999px;
+  border: 1.5px solid #ffffff;
+}

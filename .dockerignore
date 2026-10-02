@@ -1,0 +1,21 @@
+# Node dependencies & temp
+frontend/node_modules
+frontend/dist
+
+# Python bytecode & temp
+**/__pycache__
+**/*.pyc
+**/*.pyo
+**/*.pyd
+venv/
+.env
+
+# Git & IDE
+.git
+.gitignore
+.vscode
+.idea
+
+# Backup files
+backend/storage/*.bak
+*.log
