@@ -20,7 +20,8 @@ import {
   ChevronRight,
   Compass,
   Clock,
-  ShieldAlert
+  ShieldAlert,
+  Settings
 } from 'lucide-react';
 import { sound } from '../utils/sound';
 import { api } from '../utils/api';
@@ -80,6 +81,7 @@ export default function Navbar({
     { id: 'invite', label: 'Invite Friends', icon: UserPlus },
     { id: 'leaderboards', label: 'Leaderboard', icon: Trophy },
     { id: 'profile', label: 'My Radar', icon: Activity },
+    { id: 'settings', label: 'Settings', icon: Settings },
   ];
 
   const handleTabClick = (tabId) => {
@@ -252,6 +254,21 @@ export default function Navbar({
                   onToastUpdate={(upd) => setToastUpdate(upd)}
                 />
               </div>
+            )}
+
+            {/* Quick Settings Gear button */}
+            {user && (
+              <button
+                onClick={() => handleTabClick('settings')}
+                title="Settings"
+                className={`p-2 rounded-xl transition cursor-pointer ${
+                  activeTab === 'settings'
+                    ? 'text-orange-400 bg-orange-500/15 border border-orange-500/40'
+                    : 'text-slate-400 hover:text-orange-400 hover:bg-white/5 border border-white/10'
+                }`}
+              >
+                <Settings className="w-4 h-4" />
+              </button>
             )}
 
             {/* Audio sound toggle */}

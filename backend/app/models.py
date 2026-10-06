@@ -40,16 +40,30 @@ class UserProfile(BaseModel):
     total_syllabus_chapters: Optional[int] = 59
     air_gate_reason: Optional[str] = None
     learnt_chapters: Optional[List[str]] = []
+    target_exam: Optional[str] = "MIXED"
+    chat_settings: Optional[Dict[str, Any]] = {}
 
 class ProfileUpdateRequest(BaseModel):
     target_college: Optional[str] = None
     target_exam_date: Optional[str] = None
+    target_exam: Optional[str] = None
     bio: Optional[str] = None
     banner_theme: Optional[str] = None
     pinned_badges: Optional[List[str]] = None
     title: Optional[str] = None
     avatar_id: Optional[str] = None
     learnt_chapters: Optional[List[str]] = None
+    chat_settings: Optional[Dict[str, Any]] = None
+
+class ChangeUsernameRequest(BaseModel):
+    new_username: str = Field(..., min_length=3, max_length=20)
+
+class ChangePinRequest(BaseModel):
+    current_pin: str
+    new_pin: str = Field(..., min_length=4, max_length=6)
+
+class ChatSettingsUpdateRequest(BaseModel):
+    chat_settings: Dict[str, Any]
 
 class AuthResponse(BaseModel):
     token: str

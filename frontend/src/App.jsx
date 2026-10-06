@@ -16,6 +16,7 @@ import AdaptivePracticeView from './components/AdaptivePracticeView';
 import SphereGridSkillTree from './components/SphereGridSkillTree';
 import TestHistoryView from './components/TestHistoryView';
 import TestAnalysisView from './components/TestAnalysisView';
+import SettingsView from './components/SettingsView';
 import AuthModal from './components/AuthModal';
 import RoomModal from './components/RoomModal';
 import ErrorBoundary from './components/ErrorBoundary';
@@ -422,6 +423,19 @@ export default function App() {
               onUpdateUser={(u) => setUser(u)}
               onStartPreset={handleStartPreset}
               isActive={activeTab === 'profile'}
+            />
+          </div>
+        )}
+
+        {/* Tab 9: Settings Console (Account & Chat) */}
+        {visitedTabs.settings && (
+          <div className={activeTab === 'settings' ? 'block' : 'hidden'}>
+            <SettingsView
+              user={user}
+              onUpdateUser={(u) => setUser(u)}
+              onLogout={handleLogout}
+              onNavigateTab={switchTab}
+              isActive={activeTab === 'settings'}
             />
           </div>
         )}

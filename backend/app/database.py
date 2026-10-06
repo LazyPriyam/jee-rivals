@@ -385,7 +385,9 @@ def init_db():
         ("bio", "'Aiming for Top 500 AIR. PvP Aspirant.'"),
         ("banner_theme", "'orange_cyber'"),
         ("pinned_badges", "'[\"elo_bronze\", \"first_blood\"]'"),
-        ("learnt_chapters", "'[]'")
+        ("learnt_chapters", "'[]'"),
+        ("chat_settings", "'{}'"),
+        ("target_exam", "'MIXED'")
     ]:
         try:
             cursor.execute(f"ALTER TABLE users ADD COLUMN {col} TEXT DEFAULT {default_val};")

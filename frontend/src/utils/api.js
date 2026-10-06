@@ -75,6 +75,25 @@ export const api = {
         method: "PUT",
         body: JSON.stringify({ chapters }),
       }),
+    changeUsername: (new_username) =>
+      request("/api/auth/change-username", {
+        method: "POST",
+        body: JSON.stringify({ new_username }),
+      }),
+    changePin: (current_pin, new_pin) =>
+      request("/api/auth/change-pin", {
+        method: "POST",
+        body: JSON.stringify({ current_pin, new_pin }),
+      }),
+    updateChatSettings: (chat_settings) =>
+      request("/api/auth/chat-settings", {
+        method: "POST",
+        body: JSON.stringify({ chat_settings }),
+      }),
+    resetData: () =>
+      request("/api/auth/reset-data", {
+        method: "POST",
+      }),
   },
   questions: {
     getChapters: () => request("/api/questions/chapters"),

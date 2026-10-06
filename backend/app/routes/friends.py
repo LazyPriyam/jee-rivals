@@ -28,9 +28,16 @@ class RespondChallengeModel(BaseModel):
     accept: bool
 
 
-def is_user_online(last_active_str: Optional[str]) -> bool:
+def is_user_online(last_active_str: Optional[str], chat_settings_raw: Optional[str] = None) -> bool:
     if not last_active_str:
         return False
+    if chat_settings_raw:
+        try:
+            cs = json.loads(chat_settings_raw) if isinstance(chat_settings_raw, str) else chat_settings_raw
+            if cs.get("presence_status") == "INVISIBLE":
+                return False
+        except Exception:
+            pass
     try:
         last_dt = datetime.datetime.fromisoformat(last_active_str)
         diff = (datetime.datetime.utcnow() - last_dt).total_seconds()
@@ -48,7 +55,7 @@ def get_friends(user: dict = Depends(get_current_user)):
     c.execute("""
         SELECT u.id, u.username, u.avatar_id, u.title, u.overall_elo, u.current_division,
                u.weekly_rp, u.total_solved, u.total_correct, u.gold_medals, u.silver_medals,
-               u.bronze_medals, u.last_active, f.created_at as friendship_date
+               u.bronze_medals, u.last_active, u.chat_settings, f.created_at as friendship_date
         FROM friends f
         JOIN users u ON (CASE WHEN f.user_id = ? THEN f.friend_id ELSE f.user_id END) = u.id
         WHERE (f.user_id = ? OR f.friend_id = ?) AND f.status = 'ACCEPTED'
@@ -76,7 +83,7 @@ def get_friends(user: dict = Depends(get_current_user)):
             "total_correct": correct,
             "accuracy_percentage": acc,
             "gold_medals": r.get("gold_medals", 0),
-            "is_online": is_user_online(r.get("last_active")),
+            "is_online": is_user_online(r.get("last_active"), r.get("chat_settings")),
             "last_active": r.get("last_active"),
             "friendship_date": r.get("friendship_date")
         })
@@ -487,6 +494,43 @@ def challenge_friend(friend_id: str, req: ChallengeFriendModel, user: dict = Dep
     target_friend = get_user_by_id(friend_id)
     if not target_friend:
         raise HTTPException(status_code=404, detail="Challenger friend not found.")
+
+    # Check recipient's challenge privacy & presence
+    if not target_friend["id"].startswith("bot_"):
+        target_chat_raw = target_friend.get("chat_settings") or "{}"
+        try:
+            target_chat = json.loads(target_chat_raw) if isinstance(target_chat_raw, str) else target_chat_raw
+        except Exception:
+            target_chat = {}
+
+        privacy = target_chat.get("challenge_privacy", "EVERYONE")
+        presence = target_chat.get("presence_status", "ONLINE")
+
+        if presence == "DND":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"{target_friend['username']} is currently in Deep Study (DND) mode."
+            )
+        if privacy == "NONE":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"{target_friend['username']} has disabled direct 1v1 duel challenges in their settings."
+            )
+        elif privacy == "FRIENDS_ONLY":
+            conn_check = get_connection()
+            cc = conn_check.cursor()
+            cc.execute("""
+                SELECT status FROM friends
+                WHERE ((user_id = ? AND friend_id = ?) OR (user_id = ? AND friend_id = ?))
+                  AND status = 'ACCEPTED'
+            """, (user["id"], friend_id, friend_id, user["id"]))
+            is_mutual = cc.fetchone()
+            conn_check.close()
+            if not is_mutual:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"{target_friend['username']} only accepts duel challenges from friends."
+                )
 
     conn = get_connection()
     c = conn.cursor()

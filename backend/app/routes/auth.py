@@ -3,7 +3,11 @@ import datetime
 import json
 from fastapi import APIRouter, HTTPException, Depends, status
 
-from backend.app.models import UserRegisterRequest, UserLoginRequest, AuthResponse, UserProfile
+import re
+from backend.app.models import (
+    UserRegisterRequest, UserLoginRequest, AuthResponse, UserProfile,
+    ChangeUsernameRequest, ChangePinRequest, ChatSettingsUpdateRequest
+)
 from backend.app.database import get_connection, get_user_by_username, get_user_by_id
 from backend.app.auth import hash_pin, verify_pin, create_access_token, get_current_user
 
@@ -61,6 +65,16 @@ def format_user_profile(user: dict, cursor=None) -> UserProfile:
     except Exception:
         learnt = []
 
+    chat_raw = user.get("chat_settings") or "{}"
+    try:
+        chat_set = json.loads(chat_raw) if isinstance(chat_raw, str) else chat_raw
+        if not isinstance(chat_set, dict):
+            chat_set = {}
+    except Exception:
+        chat_set = {}
+
+    target_exam = user.get("target_exam") or "MIXED"
+
     return UserProfile(
         id=user["id"],
         username=user["username"],
@@ -90,7 +104,9 @@ def format_user_profile(user: dict, cursor=None) -> UserProfile:
         active_chapters_count=active_count,
         total_syllabus_chapters=59,
         air_gate_reason=air_gate,
-        learnt_chapters=learnt
+        learnt_chapters=learnt,
+        target_exam=target_exam,
+        chat_settings=chat_set
     )
 
 
@@ -161,19 +177,47 @@ def get_me(user: dict = Depends(get_current_user)):
 
 @router.post("/profile", response_model=UserProfile)
 def update_profile(data: dict, user: dict = Depends(get_current_user)):
-    avatar_id = data.get("avatar_id")
-    title = data.get("title")
-    learnt_chapters = data.get("learnt_chapters")
-
     conn = get_connection()
     c = conn.cursor()
-    if avatar_id:
-        c.execute("UPDATE users SET avatar_id = ? WHERE id = ?", (avatar_id, user["id"]))
-    if title:
-        c.execute("UPDATE users SET title = ? WHERE id = ?", (title, user["id"]))
-    if learnt_chapters is not None:
-        c.execute("UPDATE users SET learnt_chapters = ? WHERE id = ?", (json.dumps(learnt_chapters), user["id"]))
-    conn.commit()
+
+    fields = []
+    values = []
+
+    if "avatar_id" in data and data["avatar_id"]:
+        fields.append("avatar_id = ?")
+        values.append(data["avatar_id"])
+    if "title" in data and data["title"]:
+        fields.append("title = ?")
+        values.append(data["title"])
+    if "target_college" in data and data["target_college"] is not None:
+        fields.append("target_college = ?")
+        values.append(data["target_college"])
+    if "target_exam_date" in data and data["target_exam_date"] is not None:
+        fields.append("target_exam_date = ?")
+        values.append(data["target_exam_date"])
+    if "target_exam" in data and data["target_exam"] is not None:
+        fields.append("target_exam = ?")
+        values.append(data["target_exam"])
+    if "bio" in data and data["bio"] is not None:
+        fields.append("bio = ?")
+        values.append(data["bio"])
+    if "banner_theme" in data and data["banner_theme"] is not None:
+        fields.append("banner_theme = ?")
+        values.append(data["banner_theme"])
+    if "pinned_badges" in data and data["pinned_badges"] is not None:
+        fields.append("pinned_badges = ?")
+        values.append(json.dumps(data["pinned_badges"]))
+    if "learnt_chapters" in data and data["learnt_chapters"] is not None:
+        fields.append("learnt_chapters = ?")
+        values.append(json.dumps(data["learnt_chapters"]))
+    if "chat_settings" in data and data["chat_settings"] is not None:
+        fields.append("chat_settings = ?")
+        values.append(json.dumps(data["chat_settings"]))
+
+    if fields:
+        values.append(user["id"])
+        c.execute(f"UPDATE users SET {', '.join(fields)} WHERE id = ?", tuple(values))
+        conn.commit()
     conn.close()
 
     updated = get_user_by_id(user["id"])
@@ -198,3 +242,115 @@ def update_learnt_chapters(data: dict, user: dict = Depends(get_current_user)):
 
     updated = get_user_by_id(user["id"])
     return format_user_profile(updated)
+
+
+@router.post("/change-username")
+def change_username(req: ChangeUsernameRequest, user: dict = Depends(get_current_user)):
+    new_username = req.new_username.strip()
+    if len(new_username) < 3 or len(new_username) > 20:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Username must be between 3 and 20 characters."
+        )
+
+    if not re.match(r"^[a-zA-Z0-9_-]+$", new_username):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Username can only contain letters, numbers, underscores, and hyphens."
+        )
+
+    existing = get_user_by_username(new_username)
+    if existing and existing["id"] != user["id"]:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Callsign '{new_username}' is already in use by another aspirant."
+        )
+
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute("UPDATE users SET username = ? WHERE id = ?", (new_username, user["id"]))
+    conn.commit()
+    conn.close()
+
+    updated = get_user_by_id(user["id"])
+    new_token = create_access_token(user["id"], new_username)
+    return {
+        "message": f"Callsign updated to {new_username}",
+        "token": new_token,
+        "user": format_user_profile(updated)
+    }
+
+
+@router.post("/change-pin")
+def change_pin(req: ChangePinRequest, user: dict = Depends(get_current_user)):
+    current_pin = req.current_pin.strip()
+    new_pin = req.new_pin.strip()
+
+    if not verify_pin(current_pin, user["pin_hash"]):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Current PIN is incorrect. Verification failed."
+        )
+
+    if len(new_pin) < 4 or len(new_pin) > 6 or not new_pin.isdigit():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="New PIN must be 4 to 6 numeric digits."
+        )
+
+    pin_hashed = hash_pin(new_pin)
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute("UPDATE users SET pin_hash = ? WHERE id = ?", (pin_hashed, user["id"]))
+    conn.commit()
+    conn.close()
+
+    return {"message": "Security PIN successfully updated."}
+
+
+@router.post("/chat-settings", response_model=UserProfile)
+def update_chat_settings(req: ChatSettingsUpdateRequest, user: dict = Depends(get_current_user)):
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute("UPDATE users SET chat_settings = ? WHERE id = ?", (json.dumps(req.chat_settings), user["id"]))
+    conn.commit()
+    conn.close()
+
+    updated = get_user_by_id(user["id"])
+    return format_user_profile(updated)
+
+
+@router.post("/reset-data")
+def reset_user_data(user: dict = Depends(get_current_user)):
+    """
+    Resets user's practice logs, session history, and chapter statistics,
+    while preserving account credentials, target goals, and friendships.
+    """
+    user_id = user["id"]
+    conn = get_connection()
+    c = conn.cursor()
+
+    c.execute("DELETE FROM activity_log WHERE user_id = ?", (user_id,))
+    c.execute("DELETE FROM adaptive_sessions WHERE user_id = ?", (user_id,))
+    c.execute("DELETE FROM user_rank_history WHERE user_id = ?", (user_id,))
+    c.execute("DELETE FROM room_participants WHERE user_id = ?", (user_id,))
+    c.execute("""
+        UPDATE users SET 
+            total_solved = 0,
+            total_correct = 0,
+            weekly_rp = 0,
+            gold_medals = 0,
+            silver_medals = 0,
+            bronze_medals = 0,
+            chapter_stats = '{}'
+        WHERE id = ?
+    """, (user_id,))
+
+    conn.commit()
+    conn.close()
+
+    updated = get_user_by_id(user_id)
+    return {
+        "message": "Practice and drill stats successfully reset to baseline.",
+        "user": format_user_profile(updated)
+    }
