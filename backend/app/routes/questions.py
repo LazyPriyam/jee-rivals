@@ -9,6 +9,28 @@ from backend.app.models import QuestionOut, QuestionSolutionOut, QuestionOptionM
 from backend.app.database import get_connection
 from backend.app.auth import get_current_user
 
+import re
+
+LATEX_N_CMDS = {
+    'eq', 'e', 'abla', 'atural', 'earrow', 'eg', 'otin', 'ot', 'u', 'warrow', 'ewline', 'orm',
+    'ull', 'exists', 'subseteq', 'supseteq', 'parallel', 'less', 'gtr', 'leq', 'geq', 'sim', 'cong'
+}
+
+def clean_escapes(text: str) -> str:
+    if not text:
+        return text
+    text = text.replace('\\r\\n', '\n').replace('\r\n', '\n')
+    def repl_n(m):
+        full = m.group(0)
+        after = m.group(1)
+        if after.lower() in LATEX_N_CMDS:
+            return full
+        return '\n' + after
+    text = re.sub(r'\\{1,2}n([a-zA-Z]*)', repl_n, text)
+    text = re.sub(r"\\{1,2}'", "'", text)
+    text = re.sub(r'\\{1,2}"', '"', text)
+    return text
+
 router = APIRouter(prefix="/api/questions", tags=["Questions"])
 
 def row_to_question_out(row: dict) -> QuestionOut:
@@ -18,7 +40,7 @@ def row_to_question_out(row: dict) -> QuestionOut:
     except Exception:
         opts_data = []
 
-    options = [QuestionOptionModel(key=o.get("key", ""), text=o.get("text", "")) for o in opts_data]
+    options = [QuestionOptionModel(key=o.get("key", ""), text=clean_escapes(o.get("text", ""))) for o in opts_data]
 
     raw_urls = row.get("diagram_urls")
     try:
@@ -43,7 +65,7 @@ def row_to_question_out(row: dict) -> QuestionOut:
         unit=row["unit"],
         chapter=row["chapter"],
         question_type=row["question_type"],
-        text=row["text"],
+        text=clean_escapes(row["text"]),
         options=options,
         has_diagram=bool(row.get("has_diagram")),
         diagram_urls=clean_urls,
@@ -244,9 +266,9 @@ def get_question_solution(question_id: str, user: dict = Depends(get_current_use
     return QuestionSolutionOut(
         id=r["id"],
         correct_answer=r["correct_answer"],
-        solution_text=r.get("solution_text"),
+        solution_text=clean_escapes(r.get("solution_text")),
         key_formulas=formulas,
-        common_pitfall=r.get("common_pitfall")
+        common_pitfall=clean_escapes(r.get("common_pitfall"))
     )
 
 

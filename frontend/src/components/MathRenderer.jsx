@@ -1,12 +1,39 @@
 import React, { useMemo } from 'react';
 import katex from 'katex';
 
+// Standard KaTeX commands starting with 'n' to protect from being treated as escaped newlines
+const LATEX_N_CMDS = new Set([
+  'eq', 'e', 'abla', 'atural', 'earrow', 'eg', 'otin', 'ot', 'u', 'warrow', 'ewline', 'orm',
+  'ull', 'exists', 'subseteq', 'supseteq', 'parallel', 'less', 'gtr', 'leq', 'geq', 'sim', 'cong'
+]);
+
+function cleanStrayEscapes(str) {
+  if (!str) return '';
+  let text = String(str);
+
+  // 1. Replace literal \r\n with \n
+  text = text.replace(/\\{1,2}r\\{1,2}n/g, '\n').replace(/\r\n/g, '\n');
+
+  // 2. Replace literal \n followed by optional letters (when not a recognized LaTeX command like \neq, \nu, \nabla)
+  text = text.replace(/\\{1,2}n([a-zA-Z]*)/g, (fullMatch, cmdLetters) => {
+    if (cmdLetters && LATEX_N_CMDS.has(cmdLetters.toLowerCase())) {
+      return '\\' + cmdLetters;
+    }
+    return '\n' + cmdLetters;
+  });
+
+  // 3. Replace stray escaped quotes (e.g. \' -> ' and \" -> ")
+  text = text.replace(/\\{1,2}(['"])/g, '$1');
+
+  return text;
+}
+
 export default function MathRenderer({ content, text: textProp, className = '' }) {
   const renderedHtml = useMemo(() => {
     const raw = content !== undefined && content !== null ? content : textProp;
     if (raw === undefined || raw === null || raw === '') return '';
 
-    let text = String(raw);
+    let text = cleanStrayEscapes(raw);
 
     // 1. Normalize double/multiple backslashes before LaTeX command letters (e.g. \\sqrt -> \sqrt, \\frac -> \frac)
     text = text.replace(/\\{2,}([a-zA-Z]+)/g, '\\$1');
