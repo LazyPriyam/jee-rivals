@@ -1,0 +1,1 @@
+"""JEE Rivals app package."""

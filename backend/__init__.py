@@ -1,0 +1,1 @@
+"""JEE Rivals backend package."""
