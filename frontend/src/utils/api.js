@@ -1,25 +1,117 @@
 const API_BASE = "";
 
+export function isRememberMeEnabled() {
+  try {
+    return localStorage.getItem("jee_remember_me") !== "false";
+  } catch (_) {
+    return true;
+  }
+}
+
+export function setRememberMePreference(enabled) {
+  try {
+    localStorage.setItem("jee_remember_me", enabled ? "true" : "false");
+    const activeToken = sessionStorage.getItem("jee_rivals_token") || localStorage.getItem("jee_rivals_token");
+    if (enabled && activeToken) {
+      localStorage.setItem("jee_rivals_token", activeToken);
+    } else if (!enabled) {
+      localStorage.removeItem("jee_rivals_token");
+    }
+  } catch (_) {}
+}
+
 export function getToken() {
   try {
-    // Prioritize tab-scoped session so different tabs in the same browser can be different players
+    // 1. Prioritize tab-scoped session so multiple tabs can test independently if needed
     const sessionToken = sessionStorage.getItem("jee_rivals_token");
     if (sessionToken) return sessionToken;
+
+    // 2. Fall back to persistent localStorage if Remember Me is not explicitly turned off
+    const rememberMe = localStorage.getItem("jee_remember_me");
+    if (rememberMe === "false") return "";
+
     return localStorage.getItem("jee_rivals_token") || "";
   } catch (_) {
     return "";
   }
 }
 
-export function setToken(token) {
+export function setToken(token, rememberMe = true) {
   try {
     if (token) {
       sessionStorage.setItem("jee_rivals_token", token);
-      localStorage.setItem("jee_rivals_token", token);
+      if (rememberMe) {
+        localStorage.setItem("jee_rivals_token", token);
+        localStorage.setItem("jee_remember_me", "true");
+      } else {
+        localStorage.removeItem("jee_rivals_token");
+        localStorage.setItem("jee_remember_me", "false");
+      }
     } else {
       sessionStorage.removeItem("jee_rivals_token");
       localStorage.removeItem("jee_rivals_token");
+      localStorage.removeItem("jee_rivals_user");
     }
+  } catch (_) {}
+}
+
+export function getCachedUser() {
+  try {
+    const raw = localStorage.getItem("jee_rivals_user");
+    return raw ? JSON.parse(raw) : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+export function setCachedUser(user) {
+  try {
+    if (user) {
+      localStorage.setItem("jee_rivals_user", JSON.stringify(user));
+    } else {
+      localStorage.removeItem("jee_rivals_user");
+    }
+  } catch (_) {}
+}
+
+export function getSavedAccounts() {
+  try {
+    const raw = localStorage.getItem("jee_saved_accounts");
+    const list = raw ? JSON.parse(raw) : [];
+    return Array.isArray(list) ? list : [];
+  } catch (_) {
+    return [];
+  }
+}
+
+export function recordSavedAccount(user) {
+  if (!user || !user.username) return;
+  try {
+    const list = getSavedAccounts();
+    const filtered = list.filter(
+      (a) => a.username?.toLowerCase() !== user.username?.toLowerCase()
+    );
+    filtered.unshift({
+      id: user.id,
+      username: user.username,
+      avatar_id: user.avatar_id || "flame",
+      overall_elo: Math.round(user.overall_elo || 1200),
+      current_division: user.current_division || "BRONZE",
+      title: user.title || "JEE Aspirant",
+      lastActive: new Date().toISOString()
+    });
+    localStorage.setItem("jee_saved_accounts", JSON.stringify(filtered.slice(0, 6)));
+  } catch (_) {}
+}
+
+export function removeSavedAccount(username) {
+  if (!username) return;
+  try {
+    const list = getSavedAccounts();
+    const filtered = list.filter(
+      (a) => a.username?.toLowerCase() !== username?.toLowerCase()
+    );
+    localStorage.setItem("jee_saved_accounts", JSON.stringify(filtered));
   } catch (_) {}
 }
 

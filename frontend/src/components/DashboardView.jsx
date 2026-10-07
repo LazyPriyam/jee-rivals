@@ -236,7 +236,7 @@ export default function DashboardView({
             <div>
               <span className="text-[10px] uppercase font-bold text-slate-400">AIR Forecast</span>
               <h4 className="text-xs font-bold text-blue-300 truncate max-w-[130px]">
-                {user.predicted_air_bracket.split('(')[0]}
+                {user.predicted_air_bracket?.split('(')[0] || 'Aspirant'}
               </h4>
             </div>
           </div>

@@ -20,10 +20,13 @@ import SettingsView from './components/SettingsView';
 import AuthModal from './components/AuthModal';
 import RoomModal from './components/RoomModal';
 import ErrorBoundary from './components/ErrorBoundary';
-import { api, getToken, setToken } from './utils/api';
+import { api, getToken, setToken, getCachedUser, setCachedUser, recordSavedAccount } from './utils/api';
 
 export default function App() {
-  const [user, setUser] = useState(null);
+  const [user, setUser] = useState(() => {
+    const t = getToken();
+    return t ? getCachedUser() : null;
+  });
   const [activeTab, setActiveTab] = useState('arena');
   const [currentRoom, setCurrentRoom] = useState(null);
   const [roomViewMode, setRoomViewMode] = useState(null); // null, 'lobby', 'battle', 'waiting', 'results'
@@ -73,10 +76,21 @@ export default function App() {
     const token = getToken();
     if (token) {
       api.auth.getMe()
-        .then((u) => setUser(u))
-        .catch(() => {
-          setToken(null);
-          setAuthModalOpen(true);
+        .then((u) => {
+          setUser(u);
+          setCachedUser(u);
+          recordSavedAccount(u);
+        })
+        .catch((err) => {
+          // ONLY clear session if server explicitly returned 401 or 403
+          if (err?.status === 401 || err?.status === 403) {
+            setToken(null);
+            setUser(null);
+            setCachedUser(null);
+            setAuthModalOpen(true);
+          } else {
+            console.warn('[Session] Backend booting up or unreachable; maintaining local session.');
+          }
         });
     } else {
       setAuthModalOpen(true);
@@ -107,6 +121,7 @@ export default function App() {
 
   const handleLogout = () => {
     setToken(null);
+    setCachedUser(null);
     setUser(null);
     setCurrentRoom(null);
     setRoomViewMode(null);
@@ -445,9 +460,13 @@ export default function App() {
       {/* Global Modals */}
       <AuthModal
         isOpen={authModalOpen}
-        onClose={() => setAuthModalOpen(false)}
+        onClose={() => {
+          if (user) setAuthModalOpen(false);
+        }}
         onSuccess={(loggedUser) => {
           setUser(loggedUser);
+          setCachedUser(loggedUser);
+          recordSavedAccount(loggedUser);
           setAuthModalOpen(false);
         }}
       />

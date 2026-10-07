@@ -8,6 +8,6 @@ services:
       - key: PORT
         value: 8000
       - key: SECRET_KEY
-        generateValue: true
+        value: jee_rivals_permanent_jwt_secret_key_prod_2026
       - key: ADMIN_SYNC_TOKEN
         value: rivals_sync_admin_key_jee2026

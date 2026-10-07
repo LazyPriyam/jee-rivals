@@ -19,7 +19,7 @@ PORT = int(os.environ.get("PORT", 8000))
 HOST = os.environ.get("HOST", "0.0.0.0")
 SECRET_KEY = os.environ.get("SECRET_KEY", "jee_rivals_super_secret_jwt_key_2026")
 ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 30  # 30 days session for low friction
+ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 365  # 1 year session for remember me persistence
 
 # Admin Token for Local-to-Cloud Sync
 ADMIN_SYNC_TOKEN = os.environ.get("ADMIN_SYNC_TOKEN", "rivals_sync_admin_key_jee2026")
