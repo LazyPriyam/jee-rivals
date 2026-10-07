@@ -496,41 +496,40 @@ def challenge_friend(friend_id: str, req: ChallengeFriendModel, user: dict = Dep
         raise HTTPException(status_code=404, detail="Challenger friend not found.")
 
     # Check recipient's challenge privacy & presence
-    if not target_friend["id"].startswith("bot_"):
-        target_chat_raw = target_friend.get("chat_settings") or "{}"
-        try:
-            target_chat = json.loads(target_chat_raw) if isinstance(target_chat_raw, str) else target_chat_raw
-        except Exception:
-            target_chat = {}
+    target_chat_raw = target_friend.get("chat_settings") or "{}"
+    try:
+        target_chat = json.loads(target_chat_raw) if isinstance(target_chat_raw, str) else target_chat_raw
+    except Exception:
+        target_chat = {}
 
-        privacy = target_chat.get("challenge_privacy", "EVERYONE")
-        presence = target_chat.get("presence_status", "ONLINE")
+    privacy = target_chat.get("challenge_privacy", "EVERYONE")
+    presence = target_chat.get("presence_status", "ONLINE")
 
-        if presence == "DND":
+    if presence == "DND":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"{target_friend['username']} is currently in Deep Study (DND) mode."
+        )
+    if privacy == "NONE":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"{target_friend['username']} has disabled direct 1v1 duel challenges in their settings."
+        )
+    elif privacy == "FRIENDS_ONLY":
+        conn_check = get_connection()
+        cc = conn_check.cursor()
+        cc.execute("""
+            SELECT status FROM friends
+            WHERE ((user_id = ? AND friend_id = ?) OR (user_id = ? AND friend_id = ?))
+              AND status = 'ACCEPTED'
+        """, (user["id"], friend_id, friend_id, user["id"]))
+        is_mutual = cc.fetchone()
+        conn_check.close()
+        if not is_mutual:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"{target_friend['username']} is currently in Deep Study (DND) mode."
+                detail=f"{target_friend['username']} only accepts duel challenges from friends."
             )
-        if privacy == "NONE":
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"{target_friend['username']} has disabled direct 1v1 duel challenges in their settings."
-            )
-        elif privacy == "FRIENDS_ONLY":
-            conn_check = get_connection()
-            cc = conn_check.cursor()
-            cc.execute("""
-                SELECT status FROM friends
-                WHERE ((user_id = ? AND friend_id = ?) OR (user_id = ? AND friend_id = ?))
-                  AND status = 'ACCEPTED'
-            """, (user["id"], friend_id, friend_id, user["id"]))
-            is_mutual = cc.fetchone()
-            conn_check.close()
-            if not is_mutual:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"{target_friend['username']} only accepts duel challenges from friends."
-                )
 
     conn = get_connection()
     c = conn.cursor()
@@ -570,13 +569,6 @@ def challenge_friend(friend_id: str, req: ChallengeFriendModel, user: dict = Dep
         INSERT INTO room_participants (room_id, user_id, current_question_index, score, marks, answers, is_finished)
         VALUES (?, ?, 0, 0, 0.0, '{}', 0)
     """, (room_id, user["id"]))
-
-    # If target is bot, add bot immediately
-    if target_friend["id"].startswith("bot_"):
-        c.execute("""
-            INSERT INTO room_participants (room_id, user_id, current_question_index, score, marks, answers, is_finished)
-            VALUES (?, ?, 0, 0, 0.0, '{}', 0)
-        """, (room_id, target_friend["id"]))
 
     # Insert direct challenge record
     challenge_id = str(uuid.uuid4())

@@ -22,7 +22,6 @@ import {
   Layers,
   ChevronRight,
   RotateCcw,
-  Bot,
   HelpCircle,
   Hash,
   Play,
@@ -63,8 +62,6 @@ export default function CustomGeneratorView({ user, onRoomCreated, onOpenAuth })
   const [roomTitle, setRoomTitle] = useState('');
   const [isPublic, setIsPublic] = useState(true);
   const [passcode, setPasscode] = useState('');
-  const [includeBotPartner, setIncludeBotPartner] = useState(false);
-  const [selectedBotPersona, setSelectedBotPersona] = useState('bot_air1');
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -233,8 +230,6 @@ export default function CustomGeneratorView({ user, onRoomCreated, onOpenAuth })
         negative_marking: isMock ? -1.0 : parseFloat(negativePenalty),
         base_correct_score: isMock ? 100.0 : 100.0,
         speed_bonus_enabled: isMock ? false : speedBonusEnabled,
-        add_bot: isMock ? false : includeBotPartner,
-        bot_persona: selectedBotPersona,
       });
 
       if ((isMock || startInstantly) && room?.code) {
@@ -455,7 +450,7 @@ export default function CustomGeneratorView({ user, onRoomCreated, onOpenAuth })
                     <span>Multiplayer Speed Duel Arena</span>
                   </h3>
                   <p className="text-xs text-slate-400 mt-1 leading-relaxed">
-                    Fast-paced 1v1 PvP combat with live leaderboard, bot contenders, speed multipliers, and Elo rating progression.
+                    Fast-paced 1v1 PvP combat with live leaderboard, live contenders, speed multipliers, and Elo rating progression.
                   </p>
                 </div>
                 <div className="mt-4 pt-3 border-t border-white/10 text-[11px] font-bold text-purple-400 font-mono">
@@ -1214,59 +1209,6 @@ export default function CustomGeneratorView({ user, onRoomCreated, onOpenAuth })
                   )}
                 </div>
               </div>
-            </div>
-
-            {/* Partner & Challenger Configuration (User Request: "add partners, etc.") */}
-            <div className="p-5 rounded-2xl bg-[#1e2433] border border-white/10 mb-8">
-              <div className="flex items-center justify-between mb-3">
-                <div className="flex items-center gap-2">
-                  <Bot className="w-5 h-5 text-cyan-400" />
-                  <div>
-                    <h3 className="text-xs font-black text-white uppercase tracking-wider">Include AI Challenger Partner</h3>
-                    <p className="text-[11px] text-slate-400">Instantly seed an AI bot rival into your room so you can compete immediately.</p>
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setIncludeBotPartner(!includeBotPartner)}
-                  className={`w-12 h-6 rounded-full transition cursor-pointer relative ${
-                    includeBotPartner ? 'bg-cyan-500' : 'bg-slate-700'
-                  }`}
-                >
-                  <span
-                    className={`w-4 h-4 rounded-full bg-white absolute top-1 transition-transform ${
-                      includeBotPartner ? 'left-7' : 'left-1'
-                    }`}
-                  />
-                </button>
-              </div>
-
-              {includeBotPartner && (
-                <div className="mt-4 pt-4 border-t border-white/10 grid grid-cols-2 sm:grid-cols-3 gap-2">
-                  {[
-                    { id: 'bot_olympiad', name: 'Olympiad Gold AI', elo: '2260' },
-                    { id: 'bot_star_batch', name: 'Kota Star Batch', elo: '2050' },
-                    { id: 'bot_air1', name: 'AIR 1 • TopperBot', elo: '1850' },
-                    { id: 'bot_ramanujan', name: 'Ramanujan Math', elo: '1740' },
-                    { id: 'bot_kota', name: 'Kota Challenger', elo: '1680' },
-                    { id: 'bot_mechanics', name: 'Arya Physics AI', elo: '1560' },
-                  ].map((bot) => (
-                    <button
-                      key={bot.id}
-                      type="button"
-                      onClick={() => setSelectedBotPersona(bot.id)}
-                      className={`p-2.5 rounded-xl border text-left transition cursor-pointer ${
-                        selectedBotPersona === bot.id
-                          ? 'border-cyan-500 bg-cyan-950/40 text-white'
-                          : 'border-white/10 bg-[#262c3c] text-slate-400'
-                      }`}
-                    >
-                      <div className="text-xs font-bold truncate text-white">{bot.name}</div>
-                      <div className="text-[10px] text-cyan-400 font-mono mt-0.5">Elo: {bot.elo}</div>
-                    </button>
-                  ))}
-                </div>
-              )}
             </div>
 
             {/* Launch & Action Buttons */}

@@ -10,7 +10,7 @@ from pydantic import BaseModel
 from backend.app.database import get_connection
 from backend.app.auth import get_current_user, get_optional_user
 from backend.app.models import TournamentCreateRequest
-from backend.app.routes.rooms import generate_room_code, BOT_PERSONAS
+from backend.app.routes.rooms import generate_room_code
 from backend.app.tools.question_verifier import audit_and_heal_question
 
 router = APIRouter(prefix="/api/tournaments", tags=["Tournaments"])
@@ -146,8 +146,6 @@ def create_match_room_helper(cursor, tournament: dict, player1_id: str, player2_
     q_ids = verified_q_ids
 
     host_id = player1_id
-    if player1_id and str(player1_id).startswith("bot_") and player2_id and not str(player2_id).startswith("bot_"):
-        host_id = player2_id
 
     room_title = f"{tournament['title']} - Round {round_num} Duel"
 
@@ -322,50 +320,11 @@ def leave_tournament(tournament_id: str, user: dict = Depends(get_current_user))
 
 @router.post("/{tournament_id}/seed_bot")
 def seed_bot_participant(tournament_id: str, user: dict = Depends(get_current_user)):
-    """Organizer can add an AI sparring bot to fill an open bracket slot."""
-    conn = get_connection()
-    c = conn.cursor()
-
-    c.execute("SELECT * FROM tournaments WHERE id = ?", (tournament_id,))
-    t_row = c.fetchone()
-    if not t_row or t_row["organizer_id"] != user["id"]:
-        conn.close()
-        raise HTTPException(status_code=403, detail="Only the tournament organizer can seed bots.")
-
-    t = dict(t_row)
-    if t["status"] != "REGISTRATION":
-        conn.close()
-        raise HTTPException(status_code=400, detail="Tournament has already started.")
-
-    c.execute("SELECT user_id FROM tournament_participants WHERE tournament_id = ?", (tournament_id,))
-    existing_uids = {r["user_id"] for r in c.fetchall()}
-
-    if len(existing_uids) >= t["bracket_size"]:
-        conn.close()
-        raise HTTPException(status_code=400, detail="Bracket is already full.")
-
-    # Find unused bot
-    bot = next((b for b in BOT_PERSONAS if b["id"] not in existing_uids), BOT_PERSONAS[0])
-    bot_uid = bot["id"]
-    if bot_uid in existing_uids:
-        bot_uid = f"{bot['id']}_{len(existing_uids)}"
-
-    now = datetime.datetime.utcnow().isoformat()
-    # Ensure bot exists in users
-    c.execute("""
-        INSERT OR IGNORE INTO users (id, username, pin_hash, avatar_id, title, overall_elo, created_at, last_active)
-        VALUES (?, ?, 'bot_pin', ?, ?, ?, ?, ?)
-    """, (bot_uid, bot["username"], bot["avatar_id"], bot["title"], bot["overall_elo"], now, now))
-
-    c.execute("""
-        INSERT INTO tournament_participants (tournament_id, user_id, username, avatar_id, seed, joined_at)
-        VALUES (?, ?, ?, ?, ?, ?)
-    """, (tournament_id, bot_uid, bot["username"], bot["avatar_id"], len(existing_uids) + 1, now))
-
-    conn.commit()
-    data = get_tournament_full(c, tournament_id, user["id"])
-    conn.close()
-    return data
+    """Retired endpoint: All tournaments are strictly human-vs-human."""
+    raise HTTPException(
+        status_code=400,
+        detail="AI bot sparring partners have been retired. All tournament contestants must be registered human aspirants."
+    )
 
 
 @router.post("/{tournament_id}/start")
@@ -392,9 +351,35 @@ def start_tournament(tournament_id: str, user: dict = Depends(get_current_user))
         conn.close()
         raise HTTPException(status_code=400, detail="At least 2 participants are needed to start a tournament.")
 
-    # 3-PLAYER STEPLADDER GAUNTLET FORMAT (NO DUMMY BOTS NEEDED)
+    now = datetime.datetime.utcnow().isoformat()
+
+    # 2-PLAYER GRAND FINALS DIRECT CLASH
+    if len(participants) == 2:
+        c.execute("""
+            UPDATE tournaments
+            SET status = 'IN_PROGRESS', started_at = ?, current_round = 1, total_rounds = 1, bracket_size = 2
+            WHERE id = ?
+        """, (now, tournament_id))
+
+        p1 = participants[0]
+        p2 = participants[1]
+        m1_id = f"m_{tournament_id}_r1_0"
+        room_code = create_match_room_helper(c, t, p1["user_id"], p2["user_id"], 1, 0)
+
+        c.execute("""
+            INSERT INTO tournament_matches (
+                id, tournament_id, round_number, match_index,
+                player1_id, player2_id, room_code, status
+            ) VALUES (?, ?, 1, 0, ?, ?, ?, 'READY')
+        """, (m1_id, tournament_id, p1["user_id"], p2["user_id"], room_code))
+
+        conn.commit()
+        data = get_tournament_full(c, tournament_id, user["id"])
+        conn.close()
+        return data
+
+    # 3-PLAYER STEPLADDER GAUNTLET FORMAT (Seed 2 vs Seed 3, winner plays Seed 1)
     if t.get("bracket_size") == 3 or len(participants) == 3:
-        now = datetime.datetime.utcnow().isoformat()
         c.execute("""
             UPDATE tournaments
             SET status = 'IN_PROGRESS', started_at = ?, current_round = 1, total_rounds = 2, bracket_size = 3
@@ -428,25 +413,10 @@ def start_tournament(tournament_id: str, user: dict = Depends(get_current_user))
         conn.close()
         return data
 
-    # Fill remaining slots up to next power of 2 with AI bots if needed (for 4, 8, 16 brackets)
-    bracket_target = 4 if len(participants) <= 4 else (8 if len(participants) <= 8 else 16)
-    while len(participants) < bracket_target:
-        idx = len(participants)
-        bot = BOT_PERSONAS[idx % len(BOT_PERSONAS)]
-        bot_uid = f"{bot['id']}_fill_{idx}"
-        now_bot = datetime.datetime.utcnow().isoformat()
-        c.execute("""
-            INSERT OR IGNORE INTO users (id, username, pin_hash, avatar_id, title, overall_elo, created_at, last_active)
-            VALUES (?, ?, 'bot_pin', ?, ?, ?, ?, ?)
-        """, (bot_uid, f"{bot['username']} #{idx}", bot["avatar_id"], bot["title"], bot["overall_elo"], now_bot, now_bot))
-        c.execute("""
-            INSERT INTO tournament_participants (tournament_id, user_id, username, avatar_id, seed, joined_at)
-            VALUES (?, ?, ?, ?, ?, ?)
-        """, (tournament_id, bot_uid, f"{bot['username']} #{idx}", bot["avatar_id"], idx + 1, now_bot))
-        participants.append({"user_id": bot_uid, "username": f"{bot['username']} #{idx}", "seed": idx + 1})
-
-    total_rounds = int(math.log2(len(participants)))
-    now = datetime.datetime.utcnow().isoformat()
+    # 4+ PLAYERS: Standard Single-Elimination with Byes for top seeds
+    total_rounds = int(math.ceil(math.log2(len(participants))))
+    bracket_target = 2 ** total_rounds
+    num_byes = bracket_target - len(participants)
 
     c.execute("""
         UPDATE tournaments
@@ -454,34 +424,32 @@ def start_tournament(tournament_id: str, user: dict = Depends(get_current_user))
         WHERE id = ?
     """, (now, total_rounds, len(participants), tournament_id))
 
-    # Generate Round 1 Matchups: Pair seeds (1 vs 2, 3 vs 4, etc.)
-    num_matches = len(participants) // 2
-    for m_idx in range(num_matches):
-        p1 = participants[m_idx * 2]
-        p2 = participants[m_idx * 2 + 1]
+    # Top seeds receive byes in Round 1
+    for m_idx in range(num_byes):
+        p1 = participants[m_idx]
         match_id = f"m_{tournament_id}_r1_{m_idx}"
+        c.execute("""
+            INSERT INTO tournament_matches (
+                id, tournament_id, round_number, match_index,
+                player1_id, player2_id, room_code, status,
+                winner_id, player1_score, player2_score, completed_at
+            ) VALUES (?, ?, 1, ?, ?, NULL, NULL, 'COMPLETED', ?, 0, 0, ?)
+        """, (match_id, tournament_id, m_idx, p1["user_id"], p1["user_id"], now))
 
+    # Remaining players pair up for live duels
+    remaining_players = participants[num_byes:]
+    for i in range(len(remaining_players) // 2):
+        m_idx = num_byes + i
+        p1 = remaining_players[i * 2]
+        p2 = remaining_players[i * 2 + 1]
+        match_id = f"m_{tournament_id}_r1_{m_idx}"
         room_code = create_match_room_helper(c, t, p1["user_id"], p2["user_id"], 1, m_idx)
-
-        if str(p1["user_id"]).startswith("bot_") and str(p2["user_id"]).startswith("bot_"):
-            bot1_wins = random.choice([True, False])
-            win_id = p1["user_id"] if bot1_wins else p2["user_id"]
-            s1 = random.randint(300, 500) if bot1_wins else random.randint(100, 290)
-            s2 = random.randint(100, 290) if bot1_wins else random.randint(300, 500)
-            c.execute("""
-                INSERT INTO tournament_matches (
-                    id, tournament_id, round_number, match_index,
-                    player1_id, player2_id, room_code, status,
-                    winner_id, player1_score, player2_score, completed_at
-                ) VALUES (?, ?, 1, ?, ?, ?, ?, 'COMPLETED', ?, ?, ?, ?)
-            """, (match_id, tournament_id, m_idx, p1["user_id"], p2["user_id"], room_code, win_id, s1, s2, now))
-        else:
-            c.execute("""
-                INSERT INTO tournament_matches (
-                    id, tournament_id, round_number, match_index,
-                    player1_id, player2_id, room_code, status
-                ) VALUES (?, ?, 1, ?, ?, ?, ?, 'READY')
-            """, (match_id, tournament_id, m_idx, p1["user_id"], p2["user_id"], room_code))
+        c.execute("""
+            INSERT INTO tournament_matches (
+                id, tournament_id, round_number, match_index,
+                player1_id, player2_id, room_code, status
+            ) VALUES (?, ?, 1, ?, ?, ?, ?, 'READY')
+        """, (match_id, tournament_id, m_idx, p1["user_id"], p2["user_id"], room_code))
 
     check_and_advance_tournament_round(c, tournament_id)
     conn.commit()
@@ -498,7 +466,7 @@ def simulate_or_resolve_match(
     user: dict = Depends(get_current_user)
 ):
     """
-    Organizer emergency action: Advances match if an opponent disconnected or if simulating a bot clash.
+    Organizer emergency action: Advances match if an opponent disconnected or organizer forces resolution.
     """
     conn = get_connection()
     c = conn.cursor()
@@ -598,14 +566,14 @@ def check_and_advance_tournament_round(cursor, tournament_id: str):
             champ_rp = int(rp_pool * 0.70)
             runner_rp = int(rp_pool * 0.30)
 
-            if champ_id and not champ_id.startswith("bot_"):
+            if champ_id:
                 cursor.execute("""
                     UPDATE users
                     SET weekly_rp = weekly_rp + ?, gold_medals = gold_medals + 1
                     WHERE id = ?
                 """, (champ_rp, champ_id))
 
-            if runner_up_id and not runner_up_id.startswith("bot_"):
+            if runner_up_id:
                 cursor.execute("""
                     UPDATE users
                     SET weekly_rp = weekly_rp + ?, silver_medals = silver_medals + 1
@@ -647,19 +615,6 @@ def check_and_advance_tournament_round(cursor, tournament_id: str):
                 if p1_id and p2_id:
                     room_code = create_match_room_helper(cursor, t, p1_id, p2_id, next_round, m_idx)
                     status = "READY"
-                    if str(p1_id).startswith("bot_") and str(p2_id).startswith("bot_"):
-                        bot1_wins = random.choice([True, False])
-                        win_id = p1_id if bot1_wins else p2_id
-                        s1 = random.randint(300, 500) if bot1_wins else random.randint(100, 290)
-                        s2 = random.randint(100, 290) if bot1_wins else random.randint(300, 500)
-                        cursor.execute("""
-                            INSERT INTO tournament_matches (
-                                id, tournament_id, round_number, match_index,
-                                player1_id, player2_id, room_code, status,
-                                winner_id, player1_score, player2_score, completed_at
-                            ) VALUES (?, ?, ?, ?, ?, ?, ?, 'COMPLETED', ?, ?, ?, ?)
-                        """, (match_id, tournament_id, next_round, m_idx, p1_id, p2_id, room_code, win_id, s1, s2, now))
-                        continue
 
                 cursor.execute("""
                     INSERT INTO tournament_matches (

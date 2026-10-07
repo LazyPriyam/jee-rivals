@@ -122,11 +122,6 @@ class RoomCreateRequest(BaseModel):
     base_correct_score: float = 100.0
     negative_marking: float = -25.0
     speed_bonus_enabled: bool = True
-    add_bot: Optional[bool] = False
-    bot_persona: Optional[str] = None
-
-class AddBotRequest(BaseModel):
-    persona_id: Optional[str] = None
 
 class RemovePlayerRequest(BaseModel):
     user_id: str

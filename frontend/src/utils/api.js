@@ -153,16 +153,6 @@ export const api = {
       request(`/api/rooms/${code}/claim_host`, {
         method: "POST",
       }),
-    addBot: (code, persona_id = null) =>
-      request(`/api/rooms/${code}/add_bot`, {
-        method: "POST",
-        body: JSON.stringify({ persona_id }),
-      }),
-    removeBot: (code, persona_id = null) =>
-      request(`/api/rooms/${code}/remove_bot`, {
-        method: "POST",
-        body: JSON.stringify({ persona_id }),
-      }),
     removePlayer: (code, user_id) =>
       request(`/api/rooms/${code}/remove_player`, {
         method: "POST",
@@ -256,10 +246,6 @@ export const api = {
       }),
     leave: (id) =>
       request(`/api/tournaments/${id}/leave`, {
-        method: 'POST',
-      }),
-    seedBot: (id) =>
-      request(`/api/tournaments/${id}/seed_bot`, {
         method: 'POST',
       }),
     start: (id) =>

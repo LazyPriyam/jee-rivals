@@ -20,7 +20,6 @@ import {
   ChevronRight,
   AlertCircle,
   Shield,
-  Bot,
   Zap,
   Check,
   X,
@@ -140,19 +139,6 @@ export default function TournamentsView({ user, onJoinRoomCode, onOpenAuth, onVi
       setActionSuccess('Withdrew registration from tournament.');
     } catch (err) {
       setActionError(err.message || 'Failed to leave tournament.');
-    }
-  };
-
-  const handleSeedBot = async (tId) => {
-    sound.click();
-    setActionError('');
-    try {
-      const updated = await api.tournaments.seedBot(tId);
-      setSelectedTournament(updated);
-      fetchTournaments();
-      setActionSuccess('Added AI Sparring Bot to roster.');
-    } catch (err) {
-      setActionError(err.message || 'Failed to add bot challenger.');
     }
   };
 
@@ -529,16 +515,6 @@ export default function TournamentsView({ user, onJoinRoomCode, onOpenAuth, onVi
 
                     {selectedTournament.is_organizer && (
                       <div className="flex items-center gap-2">
-                        <button
-                          type="button"
-                          onClick={() => handleSeedBot(selectedTournament.id)}
-                          className="px-3.5 py-3 bg-[#1e2433] hover:bg-[#293144] border border-white/20 text-cyan-300 text-xs font-bold rounded-2xl transition cursor-pointer flex items-center gap-1.5"
-                          title="Add Bot Sparring Partner"
-                        >
-                          <Bot className="w-4 h-4" />
-                          <span>+ Add Bot</span>
-                        </button>
-
                         <button
                           type="button"
                           onClick={() => handleStartTournament(selectedTournament.id)}
@@ -1394,7 +1370,7 @@ export default function TournamentsView({ user, onJoinRoomCode, onOpenAuth, onVi
                       <Sparkles className="w-4 h-4 text-orange-400 shrink-0 mt-0.5" />
                       <div>
                         <strong className="text-white block font-bold">3-Player Stepladder Gauntlet Format:</strong>
-                        Top seed earns a direct Bye to the Grand Finals; Seeds #2 & #3 battle in the Round 1 Eliminator. Exactly 3 competitors—no bot fillers needed!
+                        Top seed earns a direct Bye to the Grand Finals; Seeds #2 & #3 battle in the Round 1 Eliminator. Exactly 3 competitors in a high-stakes gauntlet!
                       </div>
                     </div>
                   )}

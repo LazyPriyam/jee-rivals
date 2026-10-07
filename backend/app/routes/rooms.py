@@ -11,7 +11,6 @@ from pydantic import BaseModel
 from backend.app.models import (
     RoomCreateRequest,
     RoomJoinRequest,
-    AddBotRequest,
     RemovePlayerRequest,
     AnswerSubmissionRequest,
     RoomState,
@@ -27,34 +26,6 @@ from backend.app.routes.questions import row_to_question_out
 from backend.app.tools.question_verifier import audit_and_heal_question
 
 router = APIRouter(prefix="/api/rooms", tags=["Rooms & Multiplayer"])
-
-BOT_PERSONAS = [
-    {"id": "bot_olympiad", "username": "Olympiad_Gold_AI", "avatar_id": "target", "overall_elo": 2260, "title": "International Gold", "accuracy": 0.94, "min_sec": 5, "max_sec": 14},
-    {"id": "bot_star_batch", "username": "Kota_Star_Batch_AI", "avatar_id": "crown", "overall_elo": 2050, "title": "Super 30 Ranker", "accuracy": 0.91, "min_sec": 5, "max_sec": 15},
-    {"id": "bot_air1", "username": "AIR_1 • TopperBot", "avatar_id": "rocket", "overall_elo": 1850, "title": "AIR 1 Elite", "accuracy": 0.88, "min_sec": 6, "max_sec": 16},
-    {"id": "bot_ramanujan", "username": "Ramanujan_Math_Bot", "avatar_id": "brain", "overall_elo": 1740, "title": "Calculus Wizard", "accuracy": 0.86, "min_sec": 6, "max_sec": 17},
-    {"id": "bot_kota", "username": "Kota_Challenger_AI", "avatar_id": "flame", "overall_elo": 1680, "title": "Kota Veteran", "accuracy": 0.80, "min_sec": 8, "max_sec": 20},
-    {"id": "bot_mechanics", "username": "Arya_Physics_AI", "avatar_id": "atom", "overall_elo": 1560, "title": "Concept Master", "accuracy": 0.82, "min_sec": 7, "max_sec": 18},
-]
-
-active_bot_tasks: Dict[str, asyncio.Task] = {}
-
-def get_available_bot(existing_user_ids: List[str], preferred_id: Optional[str] = None) -> Optional[dict]:
-    if preferred_id:
-        for b in BOT_PERSONAS:
-            if b["id"] == preferred_id and b["id"] not in existing_user_ids:
-                return b
-    for b in BOT_PERSONAS:
-        if b["id"] not in existing_user_ids:
-            return b
-    return None
-
-def ensure_bot_user_exists(cursor, bot: dict):
-    now = datetime.datetime.utcnow().isoformat()
-    cursor.execute("""
-        INSERT OR IGNORE INTO users (id, username, pin_hash, avatar_id, title, overall_elo, created_at, last_active)
-        VALUES (?, ?, 'bot_system_pin', ?, ?, ?, ?, ?)
-    """, (bot["id"], bot["username"], bot["avatar_id"], bot["title"], bot["overall_elo"], now, now))
 
 def generate_room_code() -> str:
     """Generates a clean, 5-letter uppercase room code excluding confusing characters like 0, O, 1, I."""
@@ -108,9 +79,6 @@ def calculate_elo_updates(
 
     if n == 1:
         uid = participants[0]["user_id"]
-        if uid.startswith("bot_"):
-            return {uid: 0.0}
-
         r_user = float(participants[0].get("overall_elo", 1200.0))
         u_ans = user_answers.get(uid, {})
         correct_count = 0
@@ -452,16 +420,6 @@ def create_room(req: RoomCreateRequest, user: dict = Depends(get_current_user)):
         VALUES (?, ?, 0, 0, 0.0, '{}', 0)
     """, (room_id, user["id"]))
 
-    # If add_bot requested, insert bot as second participant
-    if req.add_bot:
-        bot = get_available_bot([], req.bot_persona)
-        if bot:
-            ensure_bot_user_exists(c, bot)
-            c.execute("""
-                INSERT OR IGNORE INTO room_participants (room_id, user_id, current_question_index, score, marks, answers, is_finished)
-                VALUES (?, ?, 0, 0, 0.0, '{}', 0)
-            """, (room_id, bot["id"]))
-
     conn.commit()
     conn.close()
 
@@ -518,89 +476,9 @@ async def join_room(req: RoomJoinRequest, user: dict = Depends(get_current_user)
     return state
 
 
-@router.post("/{code}/add_bot", response_model=RoomState)
-async def add_bot_to_room(code: str, req: Optional[AddBotRequest] = None, user: dict = Depends(get_current_user)):
-    code = code.strip().upper()
-    conn = get_connection()
-    c = conn.cursor()
-
-    c.execute("SELECT * FROM rooms WHERE code = ?", (code,))
-    room_row = c.fetchone()
-    if not room_row:
-        conn.close()
-        raise HTTPException(status_code=404, detail="Room not found.")
-
-    room = dict(room_row)
-    room_id = room["id"]
-
-    c.execute("SELECT * FROM room_participants WHERE room_id = ? AND user_id = ?", (room_id, user["id"]))
-    if not c.fetchone():
-        conn.close()
-        raise HTTPException(status_code=403, detail="You must be in the room to add a bot.")
-
-    c.execute("SELECT user_id FROM room_participants WHERE room_id = ?", (room_id,))
-    existing_ids = [r[0] for r in c.fetchall()]
-
-    persona_pref = req.persona_id if req else None
-    bot = get_available_bot(existing_ids, persona_pref)
-    if not bot:
-        conn.close()
-        raise HTTPException(status_code=400, detail="All AI bot challenger personas are already in the room.")
-
-    ensure_bot_user_exists(c, bot)
-    c.execute("""
-        INSERT OR IGNORE INTO room_participants (room_id, user_id, current_question_index, score, marks, answers, is_finished)
-        VALUES (?, ?, 0, 0, 0.0, '{}', 0)
-    """, (room_id, bot["id"]))
-    conn.commit()
-    conn.close()
-
-    state = get_room_state(code, user)
-    await room_hub.broadcast_to_room(code, "PLAYER_JOINED", {
-        "user_id": bot["id"],
-        "username": bot["username"],
-        "avatar_id": bot["avatar_id"],
-        "participants_count": len(state.participants)
-    })
-    return state
-
-
-@router.post("/{code}/remove_bot", response_model=RoomState)
-async def remove_bot_from_room(code: str, req: Optional[AddBotRequest] = None, user: dict = Depends(get_current_user)):
-    code = code.strip().upper()
-    conn = get_connection()
-    c = conn.cursor()
-
-    c.execute("SELECT * FROM rooms WHERE code = ?", (code,))
-    room_row = c.fetchone()
-    if not room_row:
-        conn.close()
-        raise HTTPException(status_code=404, detail="Room not found.")
-
-    room = dict(room_row)
-    room_id = room["id"]
-
-    bot_id = req.persona_id if req and req.persona_id else None
-    if bot_id:
-        c.execute("DELETE FROM room_participants WHERE room_id = ? AND user_id = ?", (room_id, bot_id))
-    else:
-        # Remove the latest bot
-        c.execute("DELETE FROM room_participants WHERE room_id = ? AND user_id LIKE 'bot_%'", (room_id,))
-
-    conn.commit()
-    conn.close()
-
-    state = get_room_state(code, user)
-    await room_hub.broadcast_to_room(code, "PLAYER_LEFT", {
-        "user_id": bot_id or "bot",
-        "participants_count": len(state.participants)
-    })
-    return state
-
-
 @router.post("/{code}/remove_player", response_model=RoomState)
 async def remove_player_from_room(code: str, req: RemovePlayerRequest, user: dict = Depends(get_current_user)):
-    """Allows the room host to remove/kick any participant (human or bot) from the lobby."""
+    """Allows the room host to remove/kick any participant from the lobby."""
     code = code.strip().upper()
     conn = get_connection()
     c = conn.cursor()
@@ -629,12 +507,6 @@ async def remove_player_from_room(code: str, req: RemovePlayerRequest, user: dic
     conn.commit()
     conn.close()
 
-    # Cancel bot runner if it was an active bot
-    if target_user_id.startswith("bot_"):
-        task_key = f"{code}_{target_user_id}"
-        if task_key in active_bot_tasks:
-            active_bot_tasks[task_key].cancel()
-            del active_bot_tasks[task_key]
 
     state = get_room_state(code, user)
     # Broadcast kicked event to room participants
@@ -789,16 +661,13 @@ def clean_abandoned_rooms():
             WHERE (status = 'LOBBY' AND created_at < ?)
                OR (status = 'IN_PROGRESS' AND started_at < ?)
                OR status = 'ABANDONED'
-               OR (SELECT COUNT(*) FROM room_participants p WHERE p.room_id = rooms.id AND p.user_id NOT LIKE 'bot_%') = 0
+               OR (SELECT COUNT(*) FROM room_participants p WHERE p.room_id = rooms.id) = 0
         """, (lobby_cutoff, progress_cutoff))
         stale_rooms = [dict(r) for r in c.fetchall()]
 
         for r in stale_rooms:
             c.execute("DELETE FROM room_participants WHERE room_id = ?", (r["id"],))
             c.execute("DELETE FROM rooms WHERE id = ?", (r["id"],))
-            task = active_bot_tasks.pop(r["code"], None)
-            if task and not task.done():
-                task.cancel()
 
         conn.commit()
         conn.close()
@@ -838,18 +707,12 @@ async def leave_room(code: str, user: dict = Depends(get_current_user)):
         ORDER BY p.rowid ASC
     """, (room_id,))
     remaining = [dict(r) for r in c.fetchall()]
-    remaining_humans = [r for r in remaining if not r["user_id"].startswith("bot_")]
-
-    if len(remaining_humans) == 0:
-        # All human players have left - instantly delete the abandoned room!
+    if len(remaining) == 0:
+        # All players have left - instantly delete the abandoned room!
         c.execute("DELETE FROM room_participants WHERE room_id = ?", (room_id,))
         c.execute("DELETE FROM rooms WHERE id = ?", (room_id,))
         conn.commit()
         conn.close()
-
-        task = active_bot_tasks.pop(code, None)
-        if task and not task.done():
-            task.cancel()
 
         await room_hub.broadcast_to_room(code, "ROOM_CLOSED", {"reason": "All players departed."})
         return {
@@ -862,7 +725,7 @@ async def leave_room(code: str, user: dict = Depends(get_current_user)):
     host_changed = False
 
     if room["host_id"] == user["id"]:
-        new_host_id = remaining_humans[0]["user_id"]
+        new_host_id = remaining[0]["user_id"]
         host_changed = True
         c.execute("UPDATE rooms SET host_id = ? WHERE id = ?", (new_host_id, room_id))
 
@@ -974,227 +837,6 @@ async def claim_host(code: str, user: dict = Depends(get_current_user)):
     return {"success": True, "new_host_id": user["id"]}
 
 
-async def run_bot_speed_simulation(code: str, room_id: str):
-    """
-    Simulates AI bot challengers solving questions asynchronously during SPEED_DUEL matches.
-    Emits live PLAYER_PROGRESS and SCORE_SURGE WebSocket events, creating an authentic race!
-    """
-    await asyncio.sleep(2.5)  # Brief delay to let human player's UI initialize
-    try:
-        while True:
-            conn = get_connection()
-            c = conn.cursor()
-            c.execute("SELECT * FROM rooms WHERE id = ?", (room_id,))
-            room_row = c.fetchone()
-            if not room_row:
-                conn.close()
-                break
-            room = dict(room_row)
-            if room["status"] != "IN_PROGRESS" or room["mode"] != "SPEED_DUEL":
-                conn.close()
-                break
-
-            q_ids = json.loads(room["question_ids"])
-            total_q = room["total_questions"]
-
-            # Fetch unfinished bots
-            c.execute("""
-                SELECT p.*, u.username, u.overall_elo
-                FROM room_participants p
-                JOIN users u ON p.user_id = u.id
-                WHERE p.room_id = ? AND p.user_id LIKE 'bot_%' AND p.is_finished = 0
-            """, (room_id,))
-            bots = [dict(r) for r in c.fetchall()]
-
-            if not bots:
-                conn.close()
-                break
-
-            # Pick a bot to take an action this turn
-            bot_part = random.choice(bots)
-            bot_id = bot_part["user_id"]
-            persona = next((b for b in BOT_PERSONAS if b["id"] == bot_id), {
-                "accuracy": 0.82, "min_sec": 7, "max_sec": 18
-            })
-
-            curr_idx = bot_part["current_question_index"]
-            if curr_idx >= len(q_ids):
-                c.execute("UPDATE room_participants SET is_finished = 1 WHERE room_id = ? AND user_id = ?", (room_id, bot_id))
-                conn.commit()
-                conn.close()
-                continue
-
-            q_id = q_ids[curr_idx]
-            c.execute("SELECT * FROM questions WHERE id = ?", (q_id,))
-            q_row = c.fetchone()
-            if not q_row:
-                conn.close()
-                break
-            q = dict(q_row)
-
-            # Call Dynamic Human-like Bot Engine
-            from backend.app.tools.bot_engine import simulate_dynamic_bot_action
-            time_limit = room.get("time_per_question", 90)
-
-            raw_ans = bot_part.get("answers") or "{}"
-            try:
-                ans_dict = json.loads(raw_ans) if isinstance(raw_ans, str) else raw_ans
-            except Exception:
-                ans_dict = {}
-
-            bot_streak = 0
-            for prev_q, prev_data in ans_dict.items():
-                if isinstance(prev_data, dict):
-                    if prev_data.get("correct"):
-                        bot_streak = max(1, bot_streak + 1)
-                    else:
-                        bot_streak = min(-1, bot_streak - 1)
-
-            bot_action = simulate_dynamic_bot_action(persona, q, time_limit, bot_streak)
-            is_correct = bot_action["is_correct"]
-            sim_time = bot_action["time_spent_seconds"]
-            selected_opt = bot_action["selected_option"]
-
-            base_score = room.get("base_correct_score", 100.0)
-            neg_penalty = room.get("negative_marking", -25.0)
-            speed_bonus_on = bool(room.get("speed_bonus_enabled", 1))
-
-            if is_correct:
-                if speed_bonus_on:
-                    speed_fraction = max(0.0, 1.0 - (sim_time / float(time_limit)))
-                    speed_bonus = int(50.0 * speed_fraction)
-                else:
-                    speed_bonus = 0
-                delta_score = int(base_score) + speed_bonus
-                delta_marks = 4.0
-            elif selected_opt == "SKIPPED":
-                delta_score = 0
-                delta_marks = 0.0
-            else:
-                delta_score = int(neg_penalty)
-                delta_marks = -1.0
-
-            ans_dict[q_id] = {
-                "selected": selected_opt,
-                "correct": is_correct,
-                "time_spent": sim_time,
-                "delta_score": delta_score,
-                "delta_marks": delta_marks
-            }
-
-            new_score = bot_part["score"] + delta_score
-            new_marks = bot_part["marks"] + delta_marks
-            new_idx = curr_idx + 1
-            is_finished = 1 if new_idx >= total_q else 0
-            now = datetime.datetime.utcnow().isoformat()
-
-            c.execute("""
-                UPDATE room_participants
-                SET score = ?, marks = ?, current_question_index = ?, answers = ?, is_finished = ?, finished_at = ?
-                WHERE room_id = ? AND user_id = ?
-            """, (new_score, new_marks, new_idx, json.dumps(ans_dict), is_finished, now if is_finished else None, room_id, bot_id))
-
-            c.execute("SELECT COUNT(*) as unfinished FROM room_participants WHERE room_id = ? AND is_finished = 0", (room_id,))
-            unfinished_count = c.fetchone()["unfinished"]
-            match_completed = False
-
-            if unfinished_count == 0:
-                c.execute("UPDATE rooms SET status = 'COMPLETED', completed_at = ? WHERE id = ?", (now, room_id))
-                match_completed = True
-
-                c.execute("""
-                    SELECT p.user_id, p.score, u.overall_elo, u.gold_medals
-                    FROM room_participants p
-                    JOIN users u ON p.user_id = u.id
-                    WHERE p.room_id = ?
-                    ORDER BY p.score DESC
-                """, (room_id,))
-                finished_parts = [dict(r) for r in c.fetchall()]
-
-                if finished_parts:
-                    winner_id = finished_parts[0]["user_id"]
-                    c.execute("UPDATE users SET gold_medals = gold_medals + 1 WHERE id = ?", (winner_id,))
-                    if len(finished_parts) > 1:
-                        c.execute("UPDATE users SET silver_medals = silver_medals + 1 WHERE id = ?", (finished_parts[1]["user_id"],))
-                    if len(finished_parts) > 2:
-                        c.execute("UPDATE users SET bronze_medals = bronze_medals + 1 WHERE id = ?", (finished_parts[2]["user_id"],))
-
-                    q_elos = []
-                    q_ids_raw = room.get("question_ids") or "[]"
-                    try:
-                        q_ids_list = json.loads(q_ids_raw) if isinstance(q_ids_raw, str) else q_ids_raw
-                        if q_ids_list:
-                            placeholders = ','.join(['?'] * len(q_ids_list))
-                            c.execute(f"SELECT elo_rating FROM questions WHERE id IN ({placeholders})", q_ids_list)
-                            q_elos = [float(r["elo_rating"] or 1500) for r in c.fetchall()]
-                    except Exception:
-                        pass
-
-                    user_answers_map = {}
-                    for part in finished_parts:
-                        ans_val = part.get("answers") or "{}"
-                        user_answers_map[part["user_id"]] = json.loads(ans_val) if isinstance(ans_val, str) else ans_val
-
-                    from backend.app.tools.elo_engine import apply_match_elo_to_user
-                    r_subjs = json.loads(room["subjects"]) if isinstance(room.get("subjects"), str) else (room.get("subjects") or [])
-                    r_chaps = json.loads(room["chapters"]) if isinstance(room.get("chapters"), str) else (room.get("chapters") or [])
-
-                    elo_deltas = calculate_elo_updates(finished_parts, user_answers_map, q_elos)
-                    for uid, delta in elo_deltas.items():
-                        if not uid.startswith("bot_"):
-                            apply_match_elo_to_user(c, uid, delta, r_subjs, r_chaps)
-
-                    if room.get("tournament_id"):
-                        try:
-                            from backend.app.routes.tournaments import check_and_advance_tournament_round
-                            t_id = room["tournament_id"]
-                            win_uid = finished_parts[0]["user_id"] if finished_parts else None
-                            c.execute("SELECT player1_id, player2_id FROM tournament_matches WHERE tournament_id = ? AND room_code = ?", (t_id, code))
-                            tm_row = c.fetchone()
-                            if tm_row:
-                                p1_s = next((p["score"] for p in finished_parts if p["user_id"] == tm_row["player1_id"]), 0)
-                                p2_s = next((p["score"] for p in finished_parts if p["user_id"] == tm_row["player2_id"]), 0)
-                            else:
-                                p1_s = finished_parts[0]["score"] if finished_parts else 0
-                                p2_s = finished_parts[1]["score"] if len(finished_parts) > 1 else 0
-                            c.execute("""
-                                UPDATE tournament_matches
-                                SET status = 'COMPLETED', winner_id = ?, player1_score = ?, player2_score = ?, completed_at = ?
-                                WHERE tournament_id = ? AND room_code = ?
-                            """, (win_uid, p1_s, p2_s, now, t_id, code))
-                            check_and_advance_tournament_round(c, t_id)
-                        except Exception as e:
-                            print(f"[TOURNAMENT] Error advancing tournament match in bot sim: {e}")
-
-            conn.commit()
-            conn.close()
-
-            # Broadcast live bot progression to all room participants
-            await room_hub.broadcast_to_room(code, "PLAYER_PROGRESS", {
-                "user_id": bot_id,
-                "username": bot_part["username"],
-                "question_index": new_idx,
-                "is_finished": bool(is_finished),
-                "total_questions": total_q,
-                "score": new_score,
-                "delta_score": delta_score
-            })
-            await room_hub.broadcast_to_room(code, "SCORE_SURGE", {
-                "user_id": bot_id,
-                "score": new_score
-            })
-
-            if match_completed:
-                await room_hub.broadcast_to_room(code, "MATCH_COMPLETED", {"completed_at": now})
-                break
-
-            # Natural human-like stagger before next bot response
-            await asyncio.sleep(random.uniform(4.5, 9.5))
-    except Exception as e:
-        print(f"[Bot Sim Error] Room {code}: {e}")
-    finally:
-        active_bot_tasks.pop(code, None)
-
 
 @router.post("/{code}/start", response_model=RoomState)
 async def start_room(code: str, user: dict = Depends(get_current_user)):
@@ -1219,8 +861,8 @@ async def start_room(code: str, user: dict = Depends(get_current_user)):
 
     # Host verification with self-healing fallback
     if room["host_id"] != user["id"]:
-        # If this is a tournament match or host is a bot, promote human caller to host
-        if room.get("tournament_id") or (room.get("host_id") and str(room["host_id"]).startswith("bot_")):
+        # If this is a tournament match, promote human caller to host
+        if room.get("tournament_id"):
             c.execute("UPDATE rooms SET host_id = ? WHERE id = ?", (user["id"], room_id))
             conn.commit()
             room["host_id"] = user["id"]
@@ -1254,17 +896,9 @@ async def start_room(code: str, user: dict = Depends(get_current_user)):
     c.execute("UPDATE rooms SET status = 'IN_PROGRESS', started_at = ? WHERE id = ?", (now, room_id))
     conn.commit()
 
-    # Check for bot participants to start simulation
-    c.execute("SELECT 1 FROM room_participants WHERE room_id = ? AND user_id LIKE 'bot_%'", (room_id,))
-    has_bots = bool(c.fetchone())
     conn.close()
 
     await room_hub.broadcast_to_room(code, "MATCH_STARTED", {"started_at": now})
-
-    if has_bots and room["mode"] == "SPEED_DUEL":
-        if code in active_bot_tasks and not active_bot_tasks[code].done():
-            active_bot_tasks[code].cancel()
-        active_bot_tasks[code] = asyncio.create_task(run_bot_speed_simulation(code, room_id))
 
     return get_room_state(code, user)
 
@@ -1377,37 +1011,6 @@ async def submit_bulk_mock(code: str, req: BulkSubmissionRequest, user: dict = D
         WHERE id = ?
     """, (len(q_ids), total_correct, max(10, total_score if total_score > 0 else 10), now, user["id"]))
 
-    # Auto-simulate finish for all AI bot participants in this mock test
-    c.execute("""
-        SELECT p.* FROM room_participants p
-        WHERE p.room_id = ? AND p.user_id LIKE 'bot_%' AND p.is_finished = 0
-    """, (room_id,))
-    unfinished_bots = [dict(r) for r in c.fetchall()]
-    for ub in unfinished_bots:
-        persona = next((b for b in BOT_PERSONAS if b["id"] == ub["user_id"]), {"accuracy": 0.82})
-        bot_score = 0
-        bot_marks = 0.0
-        bot_answers = {}
-        for q_id in q_ids:
-            is_corr = random.random() < persona.get("accuracy", 0.82)
-            if is_corr:
-                bot_score += int(base_score)
-                bot_marks += 4.0
-                bot_answers[q_id] = {"selected": "CORRECT", "correct": True, "delta_score": int(base_score), "delta_marks": 4.0}
-            else:
-                if random.random() < 0.75:
-                    bot_score += int(neg_penalty)
-                    bot_marks += -1.0
-                    bot_answers[q_id] = {"selected": "WRONG", "correct": False, "delta_score": int(neg_penalty), "delta_marks": -1.0}
-                else:
-                    bot_answers[q_id] = {"selected": "UNATTEMPTED", "correct": False, "delta_score": 0, "delta_marks": 0.0}
-
-        c.execute("""
-            UPDATE room_participants
-            SET score = ?, marks = ?, current_question_index = ?, answers = ?, is_finished = 1, finished_at = ?
-            WHERE room_id = ? AND user_id = ?
-        """, (bot_score, bot_marks, len(q_ids), json.dumps(bot_answers), now, room_id, ub["user_id"]))
-
     # Check if everyone finished
     c.execute("SELECT COUNT(*) as unfinished FROM room_participants WHERE room_id = ? AND is_finished = 0", (room_id,))
     unfinished_count = c.fetchone()["unfinished"]
@@ -1451,8 +1054,7 @@ async def submit_bulk_mock(code: str, req: BulkSubmissionRequest, user: dict = D
 
             elo_deltas = calculate_elo_updates(finished_parts, user_answers_map, q_elos)
             for uid, delta in elo_deltas.items():
-                if not uid.startswith("bot_"):
-                    apply_match_elo_to_user(c, uid, delta, r_subjs, r_chaps)
+                apply_match_elo_to_user(c, uid, delta, r_subjs, r_chaps)
 
     conn.commit()
     conn.close()
@@ -1669,8 +1271,7 @@ async def submit_answer(code: str, submission: AnswerSubmissionRequest, user: di
 
             elo_deltas = calculate_elo_updates(finished_parts, user_answers_map, q_elos)
             for uid, delta in elo_deltas.items():
-                if not uid.startswith("bot_"):
-                    apply_match_elo_to_user(c, uid, delta, r_subjs, r_chaps)
+                apply_match_elo_to_user(c, uid, delta, r_subjs, r_chaps)
 
             if room.get("tournament_id"):
                 try:

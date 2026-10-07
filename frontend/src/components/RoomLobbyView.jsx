@@ -1,20 +1,19 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { api, getToken } from '../utils/api';
-import { Copy, Check, Users, Swords, Play, ArrowLeft, Crown, Sparkles, BookOpen, AlertCircle, Flame, Link2, Bot, Share2, Trash2, UserX } from 'lucide-react';
+import { Copy, Check, Users, Swords, Play, ArrowLeft, Crown, Sparkles, BookOpen, AlertCircle, Flame, Link2, Share2, Trash2, UserX } from 'lucide-react';
 
 export default function RoomLobbyView({ room, user, onStartMatch, onLeaveRoom }) {
   const [currentRoom, setCurrentRoom] = useState(room);
   const [copied, setCopied] = useState(false);
   const [copiedLink, setCopiedLink] = useState(false);
-  const [addingBot, setAddingBot] = useState(false);
   const [participants, setParticipants] = useState(room.participants || []);
   const [starting, setStarting] = useState(false);
   const [leaving, setLeaving] = useState(false);
   const [error, setError] = useState('');
   const wsRef = useRef(null);
 
-  // Dynamic host status based on latest room state (allow human to start if host is bot or in tournament match)
-  const isHost = Boolean(user && currentRoom && (currentRoom.host_id === user.id || currentRoom.host_id?.startsWith('bot_') || Boolean(currentRoom.tournament_id)));
+  // Dynamic host status based on latest room state
+  const isHost = Boolean(user && currentRoom && (currentRoom.host_id === user.id || Boolean(currentRoom.tournament_id)));
 
   // Fetch latest room state
   const refreshRoom = async () => {
@@ -116,41 +115,12 @@ export default function RoomLobbyView({ room, user, onStartMatch, onLeaveRoom })
     setTimeout(() => setCopiedLink(false), 2000);
   };
 
-  const handleAddBot = async () => {
-    if (addingBot) return;
-    setAddingBot(true);
-    setError('');
-    try {
-      const state = await api.rooms.addBot(currentRoom.code);
-      setCurrentRoom(state);
-      setParticipants(state.participants || []);
-    } catch (err) {
-      setError(err.message || 'Failed to add AI bot challenger.');
-    } finally {
-      setAddingBot(false);
-    }
-  };
-
-  const handleRemoveBot = async (botId) => {
-    try {
-      const state = await api.rooms.removeBot(currentRoom.code, botId);
-      setCurrentRoom(state);
-      setParticipants(state.participants || []);
-    } catch (err) {
-      setError(err.message || 'Failed to remove bot.');
-    }
-  };
-
   const handleRemovePlayer = async (targetUserId, targetUsername) => {
     if (!window.confirm(`Remove ${targetUsername} from the room lobby?`)) return;
     try {
-      if (targetUserId.startsWith('bot_')) {
-        await handleRemoveBot(targetUserId);
-      } else {
-        const state = await api.rooms.removePlayer(currentRoom.code, targetUserId);
-        setCurrentRoom(state);
-        setParticipants(state.participants || []);
-      }
+      const state = await api.rooms.removePlayer(currentRoom.code, targetUserId);
+      setCurrentRoom(state);
+      setParticipants(state.participants || []);
     } catch (err) {
       setError(err.message || 'Failed to remove player.');
     }
@@ -230,7 +200,7 @@ export default function RoomLobbyView({ room, user, onStartMatch, onLeaveRoom })
           Battle Lobby Ready
         </h1>
         <p className="text-slate-400 text-sm mt-1">
-          Share room code or invite link with friends to duel, or add an AI bot rival to practice instantly.
+          Share room code or invite link with friends to duel together in real-time.
         </p>
 
         {/* Room Code Badge */}
@@ -277,17 +247,6 @@ export default function RoomLobbyView({ room, user, onStartMatch, onLeaveRoom })
               )}
             </button>
 
-            {isHost && (
-              <button
-                onClick={handleAddBot}
-                disabled={addingBot}
-                className="px-5 py-3 bg-gradient-to-r from-cyan-600/30 to-blue-600/30 hover:from-cyan-600/40 hover:to-blue-600/40 border border-cyan-500/40 text-cyan-300 font-extrabold rounded-2xl transition flex items-center gap-2 cursor-pointer shadow-md text-xs sm:text-sm disabled:opacity-50"
-              >
-                <Bot className="w-4 h-4 text-cyan-400" />
-                <span>{addingBot ? 'Adding Bot...' : '+ Add AI Bot Rival'}</span>
-              </button>
-            )}
-
             <a
               href={`https://api.whatsapp.com/send?text=${encodeURIComponent(`Join my JEE Rivals Battle! Room Code: ${currentRoom.code} | Link: ${window.location.origin}/?join=${currentRoom.code}`)}`}
               target="_blank"
@@ -333,7 +292,6 @@ export default function RoomLobbyView({ room, user, onStartMatch, onLeaveRoom })
             {participants.map((p) => {
               const pIsHost = p.user_id === currentRoom.host_id;
               const isMe = user && p.user_id === user.id;
-              const isBot = p.user_id.startsWith('bot_');
 
               return (
                 <div
@@ -341,26 +299,20 @@ export default function RoomLobbyView({ room, user, onStartMatch, onLeaveRoom })
                   className={`flex items-center justify-between p-3 rounded-2xl bg-[#1e2433] border ${
                     pIsHost
                       ? 'border-amber-500/60 shadow-sm shadow-amber-950/40'
-                      : isBot
-                      ? 'border-cyan-500/40 bg-cyan-950/10'
                       : 'border-white/10'
                   } hover:border-orange-500/40 transition text-left`}
                 >
                   <div className="flex items-center gap-2.5">
                     <div className="w-8 h-8 rounded-lg bg-orange-950/80 border border-orange-500/40 flex items-center justify-center text-base shrink-0">
-                      {isBot ? '🤖' : (
-                        <>
-                          {p.avatar_id === 'atom' && '⚛️'}
-                          {p.avatar_id === 'zap' && '⚡'}
-                          {p.avatar_id === 'rocket' && '🚀'}
-                          {p.avatar_id === 'flame' && '🔥'}
-                          {p.avatar_id === 'shield' && '🛡️'}
-                          {p.avatar_id === 'target' && '🎯'}
-                          {p.avatar_id === 'compass' && '🧭'}
-                          {p.avatar_id === 'brain' && '🧠'}
-                          {!['atom','zap','rocket','flame','shield','target','compass','brain'].includes(p.avatar_id) && '🔥'}
-                        </>
-                      )}
+                      {p.avatar_id === 'atom' && '⚛️'}
+                      {p.avatar_id === 'zap' && '⚡'}
+                      {p.avatar_id === 'rocket' && '🚀'}
+                      {p.avatar_id === 'flame' && '🔥'}
+                      {p.avatar_id === 'shield' && '🛡️'}
+                      {p.avatar_id === 'target' && '🎯'}
+                      {p.avatar_id === 'compass' && '🧭'}
+                      {p.avatar_id === 'brain' && '🧠'}
+                      {!['atom','zap','rocket','flame','shield','target','compass','brain'].includes(p.avatar_id) && '🔥'}
                     </div>
                     <div className="overflow-hidden">
                       <div className="flex items-center gap-1.5 font-bold text-xs text-white">
@@ -369,11 +321,6 @@ export default function RoomLobbyView({ room, user, onStartMatch, onLeaveRoom })
                           <span className="inline-flex items-center gap-0.5 px-1.5 py-0.2 rounded bg-amber-950/90 border border-amber-500/50 text-[10px] text-amber-300 font-mono shrink-0">
                             <Crown className="w-2.5 h-2.5 fill-amber-400 text-amber-400" />
                             <span>Host</span>
-                          </span>
-                        )}
-                        {isBot && (
-                          <span className="inline-flex items-center gap-0.5 px-1.5 py-0.2 rounded bg-cyan-950 border border-cyan-500/40 text-[10px] text-cyan-300 font-mono shrink-0">
-                            AI BOT
                           </span>
                         )}
                         {isMe && <span className="text-[10px] text-orange-400 font-mono shrink-0">(You)</span>}
@@ -386,7 +333,7 @@ export default function RoomLobbyView({ room, user, onStartMatch, onLeaveRoom })
 
                   <div className="flex items-center gap-1.5 shrink-0">
                     {/* If current user is host, allow transferring crown to another human player */}
-                    {isHost && !pIsHost && !isBot && (
+                    {isHost && !pIsHost && (
                       <button
                         onClick={() => handleTransferHost(p.user_id)}
                         title="Pass Host Leadership"
@@ -400,7 +347,7 @@ export default function RoomLobbyView({ room, user, onStartMatch, onLeaveRoom })
                     {isHost && !pIsHost && (
                       <button
                         onClick={() => handleRemovePlayer(p.user_id, p.username)}
-                        title={isBot ? "Remove Bot" : "Kick Player from Lobby"}
+                        title="Kick Player from Lobby"
                         className="p-1.5 hover:text-red-400 hover:bg-red-950/50 text-slate-400 rounded-lg transition cursor-pointer"
                       >
                         <UserX className="w-3.5 h-3.5" />
