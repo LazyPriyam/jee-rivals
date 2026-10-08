@@ -171,6 +171,12 @@ def register(req: UserRegisterRequest):
     conn.commit()
     conn.close()
 
+    try:
+        from backend.app.tools.system_updates_engine import mark_all_updates_read
+        mark_all_updates_read(user_id)
+    except Exception:
+        pass
+
     user = get_user_by_id(user_id)
     token = create_access_token(user_id, username, pin_hashed)
     return AuthResponse(token=token, user=format_user_profile(user))
@@ -198,6 +204,11 @@ def login(req: UserLoginRequest):
         """, (user_id, username, pin_hashed, now, now))
         conn.commit()
         conn.close()
+        try:
+            from backend.app.tools.system_updates_engine import mark_all_updates_read
+            mark_all_updates_read(user_id)
+        except Exception:
+            pass
         user = get_user_by_id(user_id)
     elif not verify_pin(req.pin, user["pin_hash"]):
         raise HTTPException(

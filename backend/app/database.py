@@ -221,6 +221,24 @@ def init_db():
         created_at TEXT
     );
     """)
+
+    # Direct Messages & Chat Table (Chess.com style integrated friends messages)
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS direct_messages (
+        id TEXT PRIMARY KEY,
+        sender_id TEXT NOT NULL,
+        receiver_id TEXT NOT NULL,
+        message TEXT NOT NULL,
+        message_type TEXT DEFAULT 'TEXT',
+        metadata TEXT DEFAULT '{}',
+        is_read INTEGER DEFAULT 0,
+        created_at TEXT NOT NULL
+    );
+    """)
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_dm_users ON direct_messages(sender_id, receiver_id);")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_dm_receiver_read ON direct_messages(receiver_id, is_read);")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_dm_created ON direct_messages(created_at DESC);")
+
     # Tournaments Table
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS tournaments (

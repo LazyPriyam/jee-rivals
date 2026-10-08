@@ -62,6 +62,7 @@ export default function Navbar({
   onAcceptDuel,
   hasActiveRoom = false,
   onUpdateUser,
+  onOpenChat,
 }) {
   const [isMuted, setIsMuted] = useState(sound.isMuted());
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -297,7 +298,7 @@ export default function Navbar({
                 <button
                   type="button"
                   onClick={() => setNotificationsOpen(!notificationsOpen)}
-                  title="Notifications"
+                  title="Notifications & Messages"
                   className="p-2 text-slate-400 hover:text-orange-400 rounded-xl hover:bg-white/5 border border-white/10 transition cursor-pointer relative"
                 >
                   <Bell className="w-4 h-4" />
@@ -307,20 +308,6 @@ export default function Navbar({
                     </span>
                   )}
                 </button>
-
-                <NotificationPanel
-                  isOpen={notificationsOpen}
-                  onClose={() => setNotificationsOpen(false)}
-                  user={user}
-                  placement="sidebar"
-                  onAcceptDuel={(roomCode) => {
-                    setNotificationsOpen(false);
-                    if (onAcceptDuel) onAcceptDuel(roomCode);
-                  }}
-                  onCountUpdate={(cnt) => setUnreadCount(cnt)}
-                  onOpenUpdateModal={(upd) => setSelectedUpdateModal(upd)}
-                  onToastUpdate={(upd) => setToastUpdate(upd)}
-                />
               </div>
             )}
 
@@ -420,7 +407,8 @@ export default function Navbar({
               <button
                 type="button"
                 onClick={() => setNotificationsOpen(!notificationsOpen)}
-                className="p-1.5 text-slate-400 hover:text-orange-400 rounded-lg border border-white/10 relative"
+                className="p-1.5 text-slate-400 hover:text-orange-400 rounded-lg border border-white/10 relative cursor-pointer"
+                title="Notifications & Messages"
               >
                 <Bell className="w-4 h-4" />
                 {unreadCount > 0 && (
@@ -429,19 +417,6 @@ export default function Navbar({
                   </span>
                 )}
               </button>
-              <NotificationPanel
-                isOpen={notificationsOpen}
-                onClose={() => setNotificationsOpen(false)}
-                user={user}
-                placement="dropdown"
-                onAcceptDuel={(roomCode) => {
-                  setNotificationsOpen(false);
-                  if (onAcceptDuel) onAcceptDuel(roomCode);
-                }}
-                onCountUpdate={(cnt) => setUnreadCount(cnt)}
-                onOpenUpdateModal={(upd) => setSelectedUpdateModal(upd)}
-                onToastUpdate={(upd) => setToastUpdate(upd)}
-              />
             </div>
           )}
 
@@ -625,6 +600,27 @@ export default function Navbar({
         user={user}
         onUpdateUser={onUpdateUser}
       />
+
+      {/* Single Unified Notification & Friends Chat Popover */}
+      {user && (
+        <NotificationPanel
+          isOpen={notificationsOpen}
+          onClose={() => setNotificationsOpen(false)}
+          user={user}
+          placement={isCollapsed ? 'sidebar' : 'dropdown'}
+          onAcceptDuel={(roomCode) => {
+            setNotificationsOpen(false);
+            if (onAcceptDuel) onAcceptDuel(roomCode);
+          }}
+          onCountUpdate={(cnt) => setUnreadCount(cnt)}
+          onOpenUpdateModal={(upd) => setSelectedUpdateModal(upd)}
+          onToastUpdate={(upd) => setToastUpdate(upd)}
+          onOpenChat={(friend) => {
+            setNotificationsOpen(false);
+            if (onOpenChat) onOpenChat(friend);
+          }}
+        />
+      )}
     </>
   );
 }

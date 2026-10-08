@@ -376,6 +376,23 @@ export const api = {
       request('/api/friends/notifications/read-all', {
         method: 'POST',
       }),
+    getConversations: () => request('/api/friends/conversations'),
+    getChatHistory: (friendId) => request(`/api/friends/chat/${friendId}`),
+    sendMessage: (friendId, message, metadata = null) =>
+      request(`/api/friends/chat/${friendId}`, {
+        method: 'POST',
+        body: JSON.stringify({ message, message_type: 'TEXT', metadata }),
+      }),
+    sendChatChallenge: (friendId, options = {}) =>
+      request(`/api/friends/chat/${friendId}/challenge`, {
+        method: 'POST',
+        body: JSON.stringify(options),
+      }),
+    respondChatChallenge: (challengeId, accept) =>
+      request(`/api/friends/chat/challenge/${challengeId}/respond`, {
+        method: 'POST',
+        body: JSON.stringify({ accept }),
+      }),
   },
   tournaments: {
     getAll: (status = null) => request(`/api/tournaments${status ? `?status_filter=${status}` : ''}`),

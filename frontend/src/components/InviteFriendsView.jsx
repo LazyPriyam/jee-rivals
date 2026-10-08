@@ -44,7 +44,8 @@ export default function InviteFriendsView({
   onJoinRoomCode,
   onRoomCreated,
   onOpenAuth,
-  onViewProfile
+  onViewProfile,
+  onOpenChat
 }) {
   // Navigation Tabs: 'squad', 'leaderboard', 'requests', 'search', 'lobbies'
   const [activeTab, setActiveTab] = useState('squad');
@@ -632,23 +633,36 @@ export default function InviteFriendsView({
                       </div>
                     </div>
 
-                    {/* Bottom Action: Challenge Duel Button */}
-                    <div className="pt-2">
+                    {/* Bottom Actions: Chat + Challenge Duel */}
+                    <div className="pt-2 flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          sound.click();
+                          if (onOpenChat) onOpenChat(friend);
+                        }}
+                        className="py-2.5 px-3.5 bg-[#1b2130] hover:bg-orange-500/20 text-slate-200 hover:text-orange-400 font-bold text-xs rounded-xl border border-white/10 hover:border-orange-500/40 transition cursor-pointer flex items-center justify-center gap-1.5"
+                        title={`Direct Chat with ${friend.username}`}
+                      >
+                        <MessageCircle className="w-3.5 h-3.5 text-orange-400" />
+                        <span>Chat</span>
+                      </button>
+
                       <button
                         type="button"
                         disabled={isChallenging}
                         onClick={() => handleDirectChallenge(friend)}
-                        className="w-full py-2.5 px-4 bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-400 hover:to-amber-400 text-white font-black text-xs rounded-xl shadow-lg shadow-orange-950/40 transition cursor-pointer flex items-center justify-center gap-2 disabled:opacity-50"
+                        className="flex-1 py-2.5 px-3 bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-400 hover:to-amber-400 text-white font-black text-xs rounded-xl shadow-lg shadow-orange-950/40 transition cursor-pointer flex items-center justify-center gap-1.5 disabled:opacity-50"
                       >
                         {isChallenging ? (
                           <>
                             <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                            <span>Setting up Duel...</span>
+                            <span>Setting up...</span>
                           </>
                         ) : (
                           <>
                             <Swords className="w-4 h-4" />
-                            <span>⚔️ CHALLENGE TO SPEED DUEL</span>
+                            <span>⚔️ Challenge</span>
                           </>
                         )}
                       </button>

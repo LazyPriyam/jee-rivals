@@ -1,5 +1,6 @@
 import uuid
 import datetime
+import json
 from typing import List, Optional, Dict, Any
 from fastapi import APIRouter, HTTPException, Depends, status
 from pydantic import BaseModel
@@ -19,6 +20,19 @@ class FriendRequestModel(BaseModel):
 class ChallengeFriendModel(BaseModel):
     preset_name: Optional[str] = "1-on-1 Friend Duel"
     mode: Optional[str] = "SPEED_DUEL"
+    question_count: Optional[int] = 5
+    time_per_question: Optional[int] = 60
+    subjects: Optional[List[str]] = ["Physics", "Chemistry", "Mathematics"]
+
+
+class SendChatMessageModel(BaseModel):
+    message: str
+    message_type: Optional[str] = "TEXT"
+    metadata: Optional[Dict[str, Any]] = None
+
+
+class ChatChallengeModel(BaseModel):
+    preset_name: Optional[str] = "1-on-1 Friend Duel"
     question_count: Optional[int] = 5
     time_per_question: Optional[int] = 60
     subjects: Optional[List[str]] = ["Physics", "Chemistry", "Mathematics"]
@@ -308,7 +322,7 @@ def cancel_friend_request(target_id: str, user: dict = Depends(get_current_user)
 def get_user_notifications(user: dict = Depends(get_current_user)):
     """
     Unified notification center feed:
-    Returns both incoming friend requests and 1-on-1 direct duel challenges.
+    Returns both incoming friend requests, 1-on-1 direct duel challenges, and unread direct messages.
     """
     conn = get_connection()
     c = conn.cursor()
@@ -356,9 +370,17 @@ def get_user_notifications(user: dict = Depends(get_current_user)):
     """, (user["id"],))
     moderation_updates = [dict(r) for r in c.fetchall()]
 
+    # 4. Unread Direct Messages Count
+    c.execute("""
+        SELECT COUNT(*) FROM direct_messages
+        WHERE receiver_id = ? AND is_read = 0
+    """, (user["id"],))
+    dm_unread_row = c.fetchone()
+    unread_messages_count = dm_unread_row[0] if dm_unread_row else 0
+
     conn.close()
 
-    # 4. System & Content Updates (Fetch recent updates annotated with is_read)
+    # 5. System & Content Updates (Fetch recent updates annotated with is_read)
     from backend.app.tools.system_updates_engine import get_user_system_updates
     all_system_updates = get_user_system_updates(user["id"], limit=30)
     unread_system_updates = [u for u in all_system_updates if not u.get("is_read")]
@@ -369,7 +391,8 @@ def get_user_notifications(user: dict = Depends(get_current_user)):
         "moderation_updates": moderation_updates,
         "system_updates": all_system_updates,
         "unread_system_updates_count": len(unread_system_updates),
-        "total_count": len(friend_requests) + len(challenges) + len(moderation_updates) + len(unread_system_updates)
+        "unread_messages_count": unread_messages_count,
+        "total_count": len(friend_requests) + len(challenges) + len(moderation_updates) + len(unread_system_updates) + unread_messages_count
     }
 
 
@@ -396,6 +419,7 @@ def mark_all_notifications_read(user: dict = Depends(get_current_user)):
     conn = get_connection()
     c = conn.cursor()
     c.execute("UPDATE user_notifications SET is_read = 1 WHERE user_id = ?", (user["id"],))
+    c.execute("UPDATE direct_messages SET is_read = 1 WHERE receiver_id = ?", (user["id"],))
     conn.commit()
     conn.close()
 
@@ -653,3 +677,380 @@ def respond_to_challenge(challenge_id: str, req: RespondChallengeModel, user: di
         "accepted": True,
         "room_code": code
     }
+
+
+# ============================================================================
+# CHESS.COM-STYLE INTEGRATED FRIENDS DIRECT CHAT & DUEL CHALLENGES
+# ============================================================================
+
+@router.get("/conversations")
+def get_conversations(user: dict = Depends(get_current_user)):
+    """
+    Returns list of friend conversations with last message preview and unread counts.
+    Chess.com style integrated messages feed.
+    """
+    conn = get_connection()
+    c = conn.cursor()
+
+    # 1. Get all accepted friends
+    c.execute("""
+        SELECT u.id, u.username, u.avatar_id, u.title, u.overall_elo, u.current_division, u.last_active, u.chat_settings
+        FROM friends f
+        JOIN users u ON (CASE WHEN f.user_id = ? THEN f.friend_id ELSE f.user_id END) = u.id
+        WHERE (f.user_id = ? OR f.friend_id = ?) AND f.status = 'ACCEPTED'
+    """, (user["id"], user["id"], user["id"]))
+    friend_rows = [dict(r) for r in c.fetchall()]
+
+    # 2. Get distinct users who have exchanged messages with user (even if not currently friends)
+    c.execute("""
+        SELECT DISTINCT CASE WHEN sender_id = ? THEN receiver_id ELSE sender_id END as other_id
+        FROM direct_messages
+        WHERE sender_id = ? OR receiver_id = ?
+    """, (user["id"], user["id"], user["id"]))
+    dm_user_ids = [r["other_id"] for r in c.fetchall()]
+
+    all_partner_ids = list(set([f["id"] for f in friend_rows] + dm_user_ids))
+    if not all_partner_ids:
+        conn.close()
+        return []
+
+    # Map user profiles
+    profiles_by_id = {f["id"]: f for f in friend_rows}
+    missing_ids = [pid for pid in all_partner_ids if pid not in profiles_by_id]
+    if missing_ids:
+        placeholders = ",".join("?" for _ in missing_ids)
+        c.execute(f"""
+            SELECT id, username, avatar_id, title, overall_elo, current_division, last_active, chat_settings
+            FROM users WHERE id IN ({placeholders})
+        """, missing_ids)
+        for r in c.fetchall():
+            profiles_by_id[r["id"]] = dict(r)
+
+    conversations = []
+    for pid in all_partner_ids:
+        prof = profiles_by_id.get(pid)
+        if not prof:
+            continue
+
+        # Latest message
+        c.execute("""
+            SELECT id, sender_id, receiver_id, message, message_type, metadata, is_read, created_at
+            FROM direct_messages
+            WHERE (sender_id = ? AND receiver_id = ?) OR (sender_id = ? AND receiver_id = ?)
+            ORDER BY created_at DESC
+            LIMIT 1
+        """, (user["id"], pid, pid, user["id"]))
+        latest_msg_row = c.fetchone()
+        latest_msg = dict(latest_msg_row) if latest_msg_row else None
+
+        # Unread count
+        c.execute("""
+            SELECT COUNT(*) FROM direct_messages
+            WHERE sender_id = ? AND receiver_id = ? AND is_read = 0
+        """, (pid, user["id"]))
+        unread_count = c.fetchone()[0]
+
+        conversations.append({
+            "friend_id": prof["id"],
+            "friend_username": prof["username"],
+            "friend_avatar": prof.get("avatar_id") or "default",
+            "friend_title": prof.get("title") or "JEE Aspirant",
+            "friend_elo": round(prof.get("overall_elo", 1200.0), 1),
+            "friend_division": prof.get("current_division") or "BRONZE",
+            "is_online": is_user_online(prof.get("last_active"), prof.get("chat_settings")),
+            "last_active": prof.get("last_active"),
+            "latest_message": latest_msg["message"] if latest_msg else "No messages yet. Say hello!",
+            "latest_message_type": latest_msg["message_type"] if latest_msg else "TEXT",
+            "latest_message_time": latest_msg["created_at"] if latest_msg else None,
+            "latest_is_mine": (latest_msg["sender_id"] == user["id"]) if latest_msg else False,
+            "unread_count": unread_count
+        })
+
+    conn.close()
+
+    # Sort conversations: recent messages first
+    def sort_key(conv):
+        return conv["latest_message_time"] or "1970-01-01T00:00:00"
+
+    conversations.sort(key=sort_key, reverse=True)
+    return conversations
+
+
+@router.get("/chat/{friend_id}")
+def get_chat_history(friend_id: str, user: dict = Depends(get_current_user)):
+    """
+    Returns chat history between current user and friend.
+    Marks incoming messages from this friend as read.
+    """
+    target = get_user_by_id(friend_id)
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found.")
+
+    conn = get_connection()
+    c = conn.cursor()
+
+    # Mark incoming unread messages as read
+    c.execute("""
+        UPDATE direct_messages
+        SET is_read = 1
+        WHERE sender_id = ? AND receiver_id = ? AND is_read = 0
+    """, (friend_id, user["id"]))
+
+    # Also mark any related notifications for this friend as read
+    c.execute("""
+        UPDATE user_notifications
+        SET is_read = 1
+        WHERE user_id = ? AND type = 'DIRECT_MESSAGE' AND details LIKE ?
+    """, (user["id"], f"%{friend_id}%"))
+    conn.commit()
+
+    # Fetch last 150 messages
+    c.execute("""
+        SELECT id, sender_id, receiver_id, message, message_type, metadata, is_read, created_at
+        FROM direct_messages
+        WHERE (sender_id = ? AND receiver_id = ?) OR (sender_id = ? AND receiver_id = ?)
+        ORDER BY created_at ASC
+        LIMIT 150
+    """, (user["id"], friend_id, friend_id, user["id"]))
+    rows = [dict(r) for r in c.fetchall()]
+    conn.close()
+
+    formatted_messages = []
+    for r in rows:
+        meta = {}
+        if r.get("metadata"):
+            try:
+                meta = json.loads(r["metadata"]) if isinstance(r["metadata"], str) else r["metadata"]
+            except Exception:
+                meta = {}
+        formatted_messages.append({
+            "id": r["id"],
+            "sender_id": r["sender_id"],
+            "receiver_id": r["receiver_id"],
+            "is_mine": r["sender_id"] == user["id"],
+            "message": r["message"],
+            "message_type": r["message_type"] or "TEXT",
+            "metadata": meta,
+            "is_read": bool(r["is_read"]),
+            "created_at": r["created_at"]
+        })
+
+    return {
+        "friend": {
+            "id": target["id"],
+            "username": target["username"],
+            "avatar_id": target.get("avatar_id") or "default",
+            "title": target.get("title") or "JEE Aspirant",
+            "overall_elo": round(target.get("overall_elo", 1200.0), 1),
+            "current_division": target.get("current_division") or "BRONZE",
+            "is_online": is_user_online(target.get("last_active"), target.get("chat_settings")),
+            "last_active": target.get("last_active")
+        },
+        "messages": formatted_messages
+    }
+
+
+@router.post("/chat/{friend_id}")
+def send_chat_message(friend_id: str, req: SendChatMessageModel, user: dict = Depends(get_current_user)):
+    """
+    Sends a direct message to a friend and alerts them.
+    """
+    msg_text = req.message.strip()
+    if not msg_text:
+        raise HTTPException(status_code=400, detail="Message cannot be empty.")
+
+    target = get_user_by_id(friend_id)
+    if not target:
+        raise HTTPException(status_code=404, detail="Recipient user not found.")
+
+    conn = get_connection()
+    c = conn.cursor()
+
+    msg_id = str(uuid.uuid4())
+    now = datetime.datetime.utcnow().isoformat()
+    meta_json = json.dumps(req.metadata or {})
+
+    c.execute("""
+        INSERT INTO direct_messages (id, sender_id, receiver_id, message, message_type, metadata, is_read, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, 0, ?)
+    """, (msg_id, user["id"], friend_id, msg_text, req.message_type or "TEXT", meta_json, now))
+
+    # Add notification for receiver
+    notif_id = str(uuid.uuid4())
+    preview = (msg_text[:45] + "...") if len(msg_text) > 45 else msg_text
+    details_json = json.dumps({"sender_id": user["id"], "sender_username": user["username"], "message_id": msg_id})
+    c.execute("""
+        INSERT INTO user_notifications (id, user_id, type, title, message, details, is_read, created_at)
+        VALUES (?, ?, 'DIRECT_MESSAGE', ?, ?, ?, 0, ?)
+    """, (notif_id, friend_id, f"Message from {user['username']}", preview, details_json, now))
+
+    conn.commit()
+    conn.close()
+
+    return {
+        "id": msg_id,
+        "sender_id": user["id"],
+        "receiver_id": friend_id,
+        "is_mine": True,
+        "message": msg_text,
+        "message_type": req.message_type or "TEXT",
+        "metadata": req.metadata or {},
+        "is_read": False,
+        "created_at": now
+    }
+
+
+@router.post("/chat/{friend_id}/challenge")
+def send_chat_challenge(friend_id: str, req: ChatChallengeModel, user: dict = Depends(get_current_user)):
+    """
+    Creates a direct duel challenge and embeds it as an interactive card in the chat.
+    """
+    target_friend = get_user_by_id(friend_id)
+    if not target_friend:
+        raise HTTPException(status_code=404, detail="Challenger friend not found.")
+
+    conn = get_connection()
+    c = conn.cursor()
+
+    # Pick 5 questions for fast 1-on-1 duel
+    q_query = """
+        SELECT id FROM questions
+        WHERE solution_text IS NOT NULL AND solution_text != ''
+        ORDER BY RANDOM() LIMIT ?
+    """
+    c.execute(q_query, (req.question_count or 5,))
+    q_rows = c.fetchall()
+    question_ids = [r[0] for r in q_rows]
+
+    code = generate_room_code()
+    room_id = str(uuid.uuid4())
+    now = datetime.datetime.utcnow().isoformat()
+    title = f"{user['username']} vs {target_friend['username']}"
+
+    # Create private room
+    c.execute("""
+        INSERT INTO rooms (
+            id, code, host_id, mode, preset_name, subject, subjects, chapter, chapters,
+            difficulty_tier, target_exam, question_type_filter, question_ids, total_questions,
+            time_per_question, total_duration_minutes, timing_type, is_public, passcode,
+            speed_bonus_enabled, negative_marking, base_correct_score, status, created_at
+        ) VALUES (?, ?, ?, 'SPEED_DUEL', ?, 'Mixed', '["Physics","Chemistry","Mathematics"]',
+                  'Mixed', '[]', 'MIXED', 'MAIN', 'ALL', ?, ?, ?, 60, 'SYNCHRONIZED', 0, NULL, 1, -25.0, 100.0, 'LOBBY', ?)
+    """, (
+        room_id, code, user["id"], title,
+        str(question_ids).replace("'", '"'), len(question_ids),
+        req.time_per_question or 60, now
+    ))
+
+    # Add host as participant
+    c.execute("""
+        INSERT INTO room_participants (room_id, user_id, current_question_index, score, marks, answers, is_finished)
+        VALUES (?, ?, 0, 0, 0.0, '{}', 0)
+    """, (room_id, user["id"]))
+
+    # Insert direct challenge record
+    challenge_id = str(uuid.uuid4())
+    c.execute("""
+        INSERT INTO direct_challenges (id, sender_id, receiver_id, room_code, challenge_message, status, created_at)
+        VALUES (?, ?, ?, ?, ?, 'PENDING', ?)
+    """, (challenge_id, user["id"], friend_id, code, f"{user['username']} challenged you to a Speed Duel!", now))
+
+    # Insert direct message with CHALLENGE type
+    msg_id = str(uuid.uuid4())
+    meta = {
+        "challenge_id": challenge_id,
+        "room_code": code,
+        "question_count": req.question_count or 5,
+        "time_per_question": req.time_per_question or 60,
+        "preset_name": req.preset_name or "1-on-1 Speed Duel",
+        "status": "PENDING",
+        "sender_username": user["username"],
+        "sender_id": user["id"]
+    }
+    chat_msg_text = f"⚔️ 1-on-1 Speed Duel Challenge in Room #{code} ({req.question_count or 5} Questions, {req.time_per_question or 60}s/Q)"
+    c.execute("""
+        INSERT INTO direct_messages (id, sender_id, receiver_id, message, message_type, metadata, is_read, created_at)
+        VALUES (?, ?, ?, ?, 'CHALLENGE', ?, 0, ?)
+    """, (msg_id, user["id"], friend_id, chat_msg_text, json.dumps(meta), now))
+
+    conn.commit()
+    conn.close()
+
+    return {
+        "success": True,
+        "challenge_id": challenge_id,
+        "room_code": code,
+        "message": {
+            "id": msg_id,
+            "sender_id": user["id"],
+            "receiver_id": friend_id,
+            "is_mine": True,
+            "message": chat_msg_text,
+            "message_type": "CHALLENGE",
+            "metadata": meta,
+            "is_read": False,
+            "created_at": now
+        }
+    }
+
+
+@router.post("/chat/challenge/{challenge_id}/respond")
+def respond_chat_challenge(challenge_id: str, req: RespondChallengeModel, user: dict = Depends(get_current_user)):
+    """
+    Accepts or declines a duel challenge from inside the chat.
+    Updates the direct challenge status and updates the chat metadata.
+    """
+    conn = get_connection()
+    c = conn.cursor()
+
+    c.execute("SELECT * FROM direct_challenges WHERE id = ?", (challenge_id,))
+    row = c.fetchone()
+    if not row:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Challenge not found.")
+
+    challenge = dict(row)
+    code = challenge["room_code"]
+    new_status = "ACCEPTED" if req.accept else "DECLINED"
+
+    c.execute("UPDATE direct_challenges SET status = ? WHERE id = ?", (new_status, challenge_id))
+
+    # Update metadata in direct_messages
+    c.execute("SELECT id, metadata FROM direct_messages WHERE message_type = 'CHALLENGE' AND metadata LIKE ?", (f"%{challenge_id}%",))
+    dm_rows = c.fetchall()
+    for dm in dm_rows:
+        try:
+            m = json.loads(dm["metadata"])
+            m["status"] = new_status
+            c.execute("UPDATE direct_messages SET metadata = ? WHERE id = ?", (json.dumps(m), dm["id"]))
+        except Exception:
+            pass
+
+    if not req.accept:
+        conn.commit()
+        conn.close()
+        return {"success": True, "accepted": False, "status": "DECLINED"}
+
+    # Accept & join room
+    c.execute("SELECT id FROM rooms WHERE code = ?", (code,))
+    r_row = c.fetchone()
+    if not r_row:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Duel room expired or closed.")
+
+    room_id = r_row["id"]
+    c.execute("""
+        INSERT OR IGNORE INTO room_participants (room_id, user_id, current_question_index, score, marks, answers, is_finished)
+        VALUES (?, ?, 0, 0, 0.0, '{}', 0)
+    """, (room_id, user["id"]))
+
+    conn.commit()
+    conn.close()
+
+    return {
+        "success": True,
+        "accepted": True,
+        "status": "ACCEPTED",
+        "room_code": code
+    }
+

@@ -20,6 +20,7 @@ import TestAnalysisView from './components/TestAnalysisView';
 import SettingsView from './components/SettingsView';
 import AuthModal from './components/AuthModal';
 import RoomModal from './components/RoomModal';
+import FriendChatDrawer from './components/FriendChatDrawer';
 import ErrorBoundary from './components/ErrorBoundary';
 import {
   api,
@@ -45,6 +46,13 @@ export default function App() {
   const [inspectProfileUser, setInspectProfileUser] = useState(null);
   const [inspectTestCode, setInspectTestCode] = useState(null);
   const [skillTreePayload, setSkillTreePayload] = useState(null);
+  const [activeChatFriend, setActiveChatFriend] = useState(null);
+  const [chatDrawerOpen, setChatDrawerOpen] = useState(false);
+
+  const handleOpenChat = (friend) => {
+    setActiveChatFriend(friend);
+    setChatDrawerOpen(true);
+  };
 
   const fetchActiveMatch = async () => {
     if (!getToken()) return null;
@@ -279,6 +287,7 @@ export default function App() {
             } catch (_) {}
           }}
           onUpdateUser={setUser}
+          onOpenChat={handleOpenChat}
         />
       )}
 
@@ -509,6 +518,7 @@ export default function App() {
                 switchTab('profile');
               }}
               isActive={activeTab === 'invite'}
+              onOpenChat={handleOpenChat}
             />
           </div>
         )}
@@ -584,6 +594,28 @@ export default function App() {
         isOpen={createRoomModalOpen}
         onClose={() => setCreateRoomModalOpen(false)}
         onRoomCreated={handleRoomCreated}
+      />
+
+      {/* Global Friends Direct Chat & Duel Drawer (Chess.com Style) */}
+      <FriendChatDrawer
+        isOpen={chatDrawerOpen}
+        onClose={() => setChatDrawerOpen(false)}
+        activeFriend={activeChatFriend}
+        currentUser={user}
+        onAcceptDuel={async (code) => {
+          setChatDrawerOpen(false);
+          try {
+            const room = await api.rooms.get(code);
+            handleJoinRoomCode(room);
+          } catch (err) {
+            alert(err.message || 'Error joining battle room.');
+          }
+        }}
+        onViewProfile={(friend) => {
+          setChatDrawerOpen(false);
+          setInspectProfileUser(friend.username);
+          switchTab('profile');
+        }}
       />
     </div>
   );

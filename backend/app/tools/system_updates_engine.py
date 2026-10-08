@@ -139,18 +139,27 @@ def post_system_update(
 def get_user_system_updates(user_id: str, limit: int = 30) -> List[Dict[str, Any]]:
     """
     Returns system updates ordered by recency, annotated with `is_read` for this specific user.
+    Updates created before the user registered are automatically treated as read.
     """
     conn = _get_db_connection()
     c = conn.cursor()
 
+    c.execute("SELECT created_at FROM users WHERE id = ?", (user_id,))
+    u_row = c.fetchone()
+    user_created_at = u_row[0] if u_row and u_row[0] else None
+
     c.execute("""
         SELECT su.*, 
-               CASE WHEN r.read_at IS NOT NULL THEN 1 ELSE 0 END as is_read
+               CASE 
+                   WHEN r.read_at IS NOT NULL THEN 1 
+                   WHEN ? IS NOT NULL AND su.created_at <= ? THEN 1
+                   ELSE 0 
+               END as is_read
         FROM system_updates su
         LEFT JOIN user_update_reads r ON su.id = r.update_id AND r.user_id = ?
         ORDER BY su.created_at DESC
         LIMIT ?
-    """, (user_id, limit))
+    """, (user_created_at, user_created_at, user_id, limit))
 
     rows = c.fetchall()
     updates = []
@@ -168,17 +177,30 @@ def get_user_system_updates(user_id: str, limit: int = 30) -> List[Dict[str, Any
 
 
 def get_unread_system_updates(user_id: str) -> List[Dict[str, Any]]:
-    """Returns only unread system updates for the given user."""
+    """Returns only genuine unread system updates posted after user registered."""
     conn = _get_db_connection()
     c = conn.cursor()
 
-    c.execute("""
-        SELECT su.*, 0 as is_read
-        FROM system_updates su
-        LEFT JOIN user_update_reads r ON su.id = r.update_id AND r.user_id = ?
-        WHERE r.read_at IS NULL
-        ORDER BY su.created_at DESC
-    """, (user_id,))
+    c.execute("SELECT created_at FROM users WHERE id = ?", (user_id,))
+    u_row = c.fetchone()
+    user_created_at = u_row[0] if u_row and u_row[0] else None
+
+    if user_created_at:
+        c.execute("""
+            SELECT su.*, 0 as is_read
+            FROM system_updates su
+            LEFT JOIN user_update_reads r ON su.id = r.update_id AND r.user_id = ?
+            WHERE r.read_at IS NULL AND su.created_at > ?
+            ORDER BY su.created_at DESC
+        """, (user_id, user_created_at))
+    else:
+        c.execute("""
+            SELECT su.*, 0 as is_read
+            FROM system_updates su
+            LEFT JOIN user_update_reads r ON su.id = r.update_id AND r.user_id = ?
+            WHERE r.read_at IS NULL
+            ORDER BY su.created_at DESC
+        """, (user_id,))
 
     rows = c.fetchall()
     updates = []
