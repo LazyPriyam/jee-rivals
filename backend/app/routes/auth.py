@@ -39,9 +39,31 @@ def format_user_profile(user: dict, cursor=None) -> UserProfile:
         if close_conn and conn:
             conn.close()
 
-    elo = user.get("overall_elo", 1200.0)
-    from backend.app.tools.elo_engine import compute_two_factor_air_bracket
-    air, air_gate, speed_p = compute_two_factor_air_bracket(elo, active_count, active_subjs_count)
+    target_exam = user.get("target_exam") or "MIXED"
+
+    from backend.app.tools.air_engine import calculate_advanced_air
+    air_data = calculate_advanced_air(
+        overall_elo=user.get("overall_elo", 1200.0),
+        physics_elo=user.get("physics_elo", 1200.0),
+        chemistry_elo=user.get("chemistry_elo", 1200.0),
+        math_elo=user.get("math_elo", 1200.0),
+        active_chapters_count=active_count,
+        active_subjects_count=active_subjs_count,
+        total_solved=solved,
+        total_correct=correct,
+        target_exam=target_exam
+    )
+    air = air_data["predicted_air_bracket"]
+    air_gate = air_data["air_gate_reason"]
+
+    elo = float(user.get("overall_elo", 1200.0))
+    if elo >= 2100: speed_p = 99
+    elif elo >= 1900: speed_p = 98
+    elif elo >= 1750: speed_p = 95
+    elif elo >= 1600: speed_p = 88
+    elif elo >= 1450: speed_p = 76
+    elif elo >= 1300: speed_p = 60
+    else: speed_p = 45
 
     ch_raw = user.get("chapter_stats") or "{}"
     try:
@@ -72,8 +94,6 @@ def format_user_profile(user: dict, cursor=None) -> UserProfile:
             chat_set = {}
     except Exception:
         chat_set = {}
-
-    target_exam = user.get("target_exam") or "MIXED"
 
     from backend.app.tools.division_engine import evaluate_user_division
     div_eval = evaluate_user_division(
@@ -111,6 +131,17 @@ def format_user_profile(user: dict, cursor=None) -> UserProfile:
         accuracy_percentage=acc,
         predicted_air_bracket=air,
         speed_percentile=speed_p,
+        predicted_air=air_data["predicted_air"],
+        predicted_air_formatted=air_data["predicted_air_formatted"],
+        predicted_air_range=air_data["predicted_air_range"],
+        predicted_percentile=air_data["predicted_percentile"],
+        predicted_jee_main_marks=air_data["predicted_jee_main_marks"],
+        air_confidence_score=air_data["confidence_score"],
+        air_confidence_label=air_data["confidence_label"],
+        college_admissibility=air_data["college_admissibility"],
+        subject_air_breakdown=air_data["subject_breakdown"],
+        air_bottlenecks=air_data["air_bottlenecks"],
+        air_meta=air_data,
         chapter_stats=ch_stats,
         target_college=user.get("target_college") or "IIT Bombay (Computer Science)",
         target_exam_date=user.get("target_exam_date") or "JEE Main Jan 2026",

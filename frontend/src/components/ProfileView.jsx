@@ -393,15 +393,33 @@ export default function ProfileView({
 
           {/* Right Block: Predicted AIR & Medals Shelf */}
           <div className="flex flex-col sm:flex-row lg:flex-col items-center lg:items-end gap-3.5 shrink-0 w-full sm:w-auto">
-            {/* Predicted AIR Pill & Two-Factor Syllabus Breadth */}
+            {/* Predicted AIR Pill & Data-Driven NTA Metrics */}
             <div className="w-full sm:w-auto bg-[#131722]/90 border border-orange-500/30 rounded-2xl p-4 shadow-xl text-center sm:text-right max-w-md">
               <span className="text-[10px] uppercase font-bold text-slate-400 block mb-1 flex items-center justify-center sm:justify-end gap-1">
                 <Target className="w-3.5 h-3.5 text-orange-400" />
-                <span>Predicted AIR Bracket</span>
+                <span>Predicted All India Rank (AIR)</span>
               </span>
-              <span className="text-sm sm:text-base font-black text-orange-400 font-mono tracking-tight block leading-snug">
-                {p.predicted_air_bracket || 'Foundation Aspirant'}
-              </span>
+              <div className="flex items-center justify-center sm:justify-end gap-2 flex-wrap">
+                <span className="text-base sm:text-lg font-black text-orange-400 font-mono tracking-tight block leading-snug">
+                  {p.predicted_air_formatted || (p.predicted_air ? `AIR ${p.predicted_air.toLocaleString()}` : (p.predicted_air_bracket || 'Foundation Aspirant'))}
+                </span>
+                {p.predicted_percentile && (
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-emerald-950/90 text-emerald-300 border border-emerald-500/40">
+                    {p.predicted_percentile}%ile
+                  </span>
+                )}
+                {p.predicted_jee_main_marks && (
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-cyan-950/90 text-cyan-300 border border-cyan-500/40">
+                    {p.predicted_jee_main_marks}/300 M
+                  </span>
+                )}
+              </div>
+
+              {p.predicted_air_range && (
+                <span className="text-[11px] font-mono text-slate-400 block mt-1">
+                  Confidence Band: <strong className="text-slate-200">{p.predicted_air_range}</strong>
+                </span>
+              )}
 
               {/* Syllabus Breadth Mini Progress Bar */}
               <div className="mt-3 pt-2.5 border-t border-white/10 text-left">
@@ -706,6 +724,223 @@ export default function ProfileView({
                 </div>
               )}
             </div>
+          </div>
+
+          {/* =========================================================================
+              DATA-DRIVEN ALL INDIA RANK (AIR) DIAGNOSTIC & COLLEGE ADMISSIONS
+              ========================================================================= */}
+          <div className="bg-[#161a24] border border-orange-500/30 rounded-3xl p-6 sm:p-8 shadow-xl glow-orange-subtle space-y-6">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-white/10 pb-5">
+              <div>
+                <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-orange-500/15 border border-orange-500/30 text-orange-400 text-[10px] font-black uppercase tracking-wider mb-2">
+                  <Target className="w-3.5 h-3.5" />
+                  <span>NTA & IIT Benchmark Engine (14 Lakh Candidate Pool)</span>
+                </div>
+                <h3 className="text-xl sm:text-2xl font-black text-white tracking-tight flex items-center gap-2">
+                  <span>National All India Rank Forecast</span>
+                  <span className="text-xs font-mono font-bold px-2 py-0.5 rounded-full bg-emerald-950 border border-emerald-500/40 text-emerald-400">
+                    {p.air_confidence_label || 'Calibrating'} ({p.air_confidence_score || 25}% Confidence)
+                  </span>
+                </h3>
+                <p className="text-xs text-slate-400 mt-1">
+                  Empirical percentile transfer curve calibrated with negative marking penalties (+4 / -1), syllabus breadth across 59 chapters, and PCM balance.
+                </p>
+              </div>
+
+              <div className="text-left md:text-right">
+                <span className="text-[11px] uppercase font-bold text-slate-400 block mb-0.5">Estimated Primary Rank</span>
+                <span className="text-2xl sm:text-3xl font-black font-mono text-orange-400 tracking-tight block">
+                  {p.predicted_air_formatted || (p.predicted_air ? `AIR ${p.predicted_air.toLocaleString()}` : (p.predicted_air_bracket || 'AIR Calculating...'))}
+                </span>
+                <span className="text-xs font-mono text-slate-300">
+                  {p.predicted_air_range || 'Provisional Baseline'}
+                </span>
+              </div>
+            </div>
+
+            {/* Tri-Metric Calibration Cards */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              {/* Card 1: National Percentile */}
+              <div className="bg-[#111520] border border-white/10 rounded-2xl p-4.5 flex flex-col justify-between">
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-[11px] uppercase font-bold text-slate-400">Predicted Percentile</span>
+                    <Sparkles className="w-4 h-4 text-emerald-400" />
+                  </div>
+                  <div className="text-2xl sm:text-3xl font-black font-mono text-emerald-400">
+                    {p.predicted_percentile ? `${p.predicted_percentile}%` : '50.0%'}
+                  </div>
+                  <p className="text-[11px] text-slate-400 mt-1 font-mono">
+                    Top {p.predicted_percentile ? (100 - p.predicted_percentile).toFixed(2) : '50.0'}% Nationwide
+                  </p>
+                </div>
+                <div className="mt-4 pt-3 border-t border-white/5 text-[10px] text-slate-400">
+                  Tier: <strong className="text-slate-200">{p.tier_name || p.air_meta?.tier_name || 'Foundation'}</strong>
+                </div>
+              </div>
+
+              {/* Card 2: Projected JEE Main Marks */}
+              <div className="bg-[#111520] border border-white/10 rounded-2xl p-4.5 flex flex-col justify-between">
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-[11px] uppercase font-bold text-slate-400">Projected Score</span>
+                    <Award className="w-4 h-4 text-cyan-400" />
+                  </div>
+                  <div className="flex items-baseline gap-1.5">
+                    <span className="text-2xl sm:text-3xl font-black font-mono text-cyan-400">
+                      {p.predicted_jee_main_marks || 0}
+                    </span>
+                    <span className="text-xs font-bold text-slate-400 font-mono">/ 300</span>
+                  </div>
+                  {/* Score Progress Bar */}
+                  <div className="w-full h-1.5 rounded-full bg-slate-800 overflow-hidden mt-2">
+                    <div
+                      className="h-full rounded-full bg-gradient-to-r from-cyan-500 to-blue-400"
+                      style={{ width: `${Math.min(100, Math.round(((p.predicted_jee_main_marks || 0) / 300) * 100))}%` }}
+                    />
+                  </div>
+                </div>
+                <div className="mt-4 pt-3 border-t border-white/5 text-[10px] text-slate-400 flex items-center justify-between">
+                  <span>Gen Cutoff: ~92</span>
+                  <span className={(p.predicted_jee_main_marks || 0) >= 92 ? 'text-emerald-400 font-bold' : 'text-amber-400 font-bold'}>
+                    {(p.predicted_jee_main_marks || 0) >= 92 ? 'Cleared (+ ' + ((p.predicted_jee_main_marks || 0) - 92) + ')' : 'Lagging (- ' + (92 - (p.predicted_jee_main_marks || 0)) + ')'}
+                  </span>
+                </div>
+              </div>
+
+              {/* Card 3: PCM Tri-Axial Balance */}
+              <div className="bg-[#111520] border border-white/10 rounded-2xl p-4.5 flex flex-col justify-between">
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-[11px] uppercase font-bold text-slate-400">PCM Symmetry Index</span>
+                    <Activity className="w-4 h-4 text-purple-400" />
+                  </div>
+                  <div className="text-base sm:text-lg font-black text-purple-300 line-clamp-1">
+                    {p.air_meta?.balance_status || 'Balanced Trifecta'}
+                  </div>
+                  <p className="text-[11px] text-slate-400 mt-1 font-mono">
+                    Rating Variance: <strong className="text-slate-200">±{p.air_meta?.pcm_std_dev || 0} Elo</strong>
+                  </p>
+                </div>
+                <div className="mt-4 pt-3 border-t border-white/5 text-[10px] text-slate-400">
+                  {p.air_meta?.coverage_label || 'Syllabus evaluation active'}
+                </div>
+              </div>
+            </div>
+
+            {/* Subject-by-Subject AIR & Score Breakdown */}
+            {p.subject_air_breakdown && (
+              <div className="bg-[#111520] border border-white/10 rounded-2xl p-5">
+                <h4 className="text-xs uppercase font-extrabold tracking-wider text-slate-400 mb-3 flex items-center gap-1.5">
+                  <BarChart2 className="w-3.5 h-3.5 text-orange-400" />
+                  <span>Subject Performance vs National Shifts</span>
+                </h4>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                  {['physics', 'chemistry', 'mathematics'].map((subjKey) => {
+                    const subjData = p.subject_air_breakdown[subjKey];
+                    if (!subjData) return null;
+                    const isPhys = subjKey === 'physics';
+                    const isChem = subjKey === 'chemistry';
+                    const title = isPhys ? 'Physics' : (isChem ? 'Chemistry' : 'Mathematics');
+                    const emoji = isPhys ? '⚛️' : (isChem ? '🧪' : '📐');
+                    const color = isPhys ? 'text-blue-400' : (isChem ? 'text-emerald-400' : 'text-purple-400');
+                    const statusColor = subjData.status === 'Dominant'
+                      ? 'bg-emerald-950/80 text-emerald-400 border-emerald-500/40'
+                      : subjData.status === 'Lagging'
+                      ? 'bg-red-950/80 text-red-400 border-red-500/40'
+                      : 'bg-slate-800 text-slate-300 border-white/10';
+
+                    return (
+                      <div key={subjKey} className="bg-[#171b26] p-3.5 rounded-xl border border-white/5 flex items-center justify-between">
+                        <div>
+                          <div className="flex items-center gap-1.5 mb-1">
+                            <span className="text-sm">{emoji}</span>
+                            <span className={`text-xs font-black ${color}`}>{title}</span>
+                          </div>
+                          <div className="text-xs font-mono font-bold text-white">
+                            {subjData.percentile}%ile • {subjData.projected_marks}/100 M
+                          </div>
+                        </div>
+                        <span className={`text-[9px] font-extrabold uppercase px-2 py-0.5 rounded border ${statusColor}`}>
+                          {subjData.status}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* Premier College Admissibility Predictor Matrix */}
+            {p.college_admissibility && p.college_admissibility.length > 0 && (
+              <div className="bg-[#111520] border border-white/10 rounded-2xl p-5">
+                <div className="flex items-center justify-between mb-3.5">
+                  <h4 className="text-xs uppercase font-extrabold tracking-wider text-slate-400 flex items-center gap-1.5">
+                    <GraduationCap className="w-4 h-4 text-amber-400" />
+                    <span>Admissions Predictor Matrix (Based on Projected Rank)</span>
+                  </h4>
+                  <span className="text-[10px] text-slate-400 font-mono">JoSAA / CSAB Standards</span>
+                </div>
+
+                <div className="space-y-2">
+                  {p.college_admissibility.map((c, idx) => {
+                    const isSafe = c.status === 'Safe';
+                    const isTarget = c.status === 'Target';
+                    const isReach = c.status === 'Reach';
+                    const statusBadge = isSafe
+                      ? 'bg-emerald-950/90 text-emerald-400 border-emerald-500/50'
+                      : isTarget
+                      ? 'bg-amber-950/90 text-amber-300 border-amber-500/50'
+                      : isReach
+                      ? 'bg-blue-950/90 text-blue-300 border-blue-500/50'
+                      : 'bg-slate-800/80 text-slate-400 border-white/10';
+
+                    return (
+                      <div
+                        key={idx}
+                        className="bg-[#171b26] p-3 rounded-xl border border-white/5 flex items-center justify-between gap-3 text-xs"
+                      >
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-2">
+                            <span className="font-bold text-white truncate">{c.college}</span>
+                            <span className="text-[9px] font-mono text-slate-400 bg-black/40 px-1.5 py-0.2 rounded border border-white/5">
+                              {c.category}
+                            </span>
+                          </div>
+                          <p className="text-[11px] text-slate-400 truncate mt-0.5">
+                            {c.branch} • Cutoff ~AIR {c.cutoff_rank.toLocaleString()}
+                          </p>
+                        </div>
+
+                        <div className="flex items-center gap-2 shrink-0">
+                          <span className={`text-[9px] font-extrabold uppercase px-2 py-0.5 rounded border ${statusBadge}`}>
+                            {c.status} ({c.chance})
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* Diagnostic Bottlenecks & Roadmap Gates */}
+            {p.air_bottlenecks && p.air_bottlenecks.length > 0 && (
+              <div className="bg-amber-500/5 border border-amber-500/25 rounded-2xl p-4.5 space-y-2">
+                <div className="flex items-center gap-1.5 text-xs font-bold text-amber-400">
+                  <Sparkles className="w-3.5 h-3.5" />
+                  <span>Strategic Rank Diagnosis & Actionable Levers:</span>
+                </div>
+                <div className="space-y-1.5 text-[11px] text-slate-300">
+                  {p.air_bottlenecks.map((b, i) => (
+                    <div key={i} className="flex items-start gap-2">
+                      <span className="text-amber-400 shrink-0 font-bold">•</span>
+                      <span>{b}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Subject-Wise Elo Triad */}

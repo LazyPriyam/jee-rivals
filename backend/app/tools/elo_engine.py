@@ -350,20 +350,29 @@ def compute_two_factor_air_bracket(
     overall_elo: float,
     active_chapters_count: int,
     active_subjects_count: int,
-    total_chapters: int = 59
+    total_chapters: int = 59,
+    physics_elo: float = 1200.0,
+    chemistry_elo: float = 1200.0,
+    math_elo: float = 1200.0,
+    total_solved: int = 0,
+    total_correct: int = 0
 ) -> Tuple[str, Optional[str], int]:
     """
-    Computes authentic Two-Factor Predicted AIR based on both:
-    1. Problem-solving skill (Elo)
-    2. Syllabus Breadth (Chapters attempted across Physics, Chemistry, Math)
-
+    Computes authentic Two-Factor Predicted AIR via data-driven air_engine:
     Returns: (predicted_air_bracket, air_gate_reason, speed_percentile)
     """
-    coverage_ratio = (active_chapters_count / total_chapters) if total_chapters > 0 else 0.0
-    coverage_pct = round(coverage_ratio * 100, 1)
+    from backend.app.tools.air_engine import calculate_advanced_air
+    data = calculate_advanced_air(
+        overall_elo=overall_elo,
+        physics_elo=physics_elo,
+        chemistry_elo=chemistry_elo,
+        math_elo=math_elo,
+        active_chapters_count=active_chapters_count,
+        active_subjects_count=active_subjects_count,
+        total_solved=total_solved,
+        total_correct=total_correct
+    )
     elo = float(overall_elo)
-
-    # Base speed percentile
     if elo >= 2100: speed_p = 99
     elif elo >= 1900: speed_p = 98
     elif elo >= 1750: speed_p = 95
@@ -372,95 +381,8 @@ def compute_two_factor_air_bracket(
     elif elo >= 1300: speed_p = 60
     else: speed_p = 45
 
-    # Case 1: Under 3 chapters
-    if active_chapters_count < 3:
-        bracket = f"Foundation Aspirant ({coverage_pct}% Syllabus | Skill {int(elo)})"
-        gate = "Attempt at least 3 distinct chapters to establish initial All India Rank forecast."
-        return bracket, gate, speed_p
+    return data["predicted_air_bracket"], data["air_gate_reason"], speed_p
 
-    # Case 2: Early Specialist (< 20% coverage, under 12 chapters)
-    if coverage_ratio < 0.20:
-        bracket = f"Chapter Specialist ({coverage_pct}% Syllabus | Skill {int(elo)})"
-        gate = f"Explore at least 12 chapters (20% syllabus) to qualify for JEE Main Cutoff rank."
-        return bracket, gate, speed_p
-
-    # Case 3: 20% to 38% coverage (12 to 22 chapters)
-    if coverage_ratio < 0.38:
-        if elo >= 1300:
-            bracket = f"AIR 25,000 - 50,000 (Mains Cutoff | {coverage_pct}% Syllabus)"
-            gate = "Expand syllabus to 38%+ (23+ chapters) across PCM to unlock Top NITs rank prediction."
-        else:
-            bracket = f"Aspirant (Building Foundation | {coverage_pct}% Syllabus)"
-            gate = "Raise competitive Elo to 1300+ and cover 23+ chapters."
-        return bracket, gate, speed_p
-
-    # Case 4: 38% to 58% coverage (23 to 34 chapters)
-    if coverage_ratio < 0.58:
-        if elo >= 1450:
-            bracket = f"AIR 5,000 - 15,000 (Top NITs / IIITs | {coverage_pct}% Syllabus)"
-            gate = "Cover 35+ chapters (58%+ syllabus) across all 3 subjects to unlock IIT Core rank."
-        elif elo >= 1300:
-            bracket = f"AIR 15,000 - 35,000 (JEE Mains Qualified | {coverage_pct}% Syllabus)"
-            gate = "Raise Elo to 1450+ or expand syllabus to 35+ chapters."
-        else:
-            bracket = f"Aspirant ({coverage_pct}% Syllabus)"
-            gate = "Raise overall Elo to 1300+."
-        return bracket, gate, speed_p
-
-    # Case 5: 58% to 75% coverage (35 to 44 chapters)
-    if coverage_ratio < 0.75:
-        if elo >= 1650:
-            if active_subjects_count >= 2:
-                bracket = f"AIR 1,500 - 5,000 (IIT Core Branches | {coverage_pct}% Syllabus)"
-                gate = "Cover 45+ chapters (75%+ syllabus) across all 3 subjects to unlock Top IITian rank (< 1500)."
-            else:
-                bracket = f"Single-Subject Specialist (Skill {int(elo)} | {coverage_pct}% Syllabus)"
-                gate = "Attempt chapters in all 3 subjects (Physics, Chemistry, Math) to unlock IIT Core prediction."
-        elif elo >= 1450:
-            bracket = f"AIR 5,000 - 15,000 (Top NITs / IIITs | {coverage_pct}% Syllabus)"
-            gate = "Raise overall Elo to 1650+ to unlock IIT Core rank."
-        else:
-            bracket = f"JEE Mains Qualified ({coverage_pct}% Syllabus)"
-            gate = "Raise overall Elo to 1450+."
-        return bracket, gate, speed_p
-
-    # Case 6: 75% to 88% coverage (45 to 51 chapters)
-    if coverage_ratio < 0.88:
-        if active_subjects_count < 3:
-            bracket = f"AIR 1,500 - 5,000 (Syllabus Imbalance | {coverage_pct}%)"
-            gate = "Study all 3 PCM subjects to unlock Top Tier IITian status."
-        elif elo >= 1800:
-            bracket = f"AIR 250 - 1,500 (Top Tier IITian | {coverage_pct}% Syllabus)"
-            gate = "Cover 52+ chapters (88%+ syllabus) and 1950+ Elo for Super 30 Elite (< 250)."
-        elif elo >= 1650:
-            bracket = f"AIR 1,500 - 5,000 (IIT Core Branches | {coverage_pct}% Syllabus)"
-            gate = "Raise Elo to 1800+ for Top Tier IITian (< 1500)."
-        else:
-            bracket = f"AIR 5,000 - 15,000 (Top NITs | {coverage_pct}% Syllabus)"
-            gate = "Raise Elo to 1650+."
-        return bracket, gate, speed_p
-
-    # Case 7: High Coverage (>= 88% coverage, 52+ chapters across PCM)
-    if active_subjects_count < 3:
-        bracket = f"AIR 250 - 1,500 (Unbalanced PCM | {coverage_pct}%)"
-        gate = "Engage all 3 subjects for AIR < 250."
-    elif elo >= 2100:
-        bracket = "AIR 1 - 50 (Presidential Gold / IIT Bombay CS)"
-        gate = "Apex All India Rank achieved! Defend your ladder standing."
-    elif elo >= 1950:
-        bracket = f"AIR 50 - 250 (Super 30 / Top IITs CS | {coverage_pct}% Syllabus)"
-        gate = "Push overall Elo above 2100 for Presidential Gold (AIR 1 - 50)."
-    elif elo >= 1800:
-        bracket = f"AIR 250 - 1,500 (Top Tier IITian | {coverage_pct}% Syllabus)"
-        gate = "Reach 1950+ Elo for Super 30 (AIR < 250)."
-    elif elo >= 1650:
-        bracket = f"AIR 1,500 - 5,000 (IIT Core Branches | {coverage_pct}% Syllabus)"
-        gate = "Reach 1800+ Elo for Top Tier IITian."
-    else:
-        bracket = f"AIR 5,000 - 15,000 (Top NITs | {coverage_pct}% Syllabus)"
-        gate = "Reach 1650+ Elo for IIT Core Branches."
-
-    return bracket, gate, speed_p
 
 
 def apply_match_elo_to_user(

@@ -336,15 +336,39 @@ export default function DashboardView({
             </div>
           </div>
 
-          <div className="bg-[#262c3c] border border-white/10 rounded-2xl p-4 flex items-center gap-3">
-            <div className="p-3 rounded-xl bg-blue-950/80 text-blue-400 border border-blue-500/30">
+          <div
+            onClick={() => {
+              if (onNavigateTab) {
+                sound.click();
+                onNavigateTab('profile');
+              }
+            }}
+            className="bg-[#262c3c] border border-blue-500/20 hover:border-blue-400/50 rounded-2xl p-4 flex items-center gap-3 cursor-pointer transition hover:scale-[1.02] group shadow-lg"
+            title="Click to view full AIR Diagnostic & JoSAA College Predictor in Profile"
+          >
+            <div className="p-3 rounded-xl bg-blue-950/80 text-blue-400 border border-blue-500/30 group-hover:scale-105 transition shrink-0">
               <Sparkles className="w-5 h-5" />
             </div>
-            <div>
-              <span className="text-[10px] uppercase font-bold text-slate-400">AIR Forecast</span>
-              <h4 className="text-xs font-bold text-blue-300 truncate max-w-[130px]">
-                {user.predicted_air_bracket?.split('(')[0] || 'Aspirant'}
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center justify-between gap-1 mb-0.5">
+                <span className="text-[10px] uppercase font-bold text-slate-400 truncate flex items-center gap-1">
+                  <span>AIR Forecast</span>
+                  <ArrowRight className="w-2.5 h-2.5 text-blue-400 group-hover:translate-x-0.5 transition" />
+                </span>
+                {user.predicted_percentile !== undefined && (
+                  <span className="text-[9px] font-mono font-bold text-cyan-400 bg-cyan-950/60 px-1.5 py-0.2 rounded border border-cyan-500/30">
+                    {user.predicted_percentile}%ile
+                  </span>
+                )}
+              </div>
+              <h4 className="text-sm sm:text-base font-black font-mono text-blue-300 truncate">
+                {user.predicted_air_formatted || (user.predicted_air ? `AIR ${Number(user.predicted_air).toLocaleString()}` : user.predicted_air_bracket?.split('(')[0] || 'Calibrating...')}
               </h4>
+              {user.predicted_jee_main_marks !== undefined && (
+                <div className="text-[10px] text-slate-400 truncate mt-0.5">
+                  Est. Marks: <span className="font-mono text-slate-200 font-bold">{user.predicted_jee_main_marks}</span><span className="text-slate-500">/300</span>
+                </div>
+              )}
             </div>
           </div>
         </div>

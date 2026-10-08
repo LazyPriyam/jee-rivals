@@ -29,6 +29,17 @@ class UserProfile(BaseModel):
     accuracy_percentage: float
     predicted_air_bracket: str
     speed_percentile: int
+    predicted_air: Optional[int] = None
+    predicted_air_formatted: Optional[str] = None
+    predicted_air_range: Optional[str] = None
+    predicted_percentile: Optional[float] = None
+    predicted_jee_main_marks: Optional[int] = None
+    air_confidence_score: Optional[int] = None
+    air_confidence_label: Optional[str] = None
+    college_admissibility: Optional[List[Dict[str, Any]]] = None
+    subject_air_breakdown: Optional[Dict[str, Any]] = None
+    air_bottlenecks: Optional[List[str]] = None
+    air_meta: Optional[Dict[str, Any]] = None
     chapter_stats: Dict[str, Any] = {}
     target_college: Optional[str] = "IIT Bombay (Computer Science)"
     target_exam_date: Optional[str] = "JEE Main Jan 2026"
