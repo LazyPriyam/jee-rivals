@@ -30,6 +30,18 @@ import NotificationPanel from './NotificationPanel';
 import UpdateToast from './UpdateToast';
 import WhatsNewModal from './WhatsNewModal';
 
+export const getDivisionBaseTier = (div) => {
+  if (!div) return 'BRONZE';
+  const u = String(div).toUpperCase();
+  if (u.includes('GRANDMASTER')) return 'GRANDMASTER';
+  if (u.includes('MASTER')) return 'MASTER';
+  if (u.includes('DIAMOND')) return 'DIAMOND';
+  if (u.includes('PLATINUM')) return 'PLATINUM';
+  if (u.includes('GOLD')) return 'GOLD';
+  if (u.includes('SILVER')) return 'SILVER';
+  return 'BRONZE';
+};
+
 const DIVISION_COLORS = {
   GRANDMASTER: 'bg-red-950/80 text-red-300 border-red-500/50',
   MASTER: 'bg-purple-950/80 text-purple-300 border-purple-500/50',
@@ -69,7 +81,7 @@ export default function Navbar({
     } catch (_) {}
   }, [isCollapsed]);
 
-  const divStyle = (user && DIVISION_COLORS[user.current_division]) || DIVISION_COLORS.BRONZE;
+  const divStyle = (user && DIVISION_COLORS[getDivisionBaseTier(user.current_division)]) || DIVISION_COLORS.BRONZE;
 
   const navItems = [
     { id: 'arena', label: 'Arena & Duels', icon: Swords },

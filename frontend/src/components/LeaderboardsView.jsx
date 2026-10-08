@@ -1,6 +1,19 @@
 import React, { useState, useEffect } from 'react';
 import { api } from '../utils/api';
-import { Trophy, Shield, Clock, Flame, Crown, RefreshCw, Zap, Users, UserPlus } from 'lucide-react';
+import { Trophy, Shield, Clock, Flame, Crown, RefreshCw, Zap, Users, UserPlus, HelpCircle, Sparkles, ArrowUpRight } from 'lucide-react';
+import DivisionGuideModal from './DivisionGuideModal';
+
+export const getDivisionBaseTier = (div) => {
+  if (!div) return 'BRONZE';
+  const u = String(div).toUpperCase();
+  if (u.includes('GRANDMASTER')) return 'GRANDMASTER';
+  if (u.includes('MASTER')) return 'MASTER';
+  if (u.includes('DIAMOND')) return 'DIAMOND';
+  if (u.includes('PLATINUM')) return 'PLATINUM';
+  if (u.includes('GOLD')) return 'GOLD';
+  if (u.includes('SILVER')) return 'SILVER';
+  return 'BRONZE';
+};
 
 const DIVISION_COLORS = {
   GRANDMASTER: 'text-red-400 bg-red-950/80 border-red-500/50',
@@ -20,6 +33,8 @@ export default function LeaderboardsView({ user, onViewProfile, onNavigateTab })
   const [friendsData, setFriendsData] = useState([]);
   const [friendsSort, setFriendsSort] = useState('elo'); // 'elo', 'rp', 'solved'
   const [loading, setLoading] = useState(true);
+  const [guideModalOpen, setGuideModalOpen] = useState(false);
+  const [myDivisionData, setMyDivisionData] = useState(null);
 
   useEffect(() => {
     fetchData();
@@ -29,8 +44,12 @@ export default function LeaderboardsView({ user, onViewProfile, onNavigateTab })
     setLoading(true);
     try {
       if (activeTab === 'weekly') {
-        const data = await api.leaderboards.getWeekly(50);
+        const [data, myDiv] = await Promise.all([
+          api.leaderboards.getWeekly(50),
+          user ? api.leaderboards.getDivisionDetails().catch(() => null) : Promise.resolve(null),
+        ]);
         setWeeklyData(data);
+        setMyDivisionData(myDiv);
       } else if (activeTab === 'elo') {
         const data = await api.leaderboards.getElo(eloSubject, 50);
         setEloData(data);
@@ -260,7 +279,7 @@ export default function LeaderboardsView({ user, onViewProfile, onNavigateTab })
       ) : activeTab === 'weekly' ? (
         /* Weekly League Division View */
         <div>
-          {/* Reset Countdown Card */}
+          {/* Reset Countdown & Division Guide Bar */}
           <div className="bg-[#101524] border border-orange-500/30 rounded-2xl p-4 sm:p-5 mb-6 flex flex-col sm:flex-row items-center justify-between gap-4 shadow-xl">
             <div className="flex items-center gap-3">
               <div className="p-2.5 rounded-xl bg-orange-950/80 border border-orange-500/40 text-orange-400">
@@ -276,13 +295,126 @@ export default function LeaderboardsView({ user, onViewProfile, onNavigateTab })
               </div>
             </div>
 
-            <div className="flex items-center gap-2">
-              <span className="text-xs text-slate-400">Active Aspirants:</span>
-              <span className="px-2.5 py-1 bg-[#1e2433] border border-white/10 rounded-lg font-mono text-orange-400 text-xs font-bold">
-                {weeklyData?.total_active_aspirants || 0}
-              </span>
+            <div className="flex items-center gap-3">
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-slate-400">Active Aspirants:</span>
+                <span className="px-2.5 py-1 bg-[#1e2433] border border-white/10 rounded-lg font-mono text-orange-400 text-xs font-bold">
+                  {weeklyData?.total_active_aspirants || 0}
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setGuideModalOpen(true)}
+                className="px-3.5 py-1.5 bg-gradient-to-r from-orange-500/20 to-amber-500/20 hover:from-orange-500/30 hover:to-amber-500/30 border border-orange-500/40 text-orange-300 text-xs font-bold rounded-xl flex items-center gap-1.5 transition cursor-pointer shadow-sm"
+              >
+                <HelpCircle className="w-4 h-4 text-orange-400" />
+                <span>Rules & Tier Guide</span>
+              </button>
             </div>
           </div>
+
+          {/* User's Personal League Advancement Status Card */}
+          {user && myDivisionData?.division && (
+            <div className="bg-gradient-to-br from-[#1b2131] via-[#161a27] to-[#121622] border border-orange-500/30 rounded-3xl p-5 sm:p-6 mb-6 shadow-2xl relative overflow-hidden">
+              <div className="absolute top-0 right-0 w-80 h-80 bg-orange-500/5 rounded-full blur-3xl -z-10 pointer-events-none"></div>
+
+              <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6">
+                {/* Left: Division Badge & Zone */}
+                <div className="space-y-3 min-w-[240px]">
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] uppercase font-bold tracking-wider text-slate-400">
+                      Your Standing in League
+                    </span>
+                    {myDivisionData.division.zone === 'promotion' && (
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 flex items-center gap-1">
+                        <Sparkles className="w-3 h-3" />
+                        <span>Promotion Zone</span>
+                      </span>
+                    )}
+                    {myDivisionData.division.zone === 'relegation' && (
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-rose-500/20 text-rose-300 border border-rose-500/30">
+                        Demotion Risk
+                      </span>
+                    )}
+                    {myDivisionData.division.zone === 'safe' && (
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-800 text-slate-300 border border-slate-700">
+                        Safe Zone
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="flex items-center gap-3">
+                    <div className="text-3xl sm:text-4xl">
+                      {myDivisionData.division.icon}
+                    </div>
+                    <div>
+                      <h3 className="text-xl sm:text-2xl font-black text-white flex items-center gap-2">
+                        <span>{myDivisionData.division.full_name}</span>
+                      </h3>
+                      <p className="text-xs text-slate-400 font-mono">
+                        Weekly Rank: <strong className="text-orange-400">#{myDivisionData.rank}</strong> of {myDivisionData.total_aspirants} aspirants
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Multiplier & Trajectory Perks */}
+                  <div className="flex flex-wrap items-center gap-2 pt-1">
+                    <span className="text-[11px] px-2.5 py-1 rounded-lg bg-orange-500/10 border border-orange-500/20 text-orange-300 font-bold flex items-center gap-1">
+                      <Zap className="w-3 h-3 text-orange-400" />
+                      <span>{myDivisionData.division.multiplier}x RP Multiplier</span>
+                    </span>
+                    <span className="text-[11px] px-2.5 py-1 rounded-lg bg-blue-500/10 border border-blue-500/20 text-blue-300 font-medium">
+                      🎯 {myDivisionData.division.air_bracket}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Right: Sub-tier Progression Bar & Dual-Gate Reqs */}
+                <div className="flex-1 max-w-xl bg-[#202738]/80 border border-white/5 rounded-2xl p-4 sm:p-5 space-y-3">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="font-bold text-slate-300">
+                      Progression toward <strong className="text-amber-300">{myDivisionData.division.next_full_name}</strong>
+                    </span>
+                    <span className="font-mono font-bold text-orange-400">
+                      {Math.round(myDivisionData.division.progress_percent)}%
+                    </span>
+                  </div>
+
+                  {/* Progress Bar */}
+                  <div className="w-full bg-[#151923] h-2.5 rounded-full overflow-hidden border border-white/10 p-[1px]">
+                    <div
+                      className="bg-gradient-to-r from-orange-500 via-amber-400 to-emerald-400 h-full rounded-full transition-all duration-500 shadow-sm"
+                      style={{ width: `${Math.min(100, Math.max(0, myDivisionData.division.progress_percent))}%` }}
+                    />
+                  </div>
+
+                  {/* Dual Gate Badges */}
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-1 text-[11px]">
+                    <div className="bg-[#181d2a] p-2 rounded-xl border border-white/5 flex flex-col">
+                      <span className="text-slate-400 text-[10px] uppercase font-bold">1. Weekly RP Gate</span>
+                      <span className={`font-mono font-bold mt-0.5 ${myDivisionData.division.needed_rp <= 0 ? 'text-emerald-400' : 'text-amber-400'}`}>
+                        {myDivisionData.division.needed_rp <= 0 ? '✓ RP Target Met' : `+${myDivisionData.division.needed_rp} RP needed`}
+                      </span>
+                    </div>
+
+                    <div className="bg-[#181d2a] p-2 rounded-xl border border-white/5 flex flex-col">
+                      <span className="text-slate-400 text-[10px] uppercase font-bold">2. Overall Elo Gate</span>
+                      <span className={`font-mono font-bold mt-0.5 ${myDivisionData.division.needed_elo <= 0 ? 'text-emerald-400' : 'text-blue-400'}`}>
+                        {myDivisionData.division.needed_elo <= 0 ? '✓ Elo Target Met' : `+${myDivisionData.division.needed_elo} Elo needed`}
+                      </span>
+                    </div>
+
+                    <div className="bg-[#181d2a] p-2 rounded-xl border border-white/5 flex flex-col">
+                      <span className="text-slate-400 text-[10px] uppercase font-bold">3. Min Accuracy Gate</span>
+                      <span className={`font-mono font-bold mt-0.5 ${myDivisionData.division.needed_acc <= 0 ? 'text-emerald-400' : 'text-purple-400'}`}>
+                        {myDivisionData.division.needed_acc <= 0 ? '✓ Accuracy Met' : `${myDivisionData.division.min_acc}% min required`}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* Leaderboard Table */}
           <div className="bg-[#262c3c] border border-white/10 rounded-3xl p-6 shadow-xl overflow-hidden">
@@ -292,16 +424,18 @@ export default function LeaderboardsView({ user, onViewProfile, onNavigateTab })
                   <tr className="border-b border-white/10 text-xs text-slate-500 uppercase font-mono">
                     <th className="pb-3 pl-2">Rank</th>
                     <th className="pb-3">Aspirant</th>
-                    <th className="pb-3">Division</th>
+                    <th className="pb-3">Division & Zone</th>
                     <th className="pb-3 text-right">Weekly RP</th>
                     <th className="pb-3 text-right">Overall Elo</th>
+                    <th className="pb-3 text-right">Accuracy</th>
                     <th className="pb-3 text-center">Medals</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-white/5">
                   {weeklyData?.leaderboard?.map((u) => {
                     const isMe = user && u.user_id === user.id;
-                    const divStyle = DIVISION_COLORS[u.division] || DIVISION_COLORS.BRONZE;
+                    const baseTier = getDivisionBaseTier(u.division_id || u.division);
+                    const divStyle = DIVISION_COLORS[baseTier] || DIVISION_COLORS.BRONZE;
 
                     return (
                       <tr
@@ -328,15 +462,35 @@ export default function LeaderboardsView({ user, onViewProfile, onNavigateTab })
                           </div>
                         </td>
                         <td className="py-3.5">
-                          <span className={`text-[10px] font-extrabold px-2 py-0.5 rounded-full border ${divStyle}`}>
-                            {u.division}
-                          </span>
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span className={`text-[10px] font-extrabold px-2 py-0.5 rounded-full border ${divStyle}`}>
+                              {u.division_icon ? `${u.division_icon} ` : ''}{u.division}
+                            </span>
+                            {u.division_zone === 'promotion' && (
+                              <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 font-bold uppercase tracking-wider">
+                                ▲ Promo
+                              </span>
+                            )}
+                            {u.division_zone === 'relegation' && (
+                              <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-rose-500/20 text-rose-400 border border-rose-500/30 font-bold uppercase tracking-wider">
+                                ▼ Risk
+                              </span>
+                            )}
+                            {u.division_zone === 'safe' && (
+                              <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-slate-800 text-slate-400 border border-slate-700 font-semibold">
+                                Safe
+                              </span>
+                            )}
+                          </div>
                         </td>
                         <td className="py-3.5 text-right font-mono font-black text-orange-400">
                           {u.weekly_rp} RP
                         </td>
                         <td className="py-3.5 text-right font-mono text-slate-300">
                           {Math.round(u.overall_elo)}
+                        </td>
+                        <td className="py-3.5 text-right font-mono text-emerald-400 font-bold">
+                          {u.accuracy !== undefined ? `${u.accuracy}%` : '-'}
                         </td>
                         <td className="py-3.5 text-center">
                           <div className="flex items-center justify-center gap-1.5 text-xs font-mono">
@@ -444,6 +598,12 @@ export default function LeaderboardsView({ user, onViewProfile, onNavigateTab })
           </div>
         </div>
       )}
+
+      {/* Division System Guide & Tiers Modal */}
+      <DivisionGuideModal
+        isOpen={guideModalOpen}
+        onClose={() => setGuideModalOpen(false)}
+      />
     </div>
   );
 }

@@ -3,6 +3,7 @@ import { Swords, Zap, Trophy, Shield, Play, ArrowRight, Sparkles, BookOpen, Cloc
 import { api } from '../utils/api';
 import { sound } from '../utils/sound';
 import OngoingMatchCard from './OngoingMatchCard';
+import DivisionGuideModal from './DivisionGuideModal';
 
 export default function DashboardView({
   user,
@@ -22,6 +23,7 @@ export default function DashboardView({
   const [openRooms, setOpenRooms] = useState([]);
   const [loadingRooms, setLoadingRooms] = useState(true);
   const [currentActiveMatch, setCurrentActiveMatch] = useState(activeMatch || null);
+  const [guideModalOpen, setGuideModalOpen] = useState(false);
 
   // Sync prop changes into state
   useEffect(() => {
@@ -266,16 +268,57 @@ export default function DashboardView({
             </div>
           </div>
 
-          <div className="bg-[#262c3c] border border-white/10 rounded-2xl p-4 flex items-center gap-3">
-            <div className="p-3 rounded-xl bg-amber-950/80 text-amber-400 border border-amber-500/30">
-              <Trophy className="w-5 h-5" />
+          <div
+            onClick={() => {
+              sound.click();
+              setGuideModalOpen(true);
+            }}
+            className="bg-[#262c3c] border border-amber-500/30 hover:border-amber-400/60 rounded-2xl p-4 flex flex-col justify-between gap-2 cursor-pointer transition hover:scale-[1.02] group shadow-lg"
+            title="Click to view Division System & Advancement Rules"
+          >
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2.5 rounded-xl bg-amber-950/80 text-amber-400 border border-amber-500/30 text-lg group-hover:scale-110 transition flex items-center justify-center">
+                  {user.division_meta?.icon || '🏆'}
+                </div>
+                <div>
+                  <span className="text-[10px] uppercase font-bold text-slate-400 flex items-center gap-1">
+                    <span>Division League</span>
+                    <ArrowRight className="w-2.5 h-2.5 text-amber-400 group-hover:translate-x-0.5 transition" />
+                  </span>
+                  <h4 className="text-base sm:text-lg font-black text-amber-300 truncate max-w-[140px]">
+                    {user.division_meta?.full_name || user.current_division}
+                  </h4>
+                </div>
+              </div>
+              {user.division_meta?.zone && (
+                <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full border ${
+                  user.division_meta.zone === 'promotion'
+                    ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30'
+                    : user.division_meta.zone === 'relegation'
+                    ? 'bg-rose-500/20 text-rose-400 border-rose-500/30'
+                    : 'bg-slate-800 text-slate-400 border-slate-700'
+                }`}>
+                  {user.division_meta.zone === 'promotion' ? '▲ Promo' : user.division_meta.zone === 'relegation' ? '▼ Demote' : 'Safe'}
+                </span>
+              )}
             </div>
-            <div>
-              <span className="text-[10px] uppercase font-bold text-slate-400">Division League</span>
-              <h4 className="text-xl font-black text-amber-300">
-                {user.current_division}
-              </h4>
-            </div>
+
+            {/* Sub-tier Progress Bar */}
+            {user.division_meta?.next_full_name && (
+              <div className="w-full mt-1">
+                <div className="flex items-center justify-between text-[10px] text-slate-400 mb-1">
+                  <span className="truncate">Next: {user.division_meta.next_full_name}</span>
+                  <span className="font-mono text-orange-400 font-bold">{Math.round(user.division_meta.progress_percent || 0)}%</span>
+                </div>
+                <div className="w-full bg-[#151923] h-1.5 rounded-full overflow-hidden border border-white/5">
+                  <div
+                    className="bg-gradient-to-r from-orange-500 to-amber-400 h-full rounded-full transition-all duration-300"
+                    style={{ width: `${Math.min(100, Math.max(0, user.division_meta.progress_percent || 0))}%` }}
+                  />
+                </div>
+              </div>
+            )}
           </div>
 
           <div className="bg-[#262c3c] border border-white/10 rounded-2xl p-4 flex items-center gap-3">
@@ -434,6 +477,12 @@ export default function DashboardView({
           </div>
         </div>
       </div>
+
+      {/* Division System Guide & Tiers Modal */}
+      <DivisionGuideModal
+        isOpen={guideModalOpen}
+        onClose={() => setGuideModalOpen(false)}
+      />
     </div>
   );
 }

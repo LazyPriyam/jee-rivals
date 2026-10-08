@@ -75,6 +75,20 @@ def format_user_profile(user: dict, cursor=None) -> UserProfile:
 
     target_exam = user.get("target_exam") or "MIXED"
 
+    from backend.app.tools.division_engine import evaluate_user_division
+    div_eval = evaluate_user_division(
+        weekly_rp=user.get("weekly_rp", 0),
+        overall_elo=user.get("overall_elo", 1200.0),
+        total_solved=solved,
+        total_correct=correct
+    )
+    evaluated_division = div_eval["full_name"]
+    if cursor:
+        try:
+            cursor.execute("UPDATE users SET current_division = ? WHERE id = ?", (evaluated_division, user["id"]))
+        except Exception:
+            pass
+
     return UserProfile(
         id=user["id"],
         username=user["username"],
@@ -84,7 +98,7 @@ def format_user_profile(user: dict, cursor=None) -> UserProfile:
         physics_elo=round(user.get("physics_elo", 1200.0), 1),
         chemistry_elo=round(user.get("chemistry_elo", 1200.0), 1),
         math_elo=round(user.get("math_elo", 1200.0), 1),
-        current_division=user.get("current_division", "BRONZE"),
+        current_division=evaluated_division,
         weekly_rp=user.get("weekly_rp", 0),
         total_solved=solved,
         total_correct=correct,
@@ -106,7 +120,8 @@ def format_user_profile(user: dict, cursor=None) -> UserProfile:
         air_gate_reason=air_gate,
         learnt_chapters=learnt,
         target_exam=target_exam,
-        chat_settings=chat_set
+        chat_settings=chat_set,
+        division_meta=div_eval
     )
 
 

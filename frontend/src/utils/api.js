@@ -324,6 +324,7 @@ export const api = {
     getWeekly: (limit = 50) => request(`/api/leaderboards/weekly?limit=${limit}`),
     getElo: (subject = "overall", limit = 50) =>
       request(`/api/leaderboards/elo?subject=${subject}&limit=${limit}`),
+    getDivisionDetails: () => request("/api/leaderboards/division/me"),
     getProfile: (username) =>
       request(`/api/leaderboards/profile/${encodeURIComponent(username)}`),
     updateProfile: (data) =>

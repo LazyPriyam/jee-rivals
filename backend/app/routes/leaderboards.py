@@ -9,10 +9,12 @@ from backend.app.auth import get_current_user
 from backend.app.routes.auth import format_user_profile
 from backend.app.tools.jee_syllabus import build_user_skill_tree
 from backend.app.tools.achievements_engine import evaluate_user_achievements
+from backend.app.tools.division_engine import evaluate_user_division, DIVISION_TIERS_CONFIG
 
 router = APIRouter(prefix="/api/leaderboards", tags=["Leaderboards & Ranks"])
 
 def calculate_division(rank: int, total_users: int) -> str:
+    # Retained as fast fallback; full evaluation is now performed by division_engine
     if rank <= 3:
         return "GRANDMASTER"
     elif rank <= 10:
@@ -37,6 +39,42 @@ def get_next_sunday_utc() -> str:
     return target.isoformat() + "Z"
 
 
+@router.get("/division/me")
+def get_my_division_details(current_user: dict = Depends(get_current_user)):
+    """
+    Returns the calling player's rich division status, sub-tier progress,
+    promotion/relegation zone, and all divisional tier milestones.
+    """
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute("SELECT COUNT(*) as higher FROM users WHERE weekly_rp > ?", (current_user.get("weekly_rp", 0),))
+    higher_count = c.fetchone()["higher"]
+    my_rank = higher_count + 1
+
+    c.execute("SELECT COUNT(*) as total FROM users")
+    total_users = c.fetchone()["total"]
+    conn.close()
+
+    solved = current_user.get("total_solved", 0)
+    correct = current_user.get("total_correct", 0)
+    div_meta = evaluate_user_division(
+        weekly_rp=current_user.get("weekly_rp", 0),
+        overall_elo=current_user.get("overall_elo", 1200.0),
+        total_solved=solved,
+        total_correct=correct,
+        rank=my_rank,
+        total_users=total_users
+    )
+
+    return {
+        "rank": my_rank,
+        "total_aspirants": total_users,
+        "division": div_meta,
+        "all_tiers": DIVISION_TIERS_CONFIG,
+        "reset_at": get_next_sunday_utc()
+    }
+
+
 @router.get("/weekly")
 def get_weekly_leaderboard(limit: int = Query(50, ge=1, le=100)):
     conn = get_connection()
@@ -57,10 +95,18 @@ def get_weekly_leaderboard(limit: int = Query(50, ge=1, le=100)):
 
     leaderboard = []
     for rank, u in enumerate(rows, start=1):
-        div = calculate_division(rank, total_users)
         solved = u.get("total_solved", 0)
         correct = u.get("total_correct", 0)
         acc = round((correct / solved * 100), 1) if solved > 0 else 0.0
+
+        div_meta = evaluate_user_division(
+            weekly_rp=u.get("weekly_rp", 0),
+            overall_elo=u.get("overall_elo", 1200.0),
+            total_solved=solved,
+            total_correct=correct,
+            rank=rank,
+            total_users=total_users
+        )
 
         leaderboard.append({
             "rank": rank,
@@ -69,7 +115,16 @@ def get_weekly_leaderboard(limit: int = Query(50, ge=1, le=100)):
             "avatar_id": u.get("avatar_id") or "default",
             "title": u.get("title") or "JEE Aspirant",
             "weekly_rp": u.get("weekly_rp", 0),
-            "division": div,
+            "division": div_meta["full_name"],
+            "division_id": div_meta["tier_id"],
+            "division_sub": div_meta["subdivision"],
+            "division_zone": div_meta["zone"],
+            "division_zone_label": div_meta["zone_label"],
+            "division_progress": div_meta["progress_percent"],
+            "division_icon": div_meta["icon"],
+            "division_color": div_meta["color"],
+            "division_multiplier": div_meta["multiplier"],
+            "division_air": div_meta["air_bracket"],
             "overall_elo": round(u.get("overall_elo", 1200.0), 1),
             "accuracy": acc,
             "medals": {
@@ -82,7 +137,8 @@ def get_weekly_leaderboard(limit: int = Query(50, ge=1, le=100)):
     return {
         "reset_at": get_next_sunday_utc(),
         "total_active_aspirants": total_users,
-        "leaderboard": leaderboard
+        "leaderboard": leaderboard,
+        "all_tiers": DIVISION_TIERS_CONFIG
     }
 
 

@@ -42,6 +42,7 @@ class UserProfile(BaseModel):
     learnt_chapters: Optional[List[str]] = []
     target_exam: Optional[str] = "MIXED"
     chat_settings: Optional[Dict[str, Any]] = {}
+    division_meta: Optional[Dict[str, Any]] = None
 
 class ProfileUpdateRequest(BaseModel):
     target_college: Optional[str] = None
