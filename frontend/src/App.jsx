@@ -13,6 +13,7 @@ import LeaderboardsView from './components/LeaderboardsView';
 import ProfileView from './components/ProfileView';
 import TournamentsView from './components/TournamentsView';
 import AdaptivePracticeView from './components/AdaptivePracticeView';
+import ChapterMasteryView from './components/ChapterMasteryView';
 import SphereGridSkillTree from './components/SphereGridSkillTree';
 import TestHistoryView from './components/TestHistoryView';
 import TestAnalysisView from './components/TestAnalysisView';
@@ -20,7 +21,15 @@ import SettingsView from './components/SettingsView';
 import AuthModal from './components/AuthModal';
 import RoomModal from './components/RoomModal';
 import ErrorBoundary from './components/ErrorBoundary';
-import { api, getToken, setToken, getCachedUser, setCachedUser, recordSavedAccount } from './utils/api';
+import {
+  api,
+  getToken,
+  setToken,
+  getCachedUser,
+  setCachedUser,
+  recordSavedAccount,
+  getSavedAccounts
+} from './utils/api';
 
 export default function App() {
   const [user, setUser] = useState(() => {
@@ -71,9 +80,30 @@ export default function App() {
     }
   }, [user?.id, activeTab]);
 
-  // Check existing session
+  // Check existing session with bulletproof auto-healing persistence
   useEffect(() => {
     const token = getToken();
+
+    const tryAutoHealWithSavedAccount = async () => {
+      const savedAccounts = getSavedAccounts();
+      const lastUser = localStorage.getItem('jee_saved_username') || getCachedUser()?.username;
+      const savedAcc = savedAccounts.find(
+        (a) => a.username?.toLowerCase() === lastUser?.toLowerCase()
+      ) || savedAccounts[0];
+
+      if (savedAcc?.pin) {
+        try {
+          const resp = await api.auth.login(savedAcc.username, savedAcc.pin);
+          setToken(resp.token, true);
+          setUser(resp.user);
+          setCachedUser(resp.user);
+          recordSavedAccount(resp.user, resp.token, savedAcc.pin);
+          return true;
+        } catch (_) {}
+      }
+      return false;
+    };
+
     if (token) {
       api.auth.getMe()
         .then((u) => {
@@ -81,19 +111,26 @@ export default function App() {
           setCachedUser(u);
           recordSavedAccount(u);
         })
-        .catch((err) => {
-          // ONLY clear session if server explicitly returned 401 or 403
+        .catch(async (err) => {
+          // If server explicitly returned 401/403, attempt auto-heal before discarding
           if (err?.status === 401 || err?.status === 403) {
-            setToken(null);
-            setUser(null);
-            setCachedUser(null);
-            setAuthModalOpen(true);
+            const healed = await tryAutoHealWithSavedAccount();
+            if (!healed) {
+              setToken(null);
+              setUser(null);
+              setCachedUser(null);
+              setAuthModalOpen(true);
+            }
           } else {
             console.warn('[Session] Backend booting up or unreachable; maintaining local session.');
           }
         });
     } else {
-      setAuthModalOpen(true);
+      tryAutoHealWithSavedAccount().then((healed) => {
+        if (!healed) {
+          setAuthModalOpen(true);
+        }
+      });
     }
   }, []);
 
@@ -316,6 +353,20 @@ export default function App() {
           </div>
         )}
 
+        {/* Tab: Chapter Mastery & Error Log Graveyard */}
+        {visitedTabs.mastery && (
+          <div className={activeTab === 'mastery' ? 'block' : 'hidden'}>
+            <ChapterMasteryView
+              user={user}
+              onOpenAuth={() => setAuthModalOpen(true)}
+              onNavigateTab={switchTab}
+              onStartPreset={handleStartPreset}
+              onJoinRoomCode={handleJoinRoomCode}
+              isActive={activeTab === 'mastery'}
+            />
+          </div>
+        )}
+
         {/* Tab: Celestial Skill Tree Constellation (Sphere Grid / PoE style) */}
         {visitedTabs.skills && (
           <div className={activeTab === 'skills' ? 'block' : 'hidden'}>
@@ -435,7 +486,11 @@ export default function App() {
               currentUser={user}
               onBack={inspectProfileUser ? () => setInspectProfileUser(null) : null}
               onNavigateTab={switchTab}
-              onUpdateUser={(u) => setUser(u)}
+              onUpdateUser={(u) => {
+                setUser(u);
+                setCachedUser(u);
+                recordSavedAccount(u);
+              }}
               onStartPreset={handleStartPreset}
               isActive={activeTab === 'profile'}
             />
@@ -447,7 +502,11 @@ export default function App() {
           <div className={activeTab === 'settings' ? 'block' : 'hidden'}>
             <SettingsView
               user={user}
-              onUpdateUser={(u) => setUser(u)}
+              onUpdateUser={(u) => {
+                setUser(u);
+                setCachedUser(u);
+                recordSavedAccount(u);
+              }}
               onLogout={handleLogout}
               onNavigateTab={switchTab}
               isActive={activeTab === 'settings'}

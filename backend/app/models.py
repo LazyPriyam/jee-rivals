@@ -3,7 +3,7 @@ from pydantic import BaseModel, Field
 
 class UserRegisterRequest(BaseModel):
     username: str = Field(..., min_length=2, max_length=20)
-    pin: str = Field(..., min_length=4, max_length=6)
+    pin: str = Field(..., min_length=4, max_length=32)
     avatar_id: Optional[str] = "default"
 
 class UserLoginRequest(BaseModel):
@@ -60,7 +60,7 @@ class ChangeUsernameRequest(BaseModel):
 
 class ChangePinRequest(BaseModel):
     current_pin: str
-    new_pin: str = Field(..., min_length=4, max_length=6)
+    new_pin: str = Field(..., min_length=4, max_length=32)
 
 class ChatSettingsUpdateRequest(BaseModel):
     chat_settings: Dict[str, Any]
@@ -122,6 +122,7 @@ class RoomCreateRequest(BaseModel):
     base_correct_score: float = 100.0
     negative_marking: float = -25.0
     speed_bonus_enabled: bool = True
+    question_ids: Optional[List[str]] = None
 
 class RemovePlayerRequest(BaseModel):
     user_id: str
@@ -190,3 +191,4 @@ class TournamentCreateRequest(BaseModel):
     passcode: Optional[str] = None
     question_count: int = 5
     time_per_question: int = 60
+    series_cycles: int = 1  # For 3-player round-robin leagues: K cycles -> 3*K total matches

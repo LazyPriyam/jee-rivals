@@ -23,11 +23,16 @@ import {
   GraduationCap,
   Calendar,
   Flame,
-  Radio
+  Radio,
+  X,
+  ArrowRight
 } from 'lucide-react';
 import {
   api,
   setToken,
+  setCachedUser,
+  recordSavedAccount,
+  switchSavedAccount,
   isRememberMeEnabled,
   setRememberMePreference,
   getSavedAccounts,
@@ -232,10 +237,16 @@ export default function SettingsView({
       sound.click();
       const res = await api.auth.changeUsername(trimmed);
       if (res.token) {
-        setToken(res.token);
+        setToken(res.token, rememberMeActive);
       }
-      if (res.user && onUpdateUser) {
-        onUpdateUser(res.user);
+      if (res.user) {
+        setCachedUser(res.user);
+        recordSavedAccount(res.user, res.token);
+        try {
+          localStorage.setItem('jee_saved_username', trimmed);
+        } catch (_) {}
+        setSavedDeviceAccounts(getSavedAccounts());
+        if (onUpdateUser) onUpdateUser(res.user);
       }
       setUsernameSuccess(`Callsign successfully updated to ${trimmed}!`);
       setTimeout(() => setUsernameSuccess(''), 4000);
@@ -253,11 +264,11 @@ export default function SettingsView({
     setPinSuccess('');
 
     if (!currentPin) {
-      setPinError('Please enter your current 4-digit PIN.');
+      setPinError('Please enter your current PIN.');
       return;
     }
-    if (newPin.length < 4 || newPin.length > 6 || !/^\d+$/.test(newPin)) {
-      setPinError('New PIN must be 4 to 6 numeric digits.');
+    if (newPin.length < 4 || newPin.length > 32) {
+      setPinError('New PIN must be 4 to 32 characters.');
       return;
     }
     if (newPin !== confirmPin) {
@@ -268,7 +279,16 @@ export default function SettingsView({
     setChangingPin(true);
     try {
       sound.click();
-      await api.auth.changePin(currentPin, newPin);
+      const res = await api.auth.changePin(currentPin, newPin);
+      if (res?.token) {
+        setToken(res.token, rememberMeActive);
+      }
+      if (res?.user) {
+        setCachedUser(res.user);
+        recordSavedAccount(res.user, res.token, newPin);
+        setSavedDeviceAccounts(getSavedAccounts());
+        if (onUpdateUser) onUpdateUser(res.user);
+      }
       setPinSuccess('Security PIN updated successfully.');
       setCurrentPin('');
       setNewPin('');
@@ -300,6 +320,9 @@ export default function SettingsView({
       };
 
       const updated = await api.auth.updateProfile(payload);
+      setCachedUser(updated);
+      recordSavedAccount(updated);
+      setSavedDeviceAccounts(getSavedAccounts());
       if (onUpdateUser) {
         onUpdateUser(updated);
       }
@@ -767,20 +790,20 @@ export default function SettingsView({
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                 {/* Current PIN */}
                 <div className="space-y-1.5">
-                  <label className="text-xs font-bold text-slate-300">Current PIN</label>
+                  <label className="text-xs font-bold text-slate-300">Current PIN / Passcode</label>
                   <div className="relative">
                     <input
                       type={showCurrentPin ? 'text' : 'password'}
                       value={currentPin}
                       onChange={(e) => setCurrentPin(e.target.value)}
                       placeholder="••••"
-                      maxLength={6}
+                      maxLength={32}
                       className="w-full px-3.5 py-2.5 bg-[#0a0d14] border border-white/15 focus:border-orange-500 rounded-xl text-white text-xs font-mono tracking-widest placeholder-slate-600 focus:outline-none transition pr-9"
                     />
                     <button
                       type="button"
                       onClick={() => setShowCurrentPin(!showCurrentPin)}
-                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300"
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300 cursor-pointer"
                     >
                       {showCurrentPin ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
                     </button>
@@ -789,20 +812,20 @@ export default function SettingsView({
 
                 {/* New PIN */}
                 <div className="space-y-1.5">
-                  <label className="text-xs font-bold text-slate-300">New 4-Digit PIN</label>
+                  <label className="text-xs font-bold text-slate-300">New PIN (4-32 chars)</label>
                   <div className="relative">
                     <input
                       type={showNewPin ? 'text' : 'password'}
                       value={newPin}
                       onChange={(e) => setNewPin(e.target.value)}
                       placeholder="••••"
-                      maxLength={6}
+                      maxLength={32}
                       className="w-full px-3.5 py-2.5 bg-[#0a0d14] border border-white/15 focus:border-orange-500 rounded-xl text-white text-xs font-mono tracking-widest placeholder-slate-600 focus:outline-none transition pr-9"
                     />
                     <button
                       type="button"
                       onClick={() => setShowNewPin(!showNewPin)}
-                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300"
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300 cursor-pointer"
                     >
                       {showNewPin ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
                     </button>
@@ -817,7 +840,7 @@ export default function SettingsView({
                     value={confirmPin}
                     onChange={(e) => setConfirmPin(e.target.value)}
                     placeholder="••••"
-                    maxLength={6}
+                    maxLength={32}
                     className="w-full px-3.5 py-2.5 bg-[#0a0d14] border border-white/15 focus:border-orange-500 rounded-xl text-white text-xs font-mono tracking-widest placeholder-slate-600 focus:outline-none transition"
                   />
                 </div>
@@ -891,23 +914,50 @@ export default function SettingsView({
                   Saved Aspirant Profiles on this device ({savedDeviceAccounts.length})
                 </div>
                 <div className="flex flex-wrap gap-2">
-                  {savedDeviceAccounts.map((acc) => (
-                    <div
-                      key={acc.username}
-                      className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-[#262c3c] border border-white/10 text-xs text-slate-300"
-                    >
-                      <span className="font-bold text-white">{acc.username}</span>
-                      <span className="text-[10px] text-orange-400 font-mono">({acc.overall_elo} Elo)</span>
-                      <button
-                        type="button"
-                        onClick={() => handleRemoveDeviceAccount(acc.username)}
-                        title="Forget profile from this device"
-                        className="text-slate-500 hover:text-red-400 transition cursor-pointer p-0.5 ml-1"
+                  {savedDeviceAccounts.map((acc) => {
+                    const isCurrent = acc.username?.toLowerCase() === user.username?.toLowerCase();
+                    return (
+                      <div
+                        key={acc.username}
+                        className={`flex items-center gap-2 px-3 py-1.5 rounded-xl border text-xs transition ${
+                          isCurrent
+                            ? 'bg-orange-950/60 border-orange-500/50 text-orange-200'
+                            : 'bg-[#262c3c] border-white/10 text-slate-300'
+                        }`}
                       >
-                        <X className="w-3 h-3" />
-                      </button>
-                    </div>
-                  ))}
+                        <span className="font-bold">{acc.username}</span>
+                        <span className="text-[10px] text-orange-400 font-mono">({acc.overall_elo} Elo)</span>
+                        {!isCurrent && (acc.token || acc.pin) && (
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              try {
+                                sound.click();
+                                const switched = await switchSavedAccount(acc.username);
+                                if (onUpdateUser) onUpdateUser(switched);
+                                setAccountSuccess(`Switched to ${acc.username}!`);
+                                setTimeout(() => setAccountSuccess(''), 3000);
+                              } catch (err) {
+                                setAccountError(err.message || 'Failed to switch profile.');
+                              }
+                            }}
+                            className="px-2 py-0.5 rounded bg-orange-600/30 hover:bg-orange-600 text-[10px] text-orange-300 hover:text-white font-bold transition cursor-pointer flex items-center gap-1"
+                          >
+                            <span>Switch</span>
+                            <ArrowRight className="w-2.5 h-2.5" />
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveDeviceAccount(acc.username)}
+                          title="Forget profile from this device"
+                          className="text-slate-500 hover:text-red-400 transition cursor-pointer p-0.5 ml-1"
+                        >
+                          <X className="w-3 h-3" />
+                        </button>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
             )}

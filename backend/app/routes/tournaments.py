@@ -16,6 +16,127 @@ from backend.app.tools.question_verifier import audit_and_heal_question
 router = APIRouter(prefix="/api/tournaments", tags=["Tournaments"])
 
 
+def calculate_tournament_standings(cursor, tournament_id: str) -> dict:
+    """
+    Computes isolated tournament points table:
+    - Win: 3 pts, Draw: 1 pt, Loss: 0 pts
+    - Accuracy Bonus: +1 bonus pt for score >= 80
+    - Differential: Net aggregate score differential (marks_for - marks_against)
+    - Tie-breaking: Points -> Head-to-Head -> Differential -> Marks scored
+    """
+    cursor.execute("""
+        SELECT tp.user_id, tp.username, tp.avatar_id, tp.seed, u.overall_elo, u.title, u.current_division
+        FROM tournament_participants tp
+        LEFT JOIN users u ON tp.user_id = u.id
+        WHERE tp.tournament_id = ?
+        ORDER BY tp.seed ASC
+    """, (tournament_id,))
+    parts = [dict(r) for r in cursor.fetchall()]
+
+    table = {
+        p["user_id"]: {
+            "user_id": p["user_id"],
+            "username": p["username"],
+            "avatar_id": p.get("avatar_id") or "flame",
+            "title": p.get("title") or "JEE Aspirant",
+            "current_division": p.get("current_division") or "BRONZE",
+            "overall_elo": round(p.get("overall_elo") or 1200.0, 1),
+            "played": 0,
+            "won": 0,
+            "drawn": 0,
+            "lost": 0,
+            "points": 0,
+            "bonus_points": 0,
+            "marks_for": 0.0,
+            "marks_against": 0.0,
+            "diff": 0.0,
+            "h2h": {}
+        }
+        for p in parts
+    }
+
+    cursor.execute("""
+        SELECT * FROM tournament_matches
+        WHERE tournament_id = ? AND status = 'COMPLETED' AND is_tiebreaker = 0
+        ORDER BY round_number ASC, match_index ASC
+    """, (tournament_id,))
+    matches = [dict(r) for r in cursor.fetchall()]
+
+    for m in matches:
+        p1 = m.get("player1_id")
+        p2 = m.get("player2_id")
+        if not p1 or not p2 or p1 not in table or p2 not in table:
+            continue
+
+        s1 = float(m.get("player1_score") or 0.0)
+        s2 = float(m.get("player2_score") or 0.0)
+        m1 = float(m.get("player1_marks") if m.get("player1_marks") is not None else s1)
+        m2 = float(m.get("player2_marks") if m.get("player2_marks") is not None else s2)
+
+        table[p1]["played"] += 1
+        table[p2]["played"] += 1
+        table[p1]["marks_for"] += m1
+        table[p1]["marks_against"] += m2
+        table[p2]["marks_for"] += m2
+        table[p2]["marks_against"] += m1
+
+        if s1 >= 80:
+            table[p1]["bonus_points"] += 1
+            table[p1]["points"] += 1
+        if s2 >= 80:
+            table[p2]["bonus_points"] += 1
+            table[p2]["points"] += 1
+
+        if s1 > s2:
+            table[p1]["won"] += 1
+            table[p2]["lost"] += 1
+            table[p1]["points"] += 3
+            table[p1]["h2h"][p2] = table[p1]["h2h"].get(p2, 0) + 3
+            table[p2]["h2h"][p1] = table[p2]["h2h"].get(p1, 0) + 0
+        elif s2 > s1:
+            table[p2]["won"] += 1
+            table[p1]["lost"] += 1
+            table[p2]["points"] += 3
+            table[p2]["h2h"][p1] = table[p2]["h2h"].get(p1, 0) + 3
+            table[p1]["h2h"][p2] = table[p1]["h2h"].get(p2, 0) + 0
+        else:
+            table[p1]["drawn"] += 1
+            table[p2]["drawn"] += 1
+            table[p1]["points"] += 1
+            table[p2]["points"] += 1
+            table[p1]["h2h"][p2] = table[p1]["h2h"].get(p2, 0) + 1
+            table[p2]["h2h"][p1] = table[p2]["h2h"].get(p1, 0) + 1
+
+    standings_list = list(table.values())
+    for item in standings_list:
+        item["diff"] = round(item["marks_for"] - item["marks_against"], 1)
+
+    def sort_key(item):
+        return (item["points"], item["diff"], item["marks_for"])
+
+    standings_list.sort(key=sort_key, reverse=True)
+    for rank, item in enumerate(standings_list, 1):
+        item["rank"] = rank
+
+    is_tied = False
+    tied_players = []
+    if len(standings_list) >= 2:
+        top1 = standings_list[0]
+        top2 = standings_list[1]
+        if top1["points"] == top2["points"] and top1["diff"] == top2["diff"]:
+            h2h_1 = top1["h2h"].get(top2["user_id"], 0)
+            h2h_2 = top2["h2h"].get(top1["user_id"], 0)
+            if h2h_1 == h2h_2:
+                is_tied = True
+                tied_players = [top1["user_id"], top2["user_id"]]
+
+    return {
+        "standings": standings_list,
+        "is_tied": is_tied,
+        "tied_players": tied_players
+    }
+
+
 def get_tournament_full(cursor, tournament_id: str, current_user_id: Optional[str] = None) -> dict:
     cursor.execute("SELECT * FROM tournaments WHERE id = ?", (tournament_id,))
     t_row = cursor.fetchone()
@@ -48,7 +169,7 @@ def get_tournament_full(cursor, tournament_id: str, current_user_id: Optional[st
     """, (tournament_id,))
     matches = [dict(r) for r in cursor.fetchall()]
 
-    # Group matches by round
+    # Group matches by round / series cycle
     rounds_map = {}
     for m in matches:
         rnd = m["round_number"]
@@ -60,7 +181,7 @@ def get_tournament_full(cursor, tournament_id: str, current_user_id: Optional[st
     user_active_match = None
     if current_user_id:
         for m in matches:
-            if m["round_number"] == tournament["current_round"] and m["status"] in ("READY", "IN_PROGRESS"):
+            if m["status"] in ("READY", "IN_PROGRESS"):
                 if m["player1_id"] == current_user_id or m["player2_id"] == current_user_id:
                     user_active_match = m
                     break
@@ -80,6 +201,9 @@ def get_tournament_full(cursor, tournament_id: str, current_user_id: Optional[st
         if ru_row:
             runner_up_info = dict(ru_row)
 
+    # Isolated Points Table standings (calculated dynamically)
+    standings_info = calculate_tournament_standings(cursor, tournament_id)
+
     return {
         **tournament,
         "participants": participants,
@@ -89,6 +213,9 @@ def get_tournament_full(cursor, tournament_id: str, current_user_id: Optional[st
         "user_active_match": user_active_match,
         "winner": winner_info,
         "runner_up": runner_up_info,
+        "standings": standings_info["standings"],
+        "is_tied": standings_info["is_tied"],
+        "tied_players": standings_info["tied_players"],
         "is_organizer": current_user_id == tournament["organizer_id"] if current_user_id else False,
         "is_registered": any(p["user_id"] == current_user_id for p in participants) if current_user_id else False,
     }
@@ -207,7 +334,8 @@ def create_tournament(req: TournamentCreateRequest, user: dict = Depends(get_cur
         raise HTTPException(status_code=400, detail="Tournament title is required.")
 
     bracket_size = req.bracket_size if req.bracket_size in (3, 4, 8, 16) else 8
-    total_rounds = 2 if bracket_size == 3 else int(math.log2(bracket_size))
+    series_cycles = max(1, min(9, getattr(req, "series_cycles", 1) or 1)) if bracket_size == 3 else 1
+    total_rounds = series_cycles if bracket_size == 3 else (2 if bracket_size == 3 else int(math.log2(bracket_size)))
     tournament_id = f"trn_{uuid.uuid4().hex[:10]}"
     now = datetime.datetime.utcnow().isoformat()
 
@@ -217,13 +345,13 @@ def create_tournament(req: TournamentCreateRequest, user: dict = Depends(get_cur
     c.execute("""
         INSERT INTO tournaments (
             id, title, description, organizer_id, organizer_name, format,
-            target_exam, subject, bracket_size, reward_type, rp_pool,
+            target_exam, subject, bracket_size, series_cycles, reward_type, rp_pool,
             real_life_reward, claim_instructions, passcode, question_count,
             time_per_question, status, current_round, total_rounds, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'REGISTRATION', 1, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'REGISTRATION', 1, ?, ?)
     """, (
         tournament_id, req.title.strip(), req.description.strip(), user["id"], user["username"],
-        req.format, req.target_exam, req.subject, bracket_size, req.reward_type,
+        req.format, req.target_exam, req.subject, bracket_size, series_cycles, req.reward_type,
         max(100, req.rp_pool), req.real_life_reward.strip() if req.real_life_reward else None,
         req.claim_instructions.strip() if req.claim_instructions else None,
         req.passcode.strip() if req.passcode else None,
@@ -378,35 +506,48 @@ def start_tournament(tournament_id: str, user: dict = Depends(get_current_user))
         conn.close()
         return data
 
-    # 3-PLAYER STEPLADDER GAUNTLET FORMAT (Seed 2 vs Seed 3, winner plays Seed 1)
+    # 3-PLAYER MULTI-SERIES ROUND-ROBIN LEAGUE (K cycles -> 3*K matches)
     if t.get("bracket_size") == 3 or len(participants) == 3:
+        K = max(1, min(9, int(t.get("series_cycles") or 1)))
         c.execute("""
             UPDATE tournaments
-            SET status = 'IN_PROGRESS', started_at = ?, current_round = 1, total_rounds = 2, bracket_size = 3
+            SET status = 'IN_PROGRESS', started_at = ?, current_round = 1, total_rounds = ?, bracket_size = 3, series_cycles = ?
             WHERE id = ?
-        """, (now, tournament_id))
+        """, (now, K, K, tournament_id))
 
-        # Round 1: Eliminator Clash (Seed 2 vs Seed 3)
-        p1 = participants[1]  # Seed 2
-        p2 = participants[2]  # Seed 3
-        m1_id = f"m_{tournament_id}_r1_0"
-        room_code = create_match_room_helper(c, t, p1["user_id"], p2["user_id"], 1, 0)
+        p0 = participants[0]
+        p1 = participants[1]
+        p2 = participants[2]
 
-        c.execute("""
-            INSERT INTO tournament_matches (
-                id, tournament_id, round_number, match_index,
-                player1_id, player2_id, room_code, status
-            ) VALUES (?, ?, 1, 0, ?, ?, ?, 'READY')
-        """, (m1_id, tournament_id, p1["user_id"], p2["user_id"], room_code))
+        # Cyclic pairings for each cycle:
+        # Match 1: P0 vs P1
+        # Match 2: P1 vs P2
+        # Match 3: P2 vs P0
+        pairings = [
+            (p0["user_id"], p1["user_id"]),
+            (p1["user_id"], p2["user_id"]),
+            (p2["user_id"], p0["user_id"])
+        ]
 
-        # Round 2: Grand Finals (Seed 1 gets Bye, awaits Eliminator Winner)
-        m2_id = f"m_{tournament_id}_r2_0"
-        c.execute("""
-            INSERT INTO tournament_matches (
-                id, tournament_id, round_number, match_index,
-                player1_id, player2_id, room_code, status
-            ) VALUES (?, ?, 2, 0, ?, NULL, NULL, 'PENDING')
-        """, (m2_id, tournament_id, participants[0]["user_id"]))
+        # Generate all 3 * K scheduled duels across K cycles
+        for cycle in range(1, K + 1):
+            for m_sub_idx, (pA, pB) in enumerate(pairings):
+                match_idx = (cycle - 1) * 3 + m_sub_idx
+                m_id = f"m_{tournament_id}_c{cycle}_{m_sub_idx}"
+                # The first match of cycle 1 is READY immediately, all others start as PENDING
+                if cycle == 1 and m_sub_idx == 0:
+                    room_code = create_match_room_helper(c, t, pA, pB, 1, 0)
+                    match_status = 'READY'
+                else:
+                    room_code = None
+                    match_status = 'PENDING'
+
+                c.execute("""
+                    INSERT INTO tournament_matches (
+                        id, tournament_id, round_number, cycle_index, match_index,
+                        player1_id, player2_id, room_code, status, is_tiebreaker
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+                """, (m_id, tournament_id, cycle, cycle, match_idx, pA, pB, room_code, match_status))
 
         conn.commit()
         data = get_tournament_full(c, tournament_id, user["id"])
@@ -506,18 +647,94 @@ def simulate_or_resolve_match(
     return data
 
 
-def check_and_advance_tournament_round(cursor, tournament_id: str):
-    """
-    Checks if all matches in current round are complete.
-    If yes, advances to next round or crowns champion and distributes RP & medals.
-    """
-    cursor.execute("SELECT * FROM tournaments WHERE id = ?", (tournament_id,))
-    t_row = cursor.fetchone()
-    if not t_row:
-        return
+    if t.get("bracket_size") == 3:
+        # 1. Look for next scheduled match with status 'PENDING'
+        cursor.execute("""
+            SELECT * FROM tournament_matches
+            WHERE tournament_id = ? AND status = 'PENDING'
+            ORDER BY cycle_index ASC, match_index ASC
+            LIMIT 1
+        """, (tournament_id,))
+        next_pending_row = cursor.fetchone()
 
-    t = dict(t_row)
-    if t["status"] != "IN_PROGRESS":
+        if next_pending_row:
+            next_m = dict(next_pending_row)
+            room_code = create_match_room_helper(cursor, t, next_m["player1_id"], next_m["player2_id"], next_m["round_number"], next_m["match_index"])
+            cursor.execute("""
+                UPDATE tournament_matches
+                SET status = 'READY', room_code = ?
+                WHERE id = ?
+            """, (room_code, next_m["id"]))
+            cursor.execute("UPDATE tournaments SET current_round = ? WHERE id = ?", (next_m["round_number"], tournament_id))
+            return
+
+        # 2. Check if any match is still actively ongoing
+        cursor.execute("""
+            SELECT COUNT(*) as active_cnt
+            FROM tournament_matches
+            WHERE tournament_id = ? AND status IN ('READY', 'IN_PROGRESS')
+        """, (tournament_id,))
+        active_cnt = cursor.fetchone()["active_cnt"]
+        if active_cnt > 0:
+            return
+
+        # 3. All scheduled duels finished! Check points table and tiebreaking
+        standings_info = calculate_tournament_standings(cursor, tournament_id)
+        is_tied = standings_info["is_tied"]
+        tied_players = standings_info["tied_players"]
+
+        # Check if tiebreaker shootout already ran
+        cursor.execute("""
+            SELECT * FROM tournament_matches
+            WHERE tournament_id = ? AND is_tiebreaker = 1
+        """, (tournament_id,))
+        tiebreaker_match = cursor.fetchone()
+
+        if is_tied and not tiebreaker_match and len(tied_players) == 2:
+            # Trigger Sudden-Death Blitz Shootout!
+            shootout_id = f"m_{tournament_id}_shootout"
+            shootout_t = dict(t)
+            shootout_t["question_count"] = 3
+            shootout_t["time_per_question"] = 45
+            tot_r = int(t.get("total_rounds", 1) or 1)
+            shootout_code = create_match_room_helper(cursor, shootout_t, tied_players[0], tied_players[1], tot_r + 1, 99)
+            cursor.execute("""
+                INSERT INTO tournament_matches (
+                    id, tournament_id, round_number, cycle_index, match_index,
+                    player1_id, player2_id, room_code, status, is_tiebreaker
+                ) VALUES (?, ?, ?, ?, 99, ?, ?, ?, 'READY', 1)
+            """, (shootout_id, tournament_id, tot_r + 1, tot_r + 1, tied_players[0], tied_players[1], shootout_code))
+            return
+
+        # 4. Tournament is completely concluded! Crown champion, runner-up, 3rd place!
+        standings = standings_info["standings"]
+        if tiebreaker_match and tiebreaker_match["status"] == "COMPLETED" and tiebreaker_match.get("winner_id"):
+            tb_winner = tiebreaker_match["winner_id"]
+            tb_loser = tiebreaker_match["player2_id"] if tb_winner == tiebreaker_match["player1_id"] else tiebreaker_match["player1_id"]
+            champ_id = tb_winner
+            runner_up_id = tb_loser
+            third_id = next((p["user_id"] for p in standings if p["user_id"] not in (champ_id, runner_up_id)), None)
+        else:
+            champ_id = standings[0]["user_id"] if len(standings) > 0 else None
+            runner_up_id = standings[1]["user_id"] if len(standings) > 1 else None
+            third_id = standings[2]["user_id"] if len(standings) > 2 else None
+
+        cursor.execute("""
+            UPDATE tournaments
+            SET status = 'COMPLETED', completed_at = ?, winner_id = ?, runner_up_id = ?
+            WHERE id = ?
+        """, (now, champ_id, runner_up_id, tournament_id))
+
+        rp_pool = int(t.get("rp_pool", 500))
+        champ_rp = int(rp_pool * 0.70)
+        runner_rp = int(rp_pool * 0.30)
+
+        if champ_id:
+            cursor.execute("UPDATE users SET weekly_rp = weekly_rp + ?, gold_medals = gold_medals + 1 WHERE id = ?", (champ_rp, champ_id))
+        if runner_up_id:
+            cursor.execute("UPDATE users SET weekly_rp = weekly_rp + ?, silver_medals = silver_medals + 1 WHERE id = ?", (runner_rp, runner_up_id))
+        if third_id:
+            cursor.execute("UPDATE users SET bronze_medals = bronze_medals + 1 WHERE id = ?", (third_id,))
         return
 
     curr_round = t["current_round"]
@@ -584,44 +801,39 @@ def check_and_advance_tournament_round(cursor, tournament_id: str):
         next_round = curr_round + 1
         cursor.execute("UPDATE tournaments SET current_round = ? WHERE id = ?", (next_round, tournament_id))
 
-        if t.get("bracket_size") == 3 and curr_round == 1:
-            # 3-PLAYER STEPLADDER GAUNTLET:
-            # Populate pre-created Grand Finals match with Seed 1 vs Eliminator Winner
-            winner_of_r1 = round_winners[0] if round_winners else None
+        # Standard single elimination bracket advancement (4, 8, 16)
+        num_next_matches = len(round_winners) // 2
+        for m_idx in range(num_next_matches):
+            p1_id = round_winners[m_idx * 2]
+            p2_id = round_winners[m_idx * 2 + 1] if (m_idx * 2 + 1) < len(round_winners) else None
+            match_id = f"m_{tournament_id}_r{next_round}_{m_idx}"
+
+            room_code = None
+            status = "PENDING"
+            if p1_id and p2_id:
+                room_code = create_match_room_helper(cursor, t, p1_id, p2_id, next_round, m_idx)
+                status = "READY"
+
             cursor.execute("""
-                SELECT * FROM tournament_matches
-                WHERE tournament_id = ? AND round_number = 2 AND match_index = 0
-            """, (tournament_id,))
-            r2_row = cursor.fetchone()
-            if r2_row and winner_of_r1:
-                r2_match = dict(r2_row)
-                seed1_id = r2_match["player1_id"]
-                room_code = create_match_room_helper(cursor, t, seed1_id, winner_of_r1, 2, 0)
-                cursor.execute("""
-                    UPDATE tournament_matches
-                    SET player2_id = ?, room_code = ?, status = 'READY'
-                    WHERE id = ?
-                """, (winner_of_r1, room_code, r2_match["id"]))
-        else:
-            # Standard single elimination bracket advancement (4, 8, 16)
-            num_next_matches = len(round_winners) // 2
-            for m_idx in range(num_next_matches):
-                p1_id = round_winners[m_idx * 2]
-                p2_id = round_winners[m_idx * 2 + 1] if (m_idx * 2 + 1) < len(round_winners) else None
-                match_id = f"m_{tournament_id}_r{next_round}_{m_idx}"
+                INSERT INTO tournament_matches (
+                    id, tournament_id, round_number, match_index,
+                    player1_id, player2_id, room_code, status
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """, (match_id, tournament_id, next_round, m_idx, p1_id, p2_id, room_code, status))
 
-                room_code = None
-                status = "PENDING"
-                if p1_id and p2_id:
-                    room_code = create_match_room_helper(cursor, t, p1_id, p2_id, next_round, m_idx)
-                    status = "READY"
+        # Auto-advance if all matches in new round are completed
+        check_and_advance_tournament_round(cursor, tournament_id)
 
-                cursor.execute("""
-                    INSERT INTO tournament_matches (
-                        id, tournament_id, round_number, match_index,
-                        player1_id, player2_id, room_code, status
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                """, (match_id, tournament_id, next_round, m_idx, p1_id, p2_id, room_code, status))
 
-            # Auto-advance if all matches in new round are completed
-            check_and_advance_tournament_round(cursor, tournament_id)
+@router.get("/{tournament_id}/standings")
+def get_tournament_standings_endpoint(tournament_id: str):
+    """Returns real-time isolated points table, score differentials, and tiebreaker statuses."""
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute("SELECT id FROM tournaments WHERE id = ?", (tournament_id,))
+    if not c.fetchone():
+        conn.close()
+        raise HTTPException(status_code=404, detail="Tournament not found.")
+    data = calculate_tournament_standings(c, tournament_id)
+    conn.close()
+    return data

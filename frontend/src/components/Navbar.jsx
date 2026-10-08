@@ -21,7 +21,8 @@ import {
   Compass,
   Clock,
   ShieldAlert,
-  Settings
+  Settings,
+  Crosshair
 } from 'lucide-react';
 import { sound } from '../utils/sound';
 import { api } from '../utils/api';
@@ -73,6 +74,7 @@ export default function Navbar({
   const navItems = [
     { id: 'arena', label: 'Arena & Duels', icon: Swords },
     { id: 'adaptive', label: 'Adaptive AI', icon: Brain },
+    { id: 'mastery', label: 'Chapter Mastery', icon: Crosshair },
     { id: 'skills', label: 'Skill Tree', icon: Compass },
     { id: 'mocks', label: 'NTA Mocks', icon: BookOpen },
     { id: 'history', label: 'Test History', icon: Clock },
@@ -195,11 +197,24 @@ export default function Navbar({
               </div>
               {!isCollapsed && (
                 <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-1.5">
-                    <span className="text-xs font-bold text-white truncate max-w-[95px]">{user.username}</span>
-                    <span className={`text-[8px] font-extrabold px-1 py-0.2 rounded border ${divStyle}`}>
-                      {user.current_division}
-                    </span>
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      <span className="text-xs font-bold text-white truncate max-w-[90px]">{user.username}</span>
+                      <span className={`text-[8px] font-extrabold px-1 py-0.2 rounded border ${divStyle}`}>
+                        {user.current_division}
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (onOpenAuth) onOpenAuth();
+                      }}
+                      title="Switch / Change Account"
+                      className="text-[9px] text-orange-300 hover:text-white px-1.5 py-0.5 rounded bg-orange-950/80 hover:bg-orange-600/50 border border-orange-500/30 transition cursor-pointer font-bold shrink-0"
+                    >
+                      Switch
+                    </button>
                   </div>
                   <div className="text-[10px] text-slate-400 font-mono">
                     <span className="text-orange-400 font-bold">{Math.round(user.overall_elo)}</span> Elo •{' '}

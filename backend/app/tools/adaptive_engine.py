@@ -139,6 +139,24 @@ def select_next_adaptive_question(
     from backend.app.tools.jee_syllabus import expand_allowed_chapters, normalize_chapter_name
     effective_allowed = expand_allowed_chapters(allowed_chapters) if allowed_chapters else None
 
+    # Check for Due Spaced Repetition questions (interleaving spaced retrieval)
+    if len(seen) > 0 and len(seen) % 3 == 0:
+        try:
+            from backend.app.tools.fsrs_engine import find_due_fsrs_question
+            due_q = find_due_fsrs_question(cursor, user_id, subject, effective_allowed)
+            if due_q and due_q.get("id") not in seen:
+                metadata = {
+                    "target_elo": round(float(due_q.get("elo_rating") or 1500), 1),
+                    "question_elo": float(due_q.get("elo_rating") or 1500),
+                    "is_revenge": False,
+                    "is_remediation": False,
+                    "is_fsrs_due": True,
+                    "tier_label": "SPACED_MEMORY_REINFORCEMENT"
+                }
+                return due_q, metadata
+        except Exception:
+            pass
+
     if subject and subject != "Full Syllabus":
         base_query += " AND subject = ?"
         params.append(subject)
@@ -367,7 +385,24 @@ def apply_adaptive_result_to_profile(
         ) VALUES (?, ?, ?, ?, ?, ?, ?, 'ADAPTIVE', ?)
     """, (user_id, q_id, subj, chap, 1 if is_correct else 0, time_spent, elo_delta, now))
 
-    # 4. Log progression to user_rank_history
+    from backend.app.tools.elo_engine import record_chapter_attempt
+    record_chapter_attempt(cursor, user_id, subj, chap, is_correct, elo_delta)
+
+    # 4. Update Implicit Cognitive FSRS Spaced Memory
+    try:
+        from backend.app.tools.fsrs_engine import process_question_fsrs
+        process_question_fsrs(
+            cursor=cursor,
+            user_id=user_id,
+            question=question,
+            is_correct=is_correct,
+            user_choice=question.get("user_choice"),
+            time_spent=time_spent
+        )
+    except Exception:
+        pass
+
+    # 5. Log progression to user_rank_history
     cursor.execute("SELECT overall_elo FROM users WHERE id = ?", (user_id,))
     u_row = cursor.fetchone()
     if u_row:

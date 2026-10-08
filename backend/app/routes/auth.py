@@ -113,7 +113,11 @@ def format_user_profile(user: dict, cursor=None) -> UserProfile:
 @router.post("/register", response_model=AuthResponse)
 def register(req: UserRegisterRequest):
     username = req.username.strip()
-    if get_user_by_username(username):
+    existing = get_user_by_username(username)
+    if existing:
+        if verify_pin(req.pin, existing["pin_hash"]):
+            token = create_access_token(existing["id"], existing["username"], existing["pin_hash"])
+            return AuthResponse(token=token, user=format_user_profile(existing))
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Username '{username}' is already taken. Please choose another nickname."
@@ -144,7 +148,7 @@ def register(req: UserRegisterRequest):
     conn.close()
 
     user = get_user_by_id(user_id)
-    token = create_access_token(user_id, username)
+    token = create_access_token(user_id, username, pin_hashed)
     return AuthResponse(token=token, user=format_user_profile(user))
 
 
@@ -152,7 +156,26 @@ def register(req: UserRegisterRequest):
 def login(req: UserLoginRequest):
     username = req.username.strip()
     user = get_user_by_username(username)
-    if not user or not verify_pin(req.pin, user["pin_hash"]):
+    if not user:
+        # Self-healing provision for container cold restarts / ephemeral wipes
+        user_id = str(uuid.uuid4())
+        pin_hashed = hash_pin(req.pin)
+        now = datetime.datetime.utcnow().isoformat()
+        conn = get_connection()
+        c = conn.cursor()
+        c.execute("""
+            INSERT INTO users (
+                id, username, pin_hash, avatar_id, title,
+                overall_elo, physics_elo, chemistry_elo, math_elo,
+                current_division, weekly_rp, total_solved, total_correct,
+                gold_medals, silver_medals, bronze_medals,
+                chapter_stats, created_at, last_active
+            ) VALUES (?, ?, ?, 'flame', 'JEE Aspirant', 1200.0, 1200.0, 1200.0, 1200.0, 'BRONZE', 0, 0, 0, 0, 0, 0, '{}', ?, ?)
+        """, (user_id, username, pin_hashed, now, now))
+        conn.commit()
+        conn.close()
+        user = get_user_by_id(user_id)
+    elif not verify_pin(req.pin, user["pin_hash"]):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect username or PIN."
@@ -166,7 +189,7 @@ def login(req: UserLoginRequest):
     conn.commit()
     conn.close()
 
-    token = create_access_token(user["id"], user["username"])
+    token = create_access_token(user["id"], user["username"], user["pin_hash"])
     return AuthResponse(token=token, user=format_user_profile(user))
 
 
@@ -273,7 +296,7 @@ def change_username(req: ChangeUsernameRequest, user: dict = Depends(get_current
     conn.close()
 
     updated = get_user_by_id(user["id"])
-    new_token = create_access_token(user["id"], new_username)
+    new_token = create_access_token(user["id"], new_username, user.get("pin_hash"))
     return {
         "message": f"Callsign updated to {new_username}",
         "token": new_token,
@@ -292,10 +315,10 @@ def change_pin(req: ChangePinRequest, user: dict = Depends(get_current_user)):
             detail="Current PIN is incorrect. Verification failed."
         )
 
-    if len(new_pin) < 4 or len(new_pin) > 6 or not new_pin.isdigit():
+    if len(new_pin) < 4 or len(new_pin) > 32:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="New PIN must be 4 to 6 numeric digits."
+            detail="New PIN must be 4 to 32 characters."
         )
 
     pin_hashed = hash_pin(new_pin)
@@ -305,7 +328,13 @@ def change_pin(req: ChangePinRequest, user: dict = Depends(get_current_user)):
     conn.commit()
     conn.close()
 
-    return {"message": "Security PIN successfully updated."}
+    updated = get_user_by_id(user["id"])
+    new_token = create_access_token(user["id"], user["username"], pin_hashed)
+    return {
+        "message": "Security PIN successfully updated.",
+        "token": new_token,
+        "user": format_user_profile(updated)
+    }
 
 
 @router.post("/chat-settings", response_model=UserProfile)

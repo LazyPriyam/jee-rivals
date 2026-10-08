@@ -245,13 +245,27 @@ def create_room(req: RoomCreateRequest, user: dict = Depends(get_current_user)):
     conn = get_connection()
     c = conn.cursor()
 
-    # Determine multi-subject & multi-chapter filters
-    filter_subjects = req.subjects or ([req.subject] if req.subject and req.subject.lower() not in ("all", "any") else [])
-    filter_chapters = req.chapters or ([req.chapter] if req.chapter and req.chapter.lower() not in ("all", "any") else [])
+    # Explicit question IDs specified (e.g. Graveyard Re-Duel or Curated Sets)
+    if req.question_ids and len(req.question_ids) > 0:
+        placeholders = ",".join("?" for _ in req.question_ids)
+        c.execute(f"SELECT * FROM questions WHERE id IN ({placeholders})", req.question_ids)
+        candidate_rows = [dict(r) for r in c.fetchall()]
+        verified_rows = []
+        for cand in candidate_rows:
+            is_valid, healed_q, _ = audit_and_heal_question(cand)
+            if is_valid and healed_q:
+                verified_rows.append(healed_q)
+            else:
+                verified_rows.append(cand)
+        selected_rows = verified_rows
+    else:
+        # Determine multi-subject & multi-chapter filters
+        filter_subjects = req.subjects or ([req.subject] if req.subject and req.subject.lower() not in ("all", "any") else [])
+        filter_chapters = req.chapters or ([req.chapter] if req.chapter and req.chapter.lower() not in ("all", "any") else [])
 
-    base_where = "solution_text IS NOT NULL AND solution_text != '' AND (validation_status IS NULL OR validation_status != 'QUARANTINED')"
-    q_query = f"SELECT * FROM questions WHERE {base_where}"
-    params = []
+        base_where = "solution_text IS NOT NULL AND solution_text != '' AND (validation_status IS NULL OR validation_status != 'QUARANTINED')"
+        q_query = f"SELECT * FROM questions WHERE {base_where}"
+        params = []
 
     if filter_subjects:
         placeholders = ",".join("?" for _ in filter_subjects)
@@ -304,60 +318,63 @@ def create_room(req: RoomCreateRequest, user: dict = Depends(get_current_user)):
             q_query += " AND UPPER(question_type) = UPPER(?)"
             params.append(req.question_type_filter)
 
-    target_count = max(3, min(req.question_count, 75))
-    oversample_limit = min(target_count * 3, 200)
+    if req.question_ids and len(req.question_ids) > 0:
+        verified_rows = selected_rows
+    else:
+        target_count = max(3, min(req.question_count, 75))
+        oversample_limit = min(target_count * 3, 200)
 
-    q_query += " ORDER BY RANDOM() LIMIT ?"
-    params.append(oversample_limit)
+        q_query += " ORDER BY RANDOM() LIMIT ?"
+        params.append(oversample_limit)
 
-    c.execute(q_query, params)
-    candidate_rows = [dict(r) for r in c.fetchall()]
-
-    verified_rows = []
-    for cand in candidate_rows:
-        is_valid, healed_q, _ = audit_and_heal_question(cand)
-        if is_valid and healed_q:
-            verified_rows.append(healed_q)
-            if len(verified_rows) >= target_count:
-                break
-
-    # Fallback pool if filter results are sparse
-    if len(verified_rows) < 3:
-        fallback_query = f"SELECT * FROM questions WHERE {base_where}"
-        fb_params = []
-        if filter_subjects:
-            placeholders = ",".join("?" for _ in filter_subjects)
-            fallback_query += f" AND LOWER(subject) IN ({placeholders})"
-            fb_params.extend([s.lower() for s in filter_subjects])
-        if filter_chapters:
-            placeholders = ",".join("?" for _ in filter_chapters)
-            fallback_query += f" AND LOWER(chapter) IN ({placeholders})"
-            fb_params.extend([ch.lower() for ch in filter_chapters])
-        fallback_query += " ORDER BY RANDOM() LIMIT ?"
-        fb_params.append(oversample_limit)
-
-        c.execute(fallback_query, fb_params)
+        c.execute(q_query, params)
         candidate_rows = [dict(r) for r in c.fetchall()]
+
+        verified_rows = []
         for cand in candidate_rows:
-            if any(cand["id"] == vr["id"] for vr in verified_rows):
-                continue
             is_valid, healed_q, _ = audit_and_heal_question(cand)
             if is_valid and healed_q:
                 verified_rows.append(healed_q)
                 if len(verified_rows) >= target_count:
                     break
 
-    if len(verified_rows) < 3:
-        c.execute(f"SELECT * FROM questions WHERE {base_where} ORDER BY RANDOM() LIMIT ?", (oversample_limit,))
-        candidate_rows = [dict(r) for r in c.fetchall()]
-        for cand in candidate_rows:
-            if any(cand["id"] == vr["id"] for vr in verified_rows):
-                continue
-            is_valid, healed_q, _ = audit_and_heal_question(cand)
-            if is_valid and healed_q:
-                verified_rows.append(healed_q)
-                if len(verified_rows) >= target_count:
-                    break
+        # Fallback pool if filter results are sparse
+        if len(verified_rows) < 3:
+            fallback_query = f"SELECT * FROM questions WHERE {base_where}"
+            fb_params = []
+            if filter_subjects:
+                placeholders = ",".join("?" for _ in filter_subjects)
+                fallback_query += f" AND LOWER(subject) IN ({placeholders})"
+                fb_params.extend([s.lower() for s in filter_subjects])
+            if filter_chapters:
+                placeholders = ",".join("?" for _ in filter_chapters)
+                fallback_query += f" AND LOWER(chapter) IN ({placeholders})"
+                fb_params.extend([ch.lower() for ch in filter_chapters])
+            fallback_query += " ORDER BY RANDOM() LIMIT ?"
+            fb_params.append(oversample_limit)
+
+            c.execute(fallback_query, fb_params)
+            candidate_rows = [dict(r) for r in c.fetchall()]
+            for cand in candidate_rows:
+                if any(cand["id"] == vr["id"] for vr in verified_rows):
+                    continue
+                is_valid, healed_q, _ = audit_and_heal_question(cand)
+                if is_valid and healed_q:
+                    verified_rows.append(healed_q)
+                    if len(verified_rows) >= target_count:
+                        break
+
+        if len(verified_rows) < 3:
+            c.execute(f"SELECT * FROM questions WHERE {base_where} ORDER BY RANDOM() LIMIT ?", (oversample_limit,))
+            candidate_rows = [dict(r) for r in c.fetchall()]
+            for cand in candidate_rows:
+                if any(cand["id"] == vr["id"] for vr in verified_rows):
+                    continue
+                is_valid, healed_q, _ = audit_and_heal_question(cand)
+                if is_valid and healed_q:
+                    verified_rows.append(healed_q)
+                    if len(verified_rows) >= target_count:
+                        break
 
     q_rows = verified_rows
 
@@ -985,6 +1002,8 @@ async def submit_bulk_mock(code: str, req: BulkSubmissionRequest, user: dict = D
                 INSERT INTO activity_log (user_id, question_id, subject, chapter, is_correct, time_spent_seconds, elo_delta, mode, created_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (user["id"], q["id"], q["subject"], q["chapter"], 1 if is_corr else 0, time_per_item, q_elo_delta, room["mode"], now))
+            from backend.app.tools.elo_engine import record_chapter_attempt
+            record_chapter_attempt(c, user["id"], q["subject"], q["chapter"], is_corr)
 
         total_score += delta_score
         total_marks += delta_marks
@@ -1228,6 +1247,8 @@ async def submit_answer(code: str, submission: AnswerSubmissionRequest, user: di
         INSERT INTO activity_log (user_id, question_id, subject, chapter, is_correct, time_spent_seconds, elo_delta, mode, created_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, (user["id"], q["id"], q["subject"], q["chapter"], 1 if is_correct else 0, time_spent, q_elo_delta, room["mode"], now))
+    from backend.app.tools.elo_engine import record_chapter_attempt
+    record_chapter_attempt(c, user["id"], q["subject"], q["chapter"], is_correct)
 
     c.execute("SELECT COUNT(*) as unfinished FROM room_participants WHERE room_id = ? AND is_finished = 0", (room_id,))
     unfinished_count = c.fetchone()["unfinished"]
@@ -1283,14 +1304,18 @@ async def submit_answer(code: str, submission: AnswerSubmissionRequest, user: di
                     if tm_row:
                         p1_s = next((p["score"] for p in finished_parts if p["user_id"] == tm_row["player1_id"]), 0)
                         p2_s = next((p["score"] for p in finished_parts if p["user_id"] == tm_row["player2_id"]), 0)
+                        p1_m = next((p.get("marks") for p in finished_parts if p["user_id"] == tm_row["player1_id"]), float(p1_s))
+                        p2_m = next((p.get("marks") for p in finished_parts if p["user_id"] == tm_row["player2_id"]), float(p2_s))
                     else:
                         p1_s = finished_parts[0]["score"] if finished_parts else 0
                         p2_s = finished_parts[1]["score"] if len(finished_parts) > 1 else 0
+                        p1_m = finished_parts[0].get("marks") if finished_parts else 0.0
+                        p2_m = finished_parts[1].get("marks") if len(finished_parts) > 1 else 0.0
                     c.execute("""
                         UPDATE tournament_matches
-                        SET status = 'COMPLETED', winner_id = ?, player1_score = ?, player2_score = ?, completed_at = ?
+                        SET status = 'COMPLETED', winner_id = ?, player1_score = ?, player2_score = ?, player1_marks = ?, player2_marks = ?, completed_at = ?
                         WHERE tournament_id = ? AND room_code = ?
-                    """, (win_uid, p1_s, p2_s, now, t_id, code))
+                    """, (win_uid, p1_s, p2_s, p1_m, p2_m, now, t_id, code))
                     check_and_advance_tournament_round(c, t_id)
                 except Exception as e:
                     print(f"[TOURNAMENT] Error advancing tournament match: {e}")

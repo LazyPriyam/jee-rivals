@@ -394,16 +394,79 @@ def init_db():
         except Exception:
             pass
 
+    # Tournament 3-Player League & Points System Migrations
+    for col, default_val in [
+        ("series_cycles", "INTEGER DEFAULT 1"),
+    ]:
+        try:
+            cursor.execute(f"ALTER TABLE tournaments ADD COLUMN {col} {default_val};")
+        except Exception:
+            pass
+
+    for col, default_val in [
+        ("cycle_index", "INTEGER DEFAULT 1"),
+        ("player1_marks", "REAL DEFAULT 0.0"),
+        ("player2_marks", "REAL DEFAULT 0.0"),
+        ("is_tiebreaker", "INTEGER DEFAULT 0"),
+    ]:
+        try:
+            cursor.execute(f"ALTER TABLE tournament_matches ADD COLUMN {col} {default_val};")
+        except Exception:
+            pass
+
+    # Question metadata migrations (source_book for Olympiad/Pathfinder tracking)
     try:
-        cursor.execute("ALTER TABLE adaptive_sessions ADD COLUMN allowed_chapters TEXT;")
+        cursor.execute("ALTER TABLE questions ADD COLUMN source_book TEXT;")
     except Exception:
         pass
 
-    try:
-        from backend.app.tools.elo_engine import reseed_questions_gradient
-        reseed_questions_gradient(cursor)
-    except Exception:
-        pass
+    # User 59-Chapter Independent Elo Ratings Table
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS user_chapter_elo (
+        user_id TEXT NOT NULL,
+        subject TEXT NOT NULL,
+        chapter TEXT NOT NULL,
+        elo REAL DEFAULT 1200.0,
+        attempts INTEGER DEFAULT 0,
+        correct INTEGER DEFAULT 0,
+        last_updated TEXT,
+        PRIMARY KEY (user_id, chapter)
+    );
+    """)
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_user_chap_elo_user ON user_chapter_elo(user_id);")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_user_chap_elo_chap ON user_chapter_elo(chapter);")
+
+    # Implicit Hybrid Cognitive FSRS States Table
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS user_fsrs_states (
+        user_id TEXT NOT NULL,
+        question_id TEXT NOT NULL,
+        chapter TEXT NOT NULL,
+        stability REAL DEFAULT 2.0,
+        difficulty REAL DEFAULT 5.0,
+        retrievability REAL DEFAULT 1.0,
+        reps INTEGER DEFAULT 0,
+        lapses INTEGER DEFAULT 0,
+        last_grade INTEGER DEFAULT 3,
+        error_archetype TEXT,
+        last_reviewed TEXT,
+        due_date TEXT,
+        PRIMARY KEY (user_id, question_id)
+    );
+    """)
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_fsrs_user_due ON user_fsrs_states(user_id, due_date);")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_fsrs_user_chap ON user_fsrs_states(user_id, chapter);")
+
+    # Question Bookmarks Table (for Error Log Graveyard)
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS question_bookmarks (
+        user_id TEXT NOT NULL,
+        question_id TEXT NOT NULL,
+        notes TEXT DEFAULT '',
+        created_at TEXT,
+        PRIMARY KEY (user_id, question_id)
+    );
+    """)
 
     conn.commit()
     conn.close()

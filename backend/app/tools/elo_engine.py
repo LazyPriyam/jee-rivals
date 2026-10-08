@@ -20,7 +20,7 @@ MIN_GENUINE_ENGAGEMENT_SECONDS = {
 QUESTION_K_FACTOR = 2.0  # Ultra-gentle K-factor ensures questions act as stable rating anchors
 MAX_QUESTION_DELTA_PER_ATTEMPT = 1.5  # Hard ceiling on single-attempt question movement
 MIN_QUESTION_ELO = 1000.0
-MAX_QUESTION_ELO = 2450.0
+MAX_QUESTION_ELO = 3000.0
 
 PLAYER_SOLO_K_FACTOR = 24.0  # K-factor for solo mock/practice matches
 
@@ -33,14 +33,34 @@ def get_min_engagement_seconds(question_type: str) -> int:
 
 def compute_seed_elo(q_id: str, exam: Optional[str], diff: Optional[str], q_type: Optional[str]) -> int:
     """
-    Computes an organic, continuous initial Elo rating (1150 - 2350)
-    reflecting actual JEE Main vs Advanced standards and question formats.
+    Computes an organic, continuous initial Elo rating:
+    - JEE Main: 1200 - 1800
+    - JEE Advanced: 1800 - 2400
+    - Olympiad (INPhO, Pathfinder, Irodov): 2400 - 3000
+    - Mixed: 1600 - 2200
     """
     exam_str = (exam or "JEE_MAIN").upper()
     diff_str = (diff or "MEDIUM").upper()
     type_str = (q_type or "SINGLE_CHOICE").upper()
 
-    if exam_str == "JEE_ADVANCED":
+    if exam_str == "OLYMPIAD":
+        if diff_str == "HARD":
+            if type_str in ("MULTIPLE_CHOICE", "MATRIX_MATCH", "COMPREHENSION"):
+                base = 2860
+            elif type_str in ("NUMERICAL", "SUBJECTIVE"):
+                base = 2780
+            else:
+                base = 2720
+        elif diff_str == "MEDIUM":
+            if type_str in ("MULTIPLE_CHOICE", "MATRIX_MATCH"):
+                base = 2640
+            elif type_str in ("NUMERICAL", "COMPREHENSION", "SUBJECTIVE"):
+                base = 2580
+            else:
+                base = 2520
+        else:  # EASY
+            base = 2420
+    elif exam_str == "JEE_ADVANCED":
         if diff_str == "HARD":
             if type_str in ("MULTIPLE_CHOICE", "MATRIX_MATCH"):
                 base = 2220
@@ -60,6 +80,13 @@ def compute_seed_elo(q_id: str, exam: Optional[str], diff: Optional[str], q_type
                 base = 1620
             else:
                 base = 1520
+    elif exam_str == "MIXED":
+        if diff_str == "HARD":
+            base = 2050
+        elif diff_str == "MEDIUM":
+            base = 1780
+        else:
+            base = 1550
     else:  # JEE_MAIN
         if diff_str == "HARD":
             if type_str in ("NUMERICAL", "SUBJECTIVE", "MATRIX_MATCH"):
@@ -347,33 +374,33 @@ def compute_two_factor_air_bracket(
 
     # Case 1: Under 3 chapters
     if active_chapters_count < 3:
-        bracket = f"Foundation Aspirant ({coverage_pct}% Syllabus • Skill {int(elo)})"
+        bracket = f"Foundation Aspirant ({coverage_pct}% Syllabus | Skill {int(elo)})"
         gate = "Attempt at least 3 distinct chapters to establish initial All India Rank forecast."
         return bracket, gate, speed_p
 
     # Case 2: Early Specialist (< 20% coverage, under 12 chapters)
     if coverage_ratio < 0.20:
-        bracket = f"Chapter Specialist ({coverage_pct}% Syllabus • Skill {int(elo)})"
+        bracket = f"Chapter Specialist ({coverage_pct}% Syllabus | Skill {int(elo)})"
         gate = f"Explore at least 12 chapters (20% syllabus) to qualify for JEE Main Cutoff rank."
         return bracket, gate, speed_p
 
     # Case 3: 20% to 38% coverage (12 to 22 chapters)
     if coverage_ratio < 0.38:
         if elo >= 1300:
-            bracket = f"AIR 25,000 - 50,000 (Mains Cutoff • {coverage_pct}% Syllabus)"
+            bracket = f"AIR 25,000 - 50,000 (Mains Cutoff | {coverage_pct}% Syllabus)"
             gate = "Expand syllabus to 38%+ (23+ chapters) across PCM to unlock Top NITs rank prediction."
         else:
-            bracket = f"Aspirant (Building Foundation • {coverage_pct}% Syllabus)"
+            bracket = f"Aspirant (Building Foundation | {coverage_pct}% Syllabus)"
             gate = "Raise competitive Elo to 1300+ and cover 23+ chapters."
         return bracket, gate, speed_p
 
     # Case 4: 38% to 58% coverage (23 to 34 chapters)
     if coverage_ratio < 0.58:
         if elo >= 1450:
-            bracket = f"AIR 5,000 - 15,000 (Top NITs / IIITs • {coverage_pct}% Syllabus)"
+            bracket = f"AIR 5,000 - 15,000 (Top NITs / IIITs | {coverage_pct}% Syllabus)"
             gate = "Cover 35+ chapters (58%+ syllabus) across all 3 subjects to unlock IIT Core rank."
         elif elo >= 1300:
-            bracket = f"AIR 15,000 - 35,000 (JEE Mains Qualified • {coverage_pct}% Syllabus)"
+            bracket = f"AIR 15,000 - 35,000 (JEE Mains Qualified | {coverage_pct}% Syllabus)"
             gate = "Raise Elo to 1450+ or expand syllabus to 35+ chapters."
         else:
             bracket = f"Aspirant ({coverage_pct}% Syllabus)"
@@ -384,13 +411,13 @@ def compute_two_factor_air_bracket(
     if coverage_ratio < 0.75:
         if elo >= 1650:
             if active_subjects_count >= 2:
-                bracket = f"AIR 1,500 - 5,000 (IIT Core Branches • {coverage_pct}% Syllabus)"
+                bracket = f"AIR 1,500 - 5,000 (IIT Core Branches | {coverage_pct}% Syllabus)"
                 gate = "Cover 45+ chapters (75%+ syllabus) across all 3 subjects to unlock Top IITian rank (< 1500)."
             else:
-                bracket = f"Single-Subject Specialist (Skill {int(elo)} • {coverage_pct}% Syllabus)"
+                bracket = f"Single-Subject Specialist (Skill {int(elo)} | {coverage_pct}% Syllabus)"
                 gate = "Attempt chapters in all 3 subjects (Physics, Chemistry, Math) to unlock IIT Core prediction."
         elif elo >= 1450:
-            bracket = f"AIR 5,000 - 15,000 (Top NITs / IIITs • {coverage_pct}% Syllabus)"
+            bracket = f"AIR 5,000 - 15,000 (Top NITs / IIITs | {coverage_pct}% Syllabus)"
             gate = "Raise overall Elo to 1650+ to unlock IIT Core rank."
         else:
             bracket = f"JEE Mains Qualified ({coverage_pct}% Syllabus)"
@@ -400,37 +427,37 @@ def compute_two_factor_air_bracket(
     # Case 6: 75% to 88% coverage (45 to 51 chapters)
     if coverage_ratio < 0.88:
         if active_subjects_count < 3:
-            bracket = f"AIR 1,500 - 5,000 (Syllabus Imbalance • {coverage_pct}%)"
+            bracket = f"AIR 1,500 - 5,000 (Syllabus Imbalance | {coverage_pct}%)"
             gate = "Study all 3 PCM subjects to unlock Top Tier IITian status."
         elif elo >= 1800:
-            bracket = f"AIR 250 - 1,500 (Top Tier IITian • {coverage_pct}% Syllabus)"
+            bracket = f"AIR 250 - 1,500 (Top Tier IITian | {coverage_pct}% Syllabus)"
             gate = "Cover 52+ chapters (88%+ syllabus) and 1950+ Elo for Super 30 Elite (< 250)."
         elif elo >= 1650:
-            bracket = f"AIR 1,500 - 5,000 (IIT Core Branches • {coverage_pct}% Syllabus)"
+            bracket = f"AIR 1,500 - 5,000 (IIT Core Branches | {coverage_pct}% Syllabus)"
             gate = "Raise Elo to 1800+ for Top Tier IITian (< 1500)."
         else:
-            bracket = f"AIR 5,000 - 15,000 (Top NITs • {coverage_pct}% Syllabus)"
+            bracket = f"AIR 5,000 - 15,000 (Top NITs | {coverage_pct}% Syllabus)"
             gate = "Raise Elo to 1650+."
         return bracket, gate, speed_p
 
     # Case 7: High Coverage (>= 88% coverage, 52+ chapters across PCM)
     if active_subjects_count < 3:
-        bracket = f"AIR 250 - 1,500 (Unbalanced PCM • {coverage_pct}%)"
+        bracket = f"AIR 250 - 1,500 (Unbalanced PCM | {coverage_pct}%)"
         gate = "Engage all 3 subjects for AIR < 250."
     elif elo >= 2100:
         bracket = "AIR 1 - 50 (Presidential Gold / IIT Bombay CS)"
         gate = "Apex All India Rank achieved! Defend your ladder standing."
     elif elo >= 1950:
-        bracket = f"AIR 50 - 250 (Super 30 / Top IITs CS • {coverage_pct}% Syllabus)"
+        bracket = f"AIR 50 - 250 (Super 30 / Top IITs CS | {coverage_pct}% Syllabus)"
         gate = "Push overall Elo above 2100 for Presidential Gold (AIR 1 - 50)."
     elif elo >= 1800:
-        bracket = f"AIR 250 - 1,500 (Top Tier IITian • {coverage_pct}% Syllabus)"
+        bracket = f"AIR 250 - 1,500 (Top Tier IITian | {coverage_pct}% Syllabus)"
         gate = "Reach 1950+ Elo for Super 30 (AIR < 250)."
     elif elo >= 1650:
-        bracket = f"AIR 1,500 - 5,000 (IIT Core Branches • {coverage_pct}% Syllabus)"
+        bracket = f"AIR 1,500 - 5,000 (IIT Core Branches | {coverage_pct}% Syllabus)"
         gate = "Reach 1800+ Elo for Top Tier IITian."
     else:
-        bracket = f"AIR 5,000 - 15,000 (Top NITs • {coverage_pct}% Syllabus)"
+        bracket = f"AIR 5,000 - 15,000 (Top NITs | {coverage_pct}% Syllabus)"
         gate = "Reach 1650+ Elo for IIT Core Branches."
 
     return bracket, gate, speed_p
@@ -513,4 +540,55 @@ def apply_match_elo_to_user(
     """, (user_id, round(new_overall, 1), air_bracket, now_iso[:10]))
 
     return overall_delta, raw_delta, reason
+
+
+def record_chapter_attempt(
+    cursor: sqlite3.Cursor,
+    user_id: str,
+    subject: str,
+    chapter: str,
+    is_correct: bool,
+    elo_delta: Optional[float] = None
+) -> float:
+    """
+    Updates the 59-chapter independent Elo rating, attempts count, and accuracy
+    in the `user_chapter_elo` table for the specified user and chapter.
+    """
+    from backend.app.tools.jee_syllabus import normalize_chapter_name
+    canonical_chapter = normalize_chapter_name(chapter)
+    now_iso = datetime.datetime.utcnow().isoformat()
+
+    cursor.execute("""
+        SELECT elo, attempts, correct FROM user_chapter_elo
+        WHERE user_id = ? AND chapter = ?
+    """, (user_id, canonical_chapter))
+    row = cursor.fetchone()
+
+    if row:
+        cur_elo = float(row["elo"] or 1200.0)
+        attempts = int(row["attempts"] or 0) + 1
+        correct = int(row["correct"] or 0) + (1 if is_correct else 0)
+    else:
+        cur_elo = 1200.0
+        attempts = 1
+        correct = 1 if is_correct else 0
+
+    if elo_delta is not None:
+        delta = elo_delta
+    else:
+        delta = 16.0 if is_correct else -12.0
+
+    new_elo = max(600.0, min(3000.0, cur_elo + delta))
+
+    cursor.execute("""
+        INSERT INTO user_chapter_elo (user_id, subject, chapter, elo, attempts, correct, last_updated)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(user_id, chapter) DO UPDATE SET
+            elo = excluded.elo,
+            attempts = excluded.attempts,
+            correct = excluded.correct,
+            last_updated = excluded.last_updated
+    """, (user_id, subject, canonical_chapter, round(new_elo, 1), attempts, correct, now_iso))
+
+    return new_elo
 

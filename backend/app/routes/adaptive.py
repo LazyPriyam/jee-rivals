@@ -220,6 +220,7 @@ def submit_adaptive_answer(
     new_session_elo = max(1000.0, min(2600.0, current_session_elo + elo_delta))
 
     # 4. Apply permanent user profile updates
+    q["user_choice"] = req.submitted_answer
     apply_adaptive_result_to_profile(
         cursor=c,
         user_id=user["id"],

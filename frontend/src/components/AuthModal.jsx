@@ -90,6 +90,45 @@ export default function AuthModal({ isOpen, onClose, onSuccess }) {
     setError('');
   };
 
+  const handleQuickEnterSavedAccount = async (acc) => {
+    if (!acc) return;
+    setLoading(true);
+    setError('');
+    try {
+      // 1. Try with active session token first
+      if (acc.token) {
+        setToken(acc.token, true);
+        try {
+          const me = await api.auth.getMe();
+          setCachedUser(me);
+          recordSavedAccount(me, acc.token, acc.pin);
+          onSuccess(me);
+          if (onClose) onClose();
+          return;
+        } catch (_) {
+          // Token expired, fall through to PIN auto-refresh
+        }
+      }
+
+      // 2. Try with saved PIN if token failed or was missing
+      if (acc.pin) {
+        const resp = await api.auth.login(acc.username, acc.pin);
+        setToken(resp.token, true);
+        setCachedUser(resp.user);
+        recordSavedAccount(resp.user, resp.token, acc.pin);
+        onSuccess(resp.user);
+        if (onClose) onClose();
+        return;
+      }
+    } catch (err) {
+      setError(err.message || 'Auto sign-in failed. Please enter your PIN manually.');
+    } finally {
+      setLoading(false);
+    }
+
+    handleSelectSavedAccount(acc);
+  };
+
   const handleRemoveSavedAccount = (e, accUsername) => {
     e.stopPropagation();
     removeSavedAccount(accUsername);
@@ -112,7 +151,7 @@ export default function AuthModal({ isOpen, onClose, onSuccess }) {
       return;
     }
     if (cleanPin.length < 4) {
-      setError('PIN must be at least 4 digits.');
+      setError('PIN must be at least 4 characters.');
       return;
     }
 
@@ -132,16 +171,14 @@ export default function AuthModal({ isOpen, onClose, onSuccess }) {
       // Cache user profile for immediate offline & refresh restore
       setCachedUser(resp.user);
 
-      // Save account to persistent device list if Remember Me is active
-      if (rememberMe) {
-        recordSavedAccount(resp.user);
-        try {
-          localStorage.setItem('jee_saved_username', cleanUser);
-        } catch (_) {}
-      }
+      // Save account to persistent device list with active token and PIN
+      recordSavedAccount(resp.user, resp.token, rememberMe ? cleanPin : null);
+      try {
+        localStorage.setItem('jee_saved_username', cleanUser);
+      } catch (_) {}
 
       onSuccess(resp.user);
-      onClose();
+      if (onClose) onClose();
     } catch (err) {
       setError(err.message || 'Authentication failed. Please verify your callsign and PIN.');
     } finally {
@@ -179,7 +216,7 @@ export default function AuthModal({ isOpen, onClose, onSuccess }) {
             {isRegister ? 'Create Challenger Profile' : 'Enter JEE Rivals Arena'}
           </h2>
           <p className="text-xs text-slate-400 mt-1">
-            Zero friction PIN sign-in. Permanent stats, rankings & Elo tracking.
+            Zero friction sign-in. Permanent stats, rankings & Elo tracking.
           </p>
         </div>
 
@@ -192,39 +229,63 @@ export default function AuthModal({ isOpen, onClose, onSuccess }) {
 
         {/* Saved Accounts Quick Selector */}
         {savedAccounts.length > 0 && !isRegister && (
-          <div className="mb-5 p-3 rounded-2xl bg-[#1b212f] border border-white/10">
-            <div className="flex items-center justify-between mb-2">
+          <div className="mb-5 p-3 rounded-2xl bg-[#1b212f] border border-white/10 space-y-2">
+            <div className="flex items-center justify-between">
               <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
-                <User className="w-3.5 h-3.5 text-orange-400" /> Saved on this device
+                <User className="w-3.5 h-3.5 text-orange-400" /> Saved Profiles on this Device
               </span>
-              <span className="text-[10px] text-slate-500 font-mono">Tap to select</span>
+              <span className="text-[10px] text-slate-500 font-mono">1-Click Sign-in</span>
             </div>
-            <div className="flex flex-wrap gap-1.5">
+            <div className="space-y-1.5">
               {savedAccounts.map((acc) => {
                 const isSelected = username.toLowerCase() === acc.username.toLowerCase();
+                const hasToken = Boolean(acc.token || acc.pin);
                 return (
                   <div
                     key={acc.username}
-                    onClick={() => handleSelectSavedAccount(acc)}
-                    className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border text-xs transition cursor-pointer select-none ${
+                    onClick={() => handleQuickEnterSavedAccount(acc)}
+                    className={`flex items-center justify-between p-2.5 rounded-xl border transition cursor-pointer select-none group ${
                       isSelected
-                        ? 'bg-orange-950/70 border-orange-500/60 text-orange-200 ring-1 ring-orange-500/50 font-bold'
-                        : 'bg-[#22293b] border-white/10 text-slate-300 hover:border-white/20'
+                        ? 'bg-orange-950/60 border-orange-500/60 text-orange-200 ring-1 ring-orange-500/40'
+                        : 'bg-[#22293b] border-white/10 text-slate-300 hover:border-orange-500/40 hover:bg-[#252d42]'
                     }`}
                   >
-                    <span>{AVATAR_MAP[acc.avatar_id] || '⚡'}</span>
-                    <span>{acc.username}</span>
-                    <span className="text-[10px] text-slate-400 font-mono">
-                      ({acc.overall_elo} Elo)
-                    </span>
-                    <button
-                      type="button"
-                      onClick={(e) => handleRemoveSavedAccount(e, acc.username)}
-                      title="Forget this account on this device"
-                      className="text-slate-500 hover:text-red-400 p-0.5 ml-0.5 rounded transition cursor-pointer"
-                    >
-                      <X className="w-3 h-3" />
-                    </button>
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <span className="text-xl shrink-0">{AVATAR_MAP[acc.avatar_id] || '⚡'}</span>
+                      <div className="min-w-0">
+                        <div className="text-xs font-bold text-white truncate flex items-center gap-1.5">
+                          <span>{acc.username}</span>
+                          <span className="text-[9px] px-1.5 py-0.2 rounded bg-orange-500/20 text-orange-300 border border-orange-500/30">
+                            {acc.current_division || 'BRONZE'}
+                          </span>
+                        </div>
+                        <div className="text-[10px] text-slate-400 font-mono">
+                          {acc.overall_elo || 1200} Elo
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleQuickEnterSavedAccount(acc);
+                        }}
+                        className="px-2.5 py-1 rounded-lg bg-orange-500 hover:bg-orange-400 text-white font-bold text-[11px] shadow transition cursor-pointer flex items-center gap-1"
+                      >
+                        <span>{hasToken ? 'Enter' : 'Select'}</span>
+                        <ArrowRight className="w-3 h-3" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={(e) => handleRemoveSavedAccount(e, acc.username)}
+                        title="Forget this account on this device"
+                        className="p-1 text-slate-500 hover:text-red-400 rounded transition cursor-pointer"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
                   </div>
                 );
               })}
@@ -251,7 +312,7 @@ export default function AuthModal({ isOpen, onClose, onSuccess }) {
           <div>
             <div className="flex items-center justify-between mb-1.5">
               <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400">
-                Secret 4-Digit PIN
+                Security PIN / Passcode
               </label>
               <button
                 type="button"
@@ -267,10 +328,10 @@ export default function AuthModal({ isOpen, onClose, onSuccess }) {
                 type={showPin ? 'text' : 'password'}
                 required
                 value={pin}
-                onChange={(e) => setPin(e.target.value.replace(/\D/g, '').slice(0, 8))}
-                placeholder="••••"
-                maxLength={8}
-                className="w-full px-4 py-2.5 bg-[#1e2433] border border-white/10 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-500 font-mono tracking-widest text-base transition"
+                onChange={(e) => setPin(e.target.value.slice(0, 32))}
+                placeholder="4 to 32 digits or characters"
+                maxLength={32}
+                className="w-full px-4 py-2.5 bg-[#1e2433] border border-white/10 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-500 font-mono text-sm transition pr-10"
               />
               <div className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none">
                 <Lock className="w-4 h-4 opacity-50" />

@@ -47,6 +47,7 @@ export default function TournamentsView({ user, onJoinRoomCode, onOpenAuth, onVi
   const [formDescription, setFormDescription] = useState('');
   const [formFormat, setFormFormat] = useState('KNOCKOUT');
   const [formBracketSize, setFormBracketSize] = useState(8);
+  const [formSeriesCycles, setFormSeriesCycles] = useState(3); // For 3-player leagues: K cycles -> 3*K matches
   const [formTargetExam, setFormTargetExam] = useState('MIXED');
   const [formSubject, setFormSubject] = useState('Full Syllabus');
   const [formRewardType, setFormRewardType] = useState('REAL_LIFE'); // REAL_LIFE, IN_GAME, HYBRID
@@ -197,6 +198,7 @@ export default function TournamentsView({ user, onJoinRoomCode, onOpenAuth, onVi
         description: formDescription,
         format: formFormat,
         bracket_size: parseInt(formBracketSize, 10),
+        series_cycles: parseInt(formBracketSize, 10) === 3 ? parseInt(formSeriesCycles, 10) : 1,
         target_exam: formTargetExam,
         subject: formSubject,
         reward_type: formRewardType,
@@ -660,387 +662,280 @@ export default function TournamentsView({ user, onJoinRoomCode, onOpenAuth, onVi
             <div className="overflow-x-auto pb-4 pt-2 scrollbar-thin">
               <div className="min-w-fit flex items-center justify-start gap-4 p-5 rounded-3xl bg-[#171b26]/90 border border-white/5 relative">
                 
-                {/* 1. THREE-PLAYER STEPLADDER GAUNTLET BRACKET TREE */}
+                {/* 1. THREE-PLAYER MULTI-SERIES ROUND-ROBIN LEAGUE */}
                 {selectedTournament.bracket_size === 3 ? (
-                  <div className="flex items-center gap-0 py-4">
-                    {/* STAGE 1: ROUND 1 (SEED 1 BYE + THE ELIMINATOR) */}
-                    <div className="flex flex-col gap-6 w-72 sm:w-80 shrink-0">
-                      <div className="text-center pb-2 border-b border-white/10">
-                        <span className="text-xs font-black text-white uppercase tracking-wider font-mono block">
-                          Stage 1 • Eliminator & Bye
-                        </span>
-                        <span className="text-[10px] text-slate-400 font-mono">1 Top-Seed Bye + 1 Sudden Death Duel</span>
+                  <div className="w-full space-y-6 py-2">
+                    {/* LEAGUE POINTS TABLE & STANDINGS */}
+                    <div className="bg-[#1b212f] border border-orange-500/30 rounded-3xl p-5 shadow-2xl">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 mb-4 border-b border-white/10">
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs font-black uppercase tracking-wider text-orange-400 font-mono flex items-center gap-1.5">
+                              <Trophy className="w-4 h-4 text-orange-400" />
+                              3-Player League Points Table
+                            </span>
+                            <span className="px-2 py-0.5 rounded-full bg-orange-500/20 text-orange-300 font-mono text-[10px] font-bold border border-orange-500/30">
+                              {selectedTournament.series_cycles || 1} Cycles • {(selectedTournament.series_cycles || 1) * 3} Total Duels
+                            </span>
+                          </div>
+                          <p className="text-slate-400 text-xs mt-1">
+                            Scoring Matrix: <strong>Win = 3 Pts</strong> • <strong>Draw = 1 Pt</strong> • <strong>Loss = 0 Pts</strong> • <strong>Accuracy Bonus (&gt;80%) = +1 Pt</strong>
+                          </p>
+                        </div>
+                        {selectedTournament.is_tied && (
+                          <div className="px-3 py-1.5 rounded-xl bg-amber-500/20 border border-amber-500/40 text-amber-300 text-xs font-bold font-mono flex items-center gap-2 animate-pulse">
+                            <Sparkles className="w-4 h-4 text-amber-400" />
+                            <span>Tie Detected • Shootout Required</span>
+                          </div>
+                        )}
                       </div>
 
-                      {/* Top Seed Direct Bye Box */}
-                      <div className="w-full rounded-2xl border border-amber-500/40 bg-gradient-to-r from-amber-500/10 via-[#222838] to-[#1c2230] p-4 shadow-lg glow-amber-subtle">
-                        <div className="flex items-center justify-between pb-2 border-b border-amber-500/20 mb-2.5">
-                          <span className="text-[10px] font-mono font-black text-amber-400 uppercase tracking-wider flex items-center gap-1.5">
-                            <Sparkles className="w-3.5 h-3.5 text-amber-400" />
-                            <span>SEED #1 • DIRECT BYE</span>
-                          </span>
-                          <span className="px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 text-[10px] font-mono font-bold border border-amber-500/30">
-                            Finals Locked
-                          </span>
-                        </div>
-                        <div className="flex items-center justify-between p-2.5 rounded-xl bg-black/20 border border-amber-500/20">
-                          <div className="flex items-center gap-2.5 truncate">
-                            <div className="w-7 h-7 rounded-lg bg-amber-500/20 text-amber-300 border border-amber-500/40 flex items-center justify-center font-black text-xs shrink-0">
-                              #1
+                      {/* Standings Table */}
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-left text-xs font-mono">
+                          <thead>
+                            <tr className="border-b border-white/10 text-slate-400 text-[11px] uppercase tracking-wider">
+                              <th className="py-2.5 px-3 font-bold">Rank</th>
+                              <th className="py-2.5 px-3 font-bold">Aspirant Callsign</th>
+                              <th className="py-2.5 px-2 text-center font-bold">P</th>
+                              <th className="py-2.5 px-2 text-center font-bold text-emerald-400">W</th>
+                              <th className="py-2.5 px-2 text-center font-bold text-slate-300">D</th>
+                              <th className="py-2.5 px-2 text-center font-bold text-red-400">L</th>
+                              <th className="py-2.5 px-3 text-right font-bold">Marks (+/-)</th>
+                              <th className="py-2.5 px-3 text-right font-bold">Net Diff (Δ)</th>
+                              <th className="py-2.5 px-2 text-center font-bold text-amber-400">Bonus</th>
+                              <th className="py-2.5 px-4 text-right font-black text-orange-400 text-sm">Points</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-white/5">
+                            {(selectedTournament.standings || []).map((row, idx) => {
+                              const isCurrentUser = user && user.id === row.user_id;
+                              const rankMedal =
+                                row.rank === 1
+                                  ? '🥇'
+                                  : row.rank === 2
+                                  ? '🥈'
+                                  : row.rank === 3
+                                  ? '🥉'
+                                  : `#${row.rank}`;
+                              return (
+                                <tr
+                                  key={row.user_id}
+                                  className={`transition ${
+                                    isCurrentUser
+                                      ? 'bg-orange-500/10 font-bold'
+                                      : idx === 0
+                                      ? 'bg-amber-500/5'
+                                      : 'hover:bg-white/5'
+                                  }`}
+                                >
+                                  <td className="py-3 px-3 font-black text-sm">
+                                    <span className="flex items-center gap-1.5">
+                                      <span>{rankMedal}</span>
+                                      <span className="text-slate-400 text-xs">#{row.rank}</span>
+                                    </span>
+                                  </td>
+                                  <td className="py-3 px-3">
+                                    <div className="flex items-center gap-2">
+                                      <span className="text-base">{row.avatar_id === 'flame' ? '🔥' : row.avatar_id === 'atom' ? '⚛️' : '⚡'}</span>
+                                      <div>
+                                        <span className="text-white font-bold block truncate max-w-[160px]">
+                                          {row.username} {isCurrentUser && <span className="text-orange-400 text-[10px]">(You)</span>}
+                                        </span>
+                                        <span className="text-[10px] text-slate-400 block font-normal">
+                                          {row.overall_elo} Elo • {row.title}
+                                        </span>
+                                      </div>
+                                    </div>
+                                  </td>
+                                  <td className="py-3 px-2 text-center text-slate-300 font-bold">{row.played}</td>
+                                  <td className="py-3 px-2 text-center text-emerald-400 font-black">{row.won}</td>
+                                  <td className="py-3 px-2 text-center text-slate-400">{row.drawn}</td>
+                                  <td className="py-3 px-2 text-center text-red-400">{row.lost}</td>
+                                  <td className="py-3 px-3 text-right text-slate-300">
+                                    {Math.round(row.marks_for)} / {Math.round(row.marks_against)}
+                                  </td>
+                                  <td className={`py-3 px-3 text-right font-black ${
+                                    row.diff > 0 ? 'text-emerald-400' : row.diff < 0 ? 'text-red-400' : 'text-slate-400'
+                                  }`}>
+                                    {row.diff > 0 ? `+${row.diff}` : row.diff}
+                                  </td>
+                                  <td className="py-3 px-2 text-center text-amber-400 font-bold">
+                                    {row.bonus_points > 0 ? `+${row.bonus_points}` : '0'}
+                                  </td>
+                                  <td className="py-3 px-4 text-right font-black text-orange-400 text-base">
+                                    {row.points}
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+
+                    {/* SUDDEN-DEATH BLITZ SHOOTOUT BANNER (IF ACTIVE) */}
+                    {(() => {
+                      const tbMatch = (selectedTournament.matches || []).find((m) => m.is_tiebreaker === 1);
+                      if (!tbMatch) return null;
+                      const isReady = tbMatch.status === 'READY';
+                      const isLive = tbMatch.status === 'IN_PROGRESS';
+                      const isFinished = tbMatch.status === 'COMPLETED';
+                      const canPlay = (isReady || isLive) && user && (user.id === tbMatch.player1_id || user.id === tbMatch.player2_id);
+
+                      return (
+                        <div className="p-5 rounded-3xl bg-gradient-to-r from-amber-500/20 via-[#272118] to-orange-500/20 border-2 border-amber-500/60 shadow-2xl glow-amber animate-in fade-in">
+                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                            <div className="flex items-center gap-3">
+                              <div className="w-12 h-12 rounded-2xl bg-amber-500/30 text-amber-300 border border-amber-500/50 flex items-center justify-center font-black text-xl shrink-0">
+                                ⚡
+                              </div>
+                              <div>
+                                <div className="flex items-center gap-2">
+                                  <span className="text-xs font-mono font-black text-amber-400 uppercase tracking-wider">
+                                    SUDDEN-DEATH TIEBREAKER SHOOTOUT
+                                  </span>
+                                  <span className="px-2 py-0.5 rounded-full bg-amber-500/30 text-amber-200 text-[10px] font-bold font-mono">
+                                    3-Question Rapid Blitz
+                                  </span>
+                                </div>
+                                <h3 className="text-base font-black text-white mt-0.5">
+                                  {tbMatch.player1_name || 'Contender #1'} vs {tbMatch.player2_name || 'Contender #2'}
+                                </h3>
+                                <p className="text-xs text-amber-200/80 mt-0.5">
+                                  Identical league points and differential! The victor of this rapid shootout claims the Tournament Championship Gold.
+                                </p>
+                              </div>
                             </div>
-                            <div className="truncate">
-                              <span className="font-black text-xs text-white block truncate">
-                                {selectedTournament.participants?.[0]?.username || 'Top Seed Qualifier'}
-                              </span>
-                              <span className="text-[10px] font-mono text-amber-300/80 block">
-                                {selectedTournament.participants?.[0]?.overall_elo || 1200} ELO • Direct Finalist
-                              </span>
+                            <div className="flex items-center gap-3">
+                              {isFinished && tbMatch.winner_name && (
+                                <div className="px-3 py-1.5 rounded-xl bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 text-xs font-bold font-mono">
+                                  🏆 Shootout Winner: {tbMatch.winner_name}
+                                </div>
+                              )}
+                              {canPlay && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleEnterMatch(tbMatch.room_code)}
+                                  className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 text-white font-black text-xs transition cursor-pointer flex items-center gap-2 shadow-lg shadow-amber-950/50 hover:brightness-110"
+                                >
+                                  <Play className="w-4 h-4 fill-current" />
+                                  <span>ENTER BLITZ SHOOTOUT ⚡</span>
+                                </button>
+                              )}
                             </div>
                           </div>
-                          <Crown className="w-4 h-4 text-amber-400 shrink-0 ml-1" />
                         </div>
-                        <div className="mt-2 text-[10px] text-slate-400 font-mono text-center">
-                          ⚡ Automatic Bye: Advances directly to Round 2 Grand Finals
-                        </div>
+                      );
+                    })()}
+
+                    {/* MULTI-SERIES MATCH SCHEDULE MATRIX */}
+                    <div>
+                      <div className="flex items-center justify-between mb-3 px-1">
+                        <span className="text-xs font-black text-white uppercase tracking-wider font-mono flex items-center gap-1.5">
+                          <Swords className="w-3.5 h-3.5 text-orange-400" />
+                          Series Clash Schedule (Round-Robin Duels)
+                        </span>
+                        <span className="text-[10px] text-slate-400 font-mono">
+                          Current Cycle: {selectedTournament.current_round} of {selectedTournament.total_rounds}
+                        </span>
                       </div>
 
-                      {/* Eliminator Match Card (Seed 2 vs Seed 3) */}
-                      {(() => {
-                        const m = selectedTournament.rounds?.[0]?.matches?.[0] || {
-                          id: 'preview_r1',
-                          status: 'PENDING',
-                          player1_name: selectedTournament.participants?.[1]?.username || 'Awaiting Contender #2',
-                          player2_name: selectedTournament.participants?.[2]?.username || 'Awaiting Contender #3',
-                          player1_score: 0,
-                          player2_score: 0
-                        };
-                        const p1Won = m.winner_id && m.winner_id === m.player1_id;
-                        const p2Won = m.winner_id && m.winner_id === m.player2_id;
-                        const isFinished = m.status === 'COMPLETED';
-                        const isReady = m.status === 'READY';
-                        const isLive = m.status === 'IN_PROGRESS';
-                        const canPlay = (isReady || isLive) && user && (user.id === m.player1_id || user.id === m.player2_id);
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3.5">
+                        {(selectedTournament.matches || [])
+                          .filter((m) => m.is_tiebreaker !== 1)
+                          .map((m, mIdx) => {
+                            const isFinished = m.status === 'COMPLETED';
+                            const isReady = m.status === 'READY';
+                            const isLive = m.status === 'IN_PROGRESS';
+                            const p1Won = m.winner_id && m.winner_id === m.player1_id;
+                            const p2Won = m.winner_id && m.winner_id === m.player2_id;
+                            const isDraw = isFinished && !m.winner_id;
+                            const canPlay = (isReady || isLive) && user && (user.id === m.player1_id || user.id === m.player2_id);
 
-                        return (
-                          <div
-                            key={m.id}
-                            className={`w-full rounded-2xl border transition p-4 ${
-                              isFinished
-                                ? 'bg-[#1e2433] border-emerald-500/30'
-                                : isReady || isLive
-                                ? 'bg-gradient-to-b from-[#252c3e] to-[#1c212e] border-orange-500/60 shadow-xl glow-orange-subtle ring-1 ring-orange-500/30'
-                                : 'bg-[#181c26]/90 border-white/5 opacity-75'
-                            }`}
-                          >
-                            <div className="flex items-center justify-between pb-2 mb-2 border-b border-white/10 text-[10px] font-mono">
-                              <span className="font-black text-orange-400 uppercase tracking-wider flex items-center gap-1">
-                                <Swords className="w-3 h-3" />
-                                <span>The Eliminator (Seed #2 vs #3)</span>
-                              </span>
-                              <span
-                                className={`px-2 py-0.5 rounded-full font-bold flex items-center gap-1 ${
+                            return (
+                              <div
+                                key={m.id || mIdx}
+                                className={`rounded-2xl border transition p-3.5 ${
                                   isFinished
-                                    ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
-                                    : isLive
-                                    ? 'bg-orange-500/20 text-orange-400 border border-orange-500/40 animate-pulse'
-                                    : isReady
-                                    ? 'bg-blue-500/20 text-blue-300 border border-blue-500/30'
-                                    : 'bg-slate-800 text-slate-400'
+                                    ? 'bg-[#1e2433] border-white/10'
+                                    : isReady || isLive
+                                    ? 'bg-gradient-to-b from-[#242b3b] to-[#1a1f2b] border-orange-500/60 shadow-lg glow-orange-subtle ring-1 ring-orange-500/40'
+                                    : 'bg-[#161a24]/90 border-white/5 opacity-70'
                                 }`}
                               >
-                                <span className={`w-1.5 h-1.5 rounded-full ${
-                                  isFinished ? 'bg-emerald-400' : isLive ? 'bg-orange-400' : isReady ? 'bg-blue-400' : 'bg-slate-500'
-                                }`} />
-                                {isFinished ? 'Completed' : isLive ? 'Live Duel' : isReady ? 'Ready' : 'Pending'}
-                              </span>
-                            </div>
-
-                            {/* Player 1 (Seed 2) */}
-                            <div className={`flex items-center justify-between p-2 rounded-xl ${
-                              p1Won ? 'bg-amber-500/20 text-amber-200 border border-amber-500/40 font-black' : 'text-slate-300'
-                            }`}>
-                              <div className="flex items-center gap-2 truncate">
-                                <div className={`w-6 h-6 rounded-md flex items-center justify-center font-black text-[10px] ${
-                                  p1Won ? 'bg-amber-500 text-black' : 'bg-white/10 text-slate-400'
-                                }`}>
-                                  #2
+                                <div className="flex items-center justify-between pb-2 mb-2 border-b border-white/10 text-[10px] font-mono">
+                                  <span className="font-bold text-slate-300">
+                                    Cycle {m.cycle_index || m.round_number} • Duel #{(m.match_index % 3) + 1}
+                                  </span>
+                                  <span
+                                    className={`px-2 py-0.5 rounded-full font-bold text-[9px] ${
+                                      isFinished
+                                        ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                                        : isLive
+                                        ? 'bg-orange-500/20 text-orange-400 border border-orange-500/40 animate-pulse'
+                                        : isReady
+                                        ? 'bg-blue-500/20 text-blue-300 border border-blue-500/30'
+                                        : 'bg-slate-800 text-slate-400'
+                                    }`}
+                                  >
+                                    {isFinished ? (isDraw ? 'Drawn' : 'Completed') : isLive ? 'Live Duel' : isReady ? 'Ready' : 'Pending'}
+                                  </span>
                                 </div>
-                                <span className="truncate text-xs font-bold flex items-center gap-1">
-                                  {p1Won && <Crown className="w-3.5 h-3.5 text-amber-400 shrink-0" />}
-                                  {m.player1_name || 'Seed #2'}
-                                </span>
-                              </div>
-                              <span className="font-mono text-xs font-black">
-                                {isFinished ? `${m.player1_score ?? 0} pts` : '-'}
-                              </span>
-                            </div>
 
-                            <div className="relative my-1 text-center">
-                              <span className="px-2 py-0.5 rounded-full bg-[#181c26] text-[9px] font-mono font-bold text-slate-500 border border-white/5">
-                                VS
-                              </span>
-                            </div>
-
-                            {/* Player 2 (Seed 3) */}
-                            <div className={`flex items-center justify-between p-2 rounded-xl ${
-                              p2Won ? 'bg-amber-500/20 text-amber-200 border border-amber-500/40 font-black' : 'text-slate-300'
-                            }`}>
-                              <div className="flex items-center gap-2 truncate">
-                                <div className={`w-6 h-6 rounded-md flex items-center justify-center font-black text-[10px] ${
-                                  p2Won ? 'bg-amber-500 text-black' : 'bg-white/10 text-slate-400'
+                                {/* Player 1 */}
+                                <div className={`flex items-center justify-between p-2 rounded-xl text-xs mb-1.5 ${
+                                  p1Won ? 'bg-emerald-500/15 text-emerald-200 border border-emerald-500/30 font-bold' : 'bg-[#151922] text-slate-300'
                                 }`}>
-                                  #3
+                                  <span className="truncate max-w-[130px]">{m.player1_name || 'Player 1'}</span>
+                                  <span className="font-mono font-black">{m.player1_score || 0} pts</span>
                                 </div>
-                                <span className="truncate text-xs font-bold flex items-center gap-1">
-                                  {p2Won && <Crown className="w-3.5 h-3.5 text-amber-400 shrink-0" />}
-                                  {m.player2_name || 'Seed #3'}
-                                </span>
-                              </div>
-                              <span className="font-mono text-xs font-black">
-                                {isFinished ? `${m.player2_score ?? 0} pts` : '-'}
-                              </span>
-                            </div>
 
-                            {canPlay && (
-                              <button
-                                type="button"
-                                onClick={() => handleEnterMatch(m.room_code)}
-                                className="w-full mt-2.5 py-2.5 bg-gradient-to-r from-orange-500 via-amber-500 to-orange-500 text-white font-black rounded-xl text-xs transition cursor-pointer flex items-center justify-center gap-1.5 shadow-lg shadow-orange-950/40 glow-orange"
-                              >
-                                <Play className="w-3.5 h-3.5 fill-current" />
-                                <span>ENTER ELIMINATOR DUEL ⚡</span>
-                              </button>
-                            )}
+                                {/* Player 2 */}
+                                <div className={`flex items-center justify-between p-2 rounded-xl text-xs ${
+                                  p2Won ? 'bg-emerald-500/15 text-emerald-200 border border-emerald-500/30 font-bold' : 'bg-[#151922] text-slate-300'
+                                }`}>
+                                  <span className="truncate max-w-[130px]">{m.player2_name || 'Player 2'}</span>
+                                  <span className="font-mono font-black">{m.player2_score || 0} pts</span>
+                                </div>
 
-                            {selectedTournament.is_organizer && !isFinished && isReady && (
-                              <div className="mt-2 pt-2 border-t border-white/5 flex items-center justify-between text-[10px] text-slate-400">
-                                <span>Organizer Test:</span>
-                                <div className="flex gap-1">
+                                {/* Action Buttons */}
+                                {canPlay && (
                                   <button
                                     type="button"
-                                    onClick={() => handleSimulateMatch(selectedTournament.id, m.id, 1)}
-                                    className="px-2 py-0.5 bg-slate-700 hover:bg-slate-600 rounded text-white"
+                                    onClick={() => handleEnterMatch(m.room_code)}
+                                    className="w-full mt-2.5 py-2 bg-gradient-to-r from-orange-500 to-amber-500 text-white font-black rounded-xl text-xs transition cursor-pointer flex items-center justify-center gap-1.5 shadow-md shadow-orange-950/40"
                                   >
-                                    P1 Win
+                                    <Play className="w-3.5 h-3.5 fill-current" />
+                                    <span>PLAY DUEL NOW ⚔️</span>
                                   </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => handleSimulateMatch(selectedTournament.id, m.id, 2)}
-                                    className="px-2 py-0.5 bg-slate-700 hover:bg-slate-600 rounded text-white"
-                                  >
-                                    P2 Win
-                                  </button>
-                                </div>
+                                )}
+
+                                {selectedTournament.is_organizer && !isFinished && isReady && (
+                                  <div className="mt-2 pt-2 border-t border-white/5 flex items-center justify-between text-[10px] text-slate-400">
+                                    <span>Organizer Action:</span>
+                                    <div className="flex gap-1">
+                                      <button
+                                        type="button"
+                                        onClick={() => handleSimulateMatch(selectedTournament.id, m.id, 1)}
+                                        className="px-2 py-0.5 bg-slate-700 hover:bg-slate-600 rounded text-white"
+                                      >
+                                        P1 Win
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => handleSimulateMatch(selectedTournament.id, m.id, 2)}
+                                        className="px-2 py-0.5 bg-slate-700 hover:bg-slate-600 rounded text-white"
+                                      >
+                                        P2 Win
+                                      </button>
+                                    </div>
+                                  </div>
+                                )}
                               </div>
-                            )}
-                          </div>
-                        );
-                      })()}
-                    </div>
-
-                    {/* SVG BRANCH CONNECTOR: STAGE 1 -> STAGE 2 */}
-                    <div className="w-16 sm:w-20 h-[380px] flex items-center justify-center relative shrink-0">
-                      <svg className="w-full h-full overflow-visible" viewBox="0 0 80 380" preserveAspectRatio="none">
-                        {/* Seed 1 Bye stem: Top card (y=90) to Grand Finals Top slot (y=165) */}
-                        <path
-                          d="M 0,90 C 45,90 35,165 80,165"
-                          fill="none"
-                          stroke="#f59e0b"
-                          strokeWidth="2.5"
-                          strokeDasharray="4 3"
-                        />
-                        {/* Eliminator stem: Bottom card (y=290) to Grand Finals Bottom slot (y=215) */}
-                        <path
-                          d="M 0,290 C 45,290 35,215 80,215"
-                          fill="none"
-                          stroke={selectedTournament.rounds?.[0]?.matches?.[0]?.status === 'COMPLETED' ? '#10b981' : '#f97316'}
-                          strokeWidth="2.5"
-                        />
-                      </svg>
-                    </div>
-
-                    {/* STAGE 2: ROUND 2 (GRAND FINALS) */}
-                    <div className="flex flex-col justify-center w-72 sm:w-80 shrink-0">
-                      <div className="text-center pb-2 border-b border-white/10 mb-6">
-                        <span className="text-xs font-black text-white uppercase tracking-wider font-mono block">
-                          Stage 2 • Grand Finals
-                        </span>
-                        <span className="text-[10px] text-amber-400 font-mono">Championship Match</span>
+                            );
+                          })}
                       </div>
-
-                      {(() => {
-                        const m = selectedTournament.rounds?.[1]?.matches?.[0] || {
-                          id: 'preview_r2',
-                          status: 'PENDING',
-                          player1_name: selectedTournament.participants?.[0]?.username || 'Seed #1 (Bye)',
-                          player2_name: 'Winner of Eliminator',
-                          player1_score: 0,
-                          player2_score: 0
-                        };
-                        const p1Won = m.winner_id && m.winner_id === m.player1_id;
-                        const p2Won = m.winner_id && m.winner_id === m.player2_id;
-                        const isFinished = m.status === 'COMPLETED';
-                        const isReady = m.status === 'READY';
-                        const isLive = m.status === 'IN_PROGRESS';
-                        const canPlay = (isReady || isLive) && user && (user.id === m.player1_id || user.id === m.player2_id);
-
-                        return (
-                          <div
-                            key={m.id}
-                            className={`w-full rounded-2xl border transition p-4 ${
-                              isFinished
-                                ? 'bg-[#1e2433] border-emerald-500/30'
-                                : isReady || isLive
-                                ? 'bg-gradient-to-b from-[#252c3e] to-[#1c212e] border-amber-500/60 shadow-xl glow-amber-subtle ring-1 ring-amber-500/30'
-                                : 'bg-[#181c26]/90 border-white/5 opacity-75'
-                            }`}
-                          >
-                            <div className="flex items-center justify-between pb-2 mb-2 border-b border-white/10 text-[10px] font-mono">
-                              <span className="font-black text-amber-400 uppercase tracking-wider flex items-center gap-1">
-                                <Crown className="w-3.5 h-3.5" />
-                                <span>Grand Finals Championship</span>
-                              </span>
-                              <span
-                                className={`px-2 py-0.5 rounded-full font-bold flex items-center gap-1 ${
-                                  isFinished
-                                    ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
-                                    : isLive
-                                    ? 'bg-orange-500/20 text-orange-400 border border-orange-500/40 animate-pulse'
-                                    : isReady
-                                    ? 'bg-blue-500/20 text-blue-300 border border-blue-500/30'
-                                    : 'bg-slate-800 text-slate-400'
-                                }`}
-                              >
-                                <span className={`w-1.5 h-1.5 rounded-full ${
-                                  isFinished ? 'bg-emerald-400' : isLive ? 'bg-orange-400' : isReady ? 'bg-blue-400' : 'bg-slate-500'
-                                }`} />
-                                {isFinished ? 'Completed' : isLive ? 'Live Duel' : isReady ? 'Ready' : 'Pending'}
-                              </span>
-                            </div>
-
-                            {/* Player 1 (Seed 1 Bye Contender) */}
-                            <div className={`flex items-center justify-between p-2 rounded-xl ${
-                              p1Won ? 'bg-amber-500/20 text-amber-200 border border-amber-500/40 font-black' : 'text-slate-300'
-                            }`}>
-                              <div className="flex items-center gap-2 truncate">
-                                <div className={`w-6 h-6 rounded-md flex items-center justify-center font-black text-[10px] ${
-                                  p1Won ? 'bg-amber-500 text-black' : 'bg-amber-500/20 text-amber-300'
-                                }`}>
-                                  #1
-                                </div>
-                                <span className="truncate text-xs font-bold flex items-center gap-1">
-                                  {p1Won && <Crown className="w-3.5 h-3.5 text-amber-400 shrink-0" />}
-                                  {m.player1_name || 'Seed #1'}
-                                </span>
-                              </div>
-                              <span className="font-mono text-xs font-black">
-                                {isFinished ? `${m.player1_score ?? 0} pts` : '-'}
-                              </span>
-                            </div>
-
-                            <div className="relative my-1 text-center">
-                              <span className="px-2 py-0.5 rounded-full bg-[#181c26] text-[9px] font-mono font-bold text-slate-500 border border-white/5">
-                                VS
-                              </span>
-                            </div>
-
-                            {/* Player 2 (Eliminator Winner) */}
-                            <div className={`flex items-center justify-between p-2 rounded-xl ${
-                              p2Won ? 'bg-amber-500/20 text-amber-200 border border-amber-500/40 font-black' : 'text-slate-300'
-                            }`}>
-                              <div className="flex items-center gap-2 truncate">
-                                <div className={`w-6 h-6 rounded-md flex items-center justify-center font-black text-[10px] ${
-                                  p2Won ? 'bg-amber-500 text-black' : 'bg-white/10 text-slate-400'
-                                }`}>
-                                  W
-                                </div>
-                                <span className="truncate text-xs font-bold flex items-center gap-1">
-                                  {p2Won && <Crown className="w-3.5 h-3.5 text-amber-400 shrink-0" />}
-                                  {m.player2_name || 'Eliminator Winner'}
-                                </span>
-                              </div>
-                              <span className="font-mono text-xs font-black">
-                                {isFinished ? `${m.player2_score ?? 0} pts` : '-'}
-                              </span>
-                            </div>
-
-                            {canPlay && (
-                              <button
-                                type="button"
-                                onClick={() => handleEnterMatch(m.room_code)}
-                                className="w-full mt-2.5 py-2.5 bg-gradient-to-r from-amber-500 via-orange-500 to-amber-500 text-white font-black rounded-xl text-xs transition cursor-pointer flex items-center justify-center gap-1.5 shadow-lg shadow-orange-950/40 glow-orange"
-                              >
-                                <Play className="w-3.5 h-3.5 fill-current" />
-                                <span>ENTER GRAND FINALS 🏆</span>
-                              </button>
-                            )}
-
-                            {selectedTournament.is_organizer && !isFinished && isReady && (
-                              <div className="mt-2 pt-2 border-t border-white/5 flex items-center justify-between text-[10px] text-slate-400">
-                                <span>Organizer Test:</span>
-                                <div className="flex gap-1">
-                                  <button
-                                    type="button"
-                                    onClick={() => handleSimulateMatch(selectedTournament.id, m.id, 1)}
-                                    className="px-2 py-0.5 bg-slate-700 hover:bg-slate-600 rounded text-white"
-                                  >
-                                    P1 Win
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => handleSimulateMatch(selectedTournament.id, m.id, 2)}
-                                    className="px-2 py-0.5 bg-slate-700 hover:bg-slate-600 rounded text-white"
-                                  >
-                                    P2 Win
-                                  </button>
-                                </div>
-                              </div>
-                            )}
-                          </div>
-                        );
-                      })()}
-                    </div>
-
-                    {/* CONNECTOR FROM FINALS TO PODIUM */}
-                    <div className="w-14 sm:w-16 h-12 flex items-center justify-center shrink-0">
-                      <svg className="w-full h-8 overflow-visible" viewBox="0 0 60 20" preserveAspectRatio="none">
-                        <path
-                          d="M 0,10 H 60"
-                          fill="none"
-                          stroke={selectedTournament.status === 'COMPLETED' ? '#f59e0b' : '#475569'}
-                          strokeWidth="3"
-                        />
-                      </svg>
-                    </div>
-
-                    {/* CHAMPION PODIUM CARD */}
-                    <div className="shrink-0 w-72 sm:w-80 rounded-3xl border p-6 text-center flex flex-col justify-center items-center bg-gradient-to-b from-amber-500/20 via-[#262c3c] to-[#1c2230] border-amber-500/50 shadow-2xl">
-                      <div className="p-3.5 rounded-2xl bg-amber-500/20 border border-amber-500/40 text-amber-300 mb-3">
-                        <Crown className={`w-8 h-8 ${selectedTournament.status === 'COMPLETED' ? 'animate-bounce text-amber-300' : 'text-amber-500/70'}`} />
-                      </div>
-                      <span className="text-[11px] font-mono font-black text-amber-400 uppercase tracking-widest block">
-                        {selectedTournament.status === 'COMPLETED' ? '🏆 TOURNAMENT CHAMPION' : 'CHAMPION APEX'}
-                      </span>
-                      {selectedTournament.status === 'COMPLETED' && selectedTournament.winner ? (
-                        <div className="mt-2 space-y-1 w-full">
-                          <h4 className="text-xl font-black text-white truncate">
-                            @{selectedTournament.winner.username}
-                          </h4>
-                          <span className="text-xs text-amber-300 font-mono block">
-                            {selectedTournament.winner.title || 'Champion'} • {selectedTournament.winner.overall_elo} ELO
-                          </span>
-                          <div className="mt-3 px-3 py-1.5 rounded-xl bg-amber-500/20 border border-amber-500/40 text-xs font-bold text-amber-200 font-mono">
-                            +{Math.round((selectedTournament.rp_pool || 500) * 0.7)} RP Awarded!
-                          </div>
-                        </div>
-                      ) : (
-                        <div className="mt-2 text-xs text-slate-400 space-y-1">
-                          <span className="text-white font-bold block">Awaiting Grand Finals</span>
-                          <span className="text-[11px] font-mono block text-amber-400">
-                            Prize: {selectedTournament.rp_pool} RP + Medals
-                          </span>
-                        </div>
-                      )}
                     </div>
                   </div>
                 ) : (
@@ -1366,11 +1261,30 @@ export default function TournamentsView({ user, onJoinRoomCode, onOpenAuth, onVi
                     ))}
                   </div>
                   {formBracketSize === 3 && (
-                    <div className="mt-2 p-2.5 rounded-xl bg-orange-500/10 border border-orange-500/30 text-[11px] text-orange-200 flex items-start gap-2">
-                      <Sparkles className="w-4 h-4 text-orange-400 shrink-0 mt-0.5" />
-                      <div>
-                        <strong className="text-white block font-bold">3-Player Stepladder Gauntlet Format:</strong>
-                        Top seed earns a direct Bye to the Grand Finals; Seeds #2 & #3 battle in the Round 1 Eliminator. Exactly 3 competitors in a high-stakes gauntlet!
+                    <div className="mt-3 p-3.5 rounded-2xl bg-gradient-to-r from-orange-500/15 via-[#232a3b] to-[#1c2230] border border-orange-500/30 text-xs text-orange-200 space-y-2.5">
+                      <div className="flex items-center justify-between">
+                        <span className="font-bold text-white flex items-center gap-1.5 text-xs">
+                          <Swords className="w-4 h-4 text-orange-400" /> Multi-Series Cycles (K)
+                        </span>
+                        <span className="font-mono text-orange-300 font-black bg-orange-950/80 px-2.5 py-1 rounded-lg border border-orange-500/40 text-xs shadow-inner">
+                          {formSeriesCycles} Cycles = {formSeriesCycles * 3} Total Duels
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-slate-300 leading-relaxed">
+                        Every aspirant clashes against each other in structured cycles. Standings tracked via Isolated Points Table (Win: 3, Draw: 1, Loss: 0, Bonus: +1). Sudden-death blitz shootout resolves ties!
+                      </p>
+                      <div className="flex items-center gap-3 pt-1">
+                        <span className="text-[11px] text-slate-400 font-mono font-bold">1 Cycle (3 Duels)</span>
+                        <input
+                          type="range"
+                          min="1"
+                          max="9"
+                          step="1"
+                          value={formSeriesCycles}
+                          onChange={(e) => setFormSeriesCycles(parseInt(e.target.value, 10))}
+                          className="flex-1 accent-orange-500 cursor-pointer h-2 bg-slate-700 rounded-lg"
+                        />
+                        <span className="text-[11px] text-slate-400 font-mono font-bold">9 Cycles (27 Duels)</span>
                       </div>
                     </div>
                   )}

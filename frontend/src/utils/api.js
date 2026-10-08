@@ -22,15 +22,15 @@ export function setRememberMePreference(enabled) {
 
 export function getToken() {
   try {
-    // 1. Prioritize tab-scoped session so multiple tabs can test independently if needed
+    // 1. Tab-scoped session token
     const sessionToken = sessionStorage.getItem("jee_rivals_token");
     if (sessionToken) return sessionToken;
 
-    // 2. Fall back to persistent localStorage if Remember Me is not explicitly turned off
-    const rememberMe = localStorage.getItem("jee_remember_me");
-    if (rememberMe === "false") return "";
+    // 2. Persistent localStorage token (guarantees staying logged in across tabs/refreshes)
+    const localToken = localStorage.getItem("jee_rivals_token");
+    if (localToken) return localToken;
 
-    return localStorage.getItem("jee_rivals_token") || "";
+    return "";
   } catch (_) {
     return "";
   }
@@ -50,6 +50,7 @@ export function setToken(token, rememberMe = true) {
     } else {
       sessionStorage.removeItem("jee_rivals_token");
       localStorage.removeItem("jee_rivals_token");
+      sessionStorage.removeItem("jee_rivals_user");
       localStorage.removeItem("jee_rivals_user");
     }
   } catch (_) {}
@@ -57,8 +58,10 @@ export function setToken(token, rememberMe = true) {
 
 export function getCachedUser() {
   try {
-    const raw = localStorage.getItem("jee_rivals_user");
-    return raw ? JSON.parse(raw) : null;
+    const sessionUser = sessionStorage.getItem("jee_rivals_user");
+    if (sessionUser) return JSON.parse(sessionUser);
+    const localUser = localStorage.getItem("jee_rivals_user");
+    return localUser ? JSON.parse(localUser) : null;
   } catch (_) {
     return null;
   }
@@ -67,8 +70,14 @@ export function getCachedUser() {
 export function setCachedUser(user) {
   try {
     if (user) {
-      localStorage.setItem("jee_rivals_user", JSON.stringify(user));
+      sessionStorage.setItem("jee_rivals_user", JSON.stringify(user));
+      if (isRememberMeEnabled()) {
+        localStorage.setItem("jee_rivals_user", JSON.stringify(user));
+      } else {
+        localStorage.removeItem("jee_rivals_user");
+      }
     } else {
+      sessionStorage.removeItem("jee_rivals_user");
       localStorage.removeItem("jee_rivals_user");
     }
   } catch (_) {}
@@ -84,10 +93,14 @@ export function getSavedAccounts() {
   }
 }
 
-export function recordSavedAccount(user) {
+export function recordSavedAccount(user, token = null, pin = null) {
   if (!user || !user.username) return;
   try {
+    const activeToken = token || getToken();
     const list = getSavedAccounts();
+    const existing = list.find((a) => a.username?.toLowerCase() === user.username?.toLowerCase());
+    const preservedToken = activeToken || existing?.token || "";
+    const preservedPin = pin || existing?.pin || "";
     const filtered = list.filter(
       (a) => a.username?.toLowerCase() !== user.username?.toLowerCase()
     );
@@ -98,9 +111,12 @@ export function recordSavedAccount(user) {
       overall_elo: Math.round(user.overall_elo || 1200),
       current_division: user.current_division || "BRONZE",
       title: user.title || "JEE Aspirant",
+      token: preservedToken,
+      pin: preservedPin,
       lastActive: new Date().toISOString()
     });
-    localStorage.setItem("jee_saved_accounts", JSON.stringify(filtered.slice(0, 6)));
+    localStorage.setItem("jee_saved_accounts", JSON.stringify(filtered.slice(0, 10)));
+    localStorage.setItem("jee_saved_username", user.username);
   } catch (_) {}
 }
 
@@ -113,6 +129,38 @@ export function removeSavedAccount(username) {
     );
     localStorage.setItem("jee_saved_accounts", JSON.stringify(filtered));
   } catch (_) {}
+}
+
+export async function switchSavedAccount(username) {
+  const list = getSavedAccounts();
+  const acc = list.find((a) => a.username?.toLowerCase() === username?.toLowerCase());
+  if (!acc) {
+    throw new Error(`Profile '${username}' not found on this device.`);
+  }
+
+  // 1. Try saved token first
+  if (acc.token) {
+    try {
+      setToken(acc.token, true);
+      const me = await api.auth.getMe();
+      setCachedUser(me);
+      recordSavedAccount(me, acc.token, acc.pin);
+      return me;
+    } catch (_) {
+      // Session expired, attempt auto-heal via saved PIN
+    }
+  }
+
+  // 2. Try saved PIN if token expired or container restarted
+  if (acc.pin) {
+    const resp = await api.auth.login(acc.username, acc.pin);
+    setToken(resp.token, true);
+    setCachedUser(resp.user);
+    recordSavedAccount(resp.user, resp.token, acc.pin);
+    return resp.user;
+  }
+
+  throw new Error(`Session expired for ${username}. Please enter your PIN to sign in.`);
 }
 
 async function request(path, options = {}) {
@@ -382,6 +430,25 @@ export const api = {
       request('/api/updates/publish', {
         method: 'POST',
         body: JSON.stringify(data),
+      }),
+  },
+  mastery: {
+    getChapters: () => request('/api/mastery/chapters'),
+    getRadar: () => request('/api/mastery/radar'),
+    getGraveyard: () => request('/api/mastery/graveyard'),
+    toggleBookmark: (questionId, notes = '') =>
+      request('/api/mastery/bookmark', {
+        method: 'POST',
+        body: JSON.stringify({ question_id: questionId, notes }),
+      }),
+    removeFromGraveyard: (questionId) =>
+      request(`/api/mastery/graveyard/${questionId}`, {
+        method: 'DELETE',
+      }),
+    reDuel: (questionIds = null, count = 5) =>
+      request('/api/mastery/re-duel', {
+        method: 'POST',
+        body: JSON.stringify({ question_ids: questionIds, count }),
       }),
   },
 };
