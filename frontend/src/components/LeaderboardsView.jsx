@@ -454,6 +454,15 @@ export default function LeaderboardsView({ user, onViewProfile, onNavigateTab })
                         <td className="py-3.5">
                           <div className="flex items-center gap-2">
                             <span className="font-bold text-white">{u.username}</span>
+                            {u.streak > 0 && (
+                              <span
+                                className="text-[10px] px-1.5 py-0.2 bg-orange-500/15 border border-orange-500/30 text-orange-400 rounded-full font-bold flex items-center gap-0.5"
+                                title={`${u.streak} Day Study Streak`}
+                              >
+                                <Flame className="w-2.5 h-2.5 fill-current" />
+                                <span>{u.streak}</span>
+                              </span>
+                            )}
                             {isMe && (
                               <span className="text-[10px] px-1.5 py-0.5 bg-orange-950 border border-orange-500/40 text-orange-400 rounded font-bold">
                                 YOU

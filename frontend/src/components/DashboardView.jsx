@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { Swords, Zap, Trophy, Shield, Play, ArrowRight, Sparkles, BookOpen, Clock, AlertCircle, Users, Globe, Lock, Flame, Sliders, UserPlus, Brain } from 'lucide-react';
+import { Swords, Zap, Trophy, Shield, Play, ArrowRight, Sparkles, BookOpen, Clock, AlertCircle, Users, Globe, Lock, Flame, Sliders, UserPlus, Brain, CheckCircle2 } from 'lucide-react';
 import { api } from '../utils/api';
 import { sound } from '../utils/sound';
 import OngoingMatchCard from './OngoingMatchCard';
 import DivisionGuideModal from './DivisionGuideModal';
+import StreakModal from './StreakModal';
 
 export default function DashboardView({
   user,
@@ -15,6 +16,7 @@ export default function DashboardView({
   activeMatch,
   onResumeMatch,
   onForfeitMatch,
+  onUpdateUser,
 }) {
   const [joinCode, setJoinCode] = useState('');
   const [passcode, setPasscode] = useState('');
@@ -24,6 +26,7 @@ export default function DashboardView({
   const [loadingRooms, setLoadingRooms] = useState(true);
   const [currentActiveMatch, setCurrentActiveMatch] = useState(activeMatch || null);
   const [guideModalOpen, setGuideModalOpen] = useState(false);
+  const [streakModalOpen, setStreakModalOpen] = useState(false);
 
   // Sync prop changes into state
   useEffect(() => {
@@ -347,6 +350,60 @@ export default function DashboardView({
         </div>
       )}
 
+      {/* Daily Study & Arena Streak Banner */}
+      {user && (
+        <div
+          onClick={() => {
+            sound.click();
+            setStreakModalOpen(true);
+          }}
+          className="bg-gradient-to-r from-orange-950/40 via-[#221c2c] to-[#1a2133] border border-orange-500/30 hover:border-orange-500/60 rounded-3xl p-5 sm:p-6 mb-10 shadow-xl flex flex-col md:flex-row items-start md:items-center justify-between gap-5 cursor-pointer transition hover:scale-[1.01] group glow-orange-subtle"
+        >
+          <div className="flex items-center gap-4">
+            <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-orange-500 to-amber-500 flex items-center justify-center text-white shadow-lg shadow-orange-950/50 group-hover:scale-105 transition shrink-0 glow-orange">
+              <Flame className="w-8 h-8 fill-current animate-pulse" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2 mb-1">
+                <span className="text-[10px] font-mono font-black uppercase text-orange-400 bg-orange-500/20 px-2.5 py-0.5 rounded-full border border-orange-500/30">
+                  Daily Momentum
+                </span>
+                {user.is_streak_active_today ? (
+                  <span className="text-xs text-emerald-400 font-bold flex items-center gap-1">
+                    <CheckCircle2 className="w-3.5 h-3.5" />
+                    <span>Streak Active Today</span>
+                  </span>
+                ) : (
+                  <span className="text-xs text-amber-300 font-bold flex items-center gap-1 animate-pulse">
+                    <AlertCircle className="w-3.5 h-3.5" />
+                    <span>Solve 1 question today to keep your streak!</span>
+                  </span>
+                )}
+              </div>
+              <h3 className="text-lg sm:text-xl font-black text-white group-hover:text-orange-400 transition flex items-center gap-2">
+                <span>{user.current_streak || 0} Day Streak</span>
+                <span className="text-xs font-normal text-slate-400 font-mono">
+                  (Record: {user.longest_streak || 0}d)
+                </span>
+              </h3>
+              <p className="text-xs text-slate-300 mt-0.5">
+                Granting <strong className="text-orange-400">+{Math.min(20, (user.current_streak || 0) * 2)}% Bonus RP</strong> on all duels & tests. {user.streak_freezes !== undefined ? `🛡️ ${user.streak_freezes} Freeze Shield available.` : ''}
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 self-stretch md:self-auto justify-end">
+            <button
+              type="button"
+              className="px-4 py-2.5 bg-gradient-to-r from-orange-500 to-amber-500 text-white font-bold text-xs rounded-xl shadow-md transition flex items-center gap-2 group-hover:from-orange-400 group-hover:to-amber-400 shrink-0"
+            >
+              <span>View Streak Milestones</span>
+              <ArrowRight className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Active Public Matches Discovery */}
       {openRooms.length > 0 && (
         <div className="mb-10">
@@ -482,6 +539,14 @@ export default function DashboardView({
       <DivisionGuideModal
         isOpen={guideModalOpen}
         onClose={() => setGuideModalOpen(false)}
+      />
+
+      {/* Daily Study Streak Modal */}
+      <StreakModal
+        isOpen={streakModalOpen}
+        onClose={() => setStreakModalOpen(false)}
+        user={user}
+        onUpdateUser={onUpdateUser}
       />
     </div>
   );

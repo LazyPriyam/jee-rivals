@@ -29,6 +29,7 @@ import { api } from '../utils/api';
 import NotificationPanel from './NotificationPanel';
 import UpdateToast from './UpdateToast';
 import WhatsNewModal from './WhatsNewModal';
+import StreakModal from './StreakModal';
 
 export const getDivisionBaseTier = (div) => {
   if (!div) return 'BRONZE';
@@ -59,7 +60,8 @@ export default function Navbar({
   onOpenAuth,
   onLogout,
   onAcceptDuel,
-  hasActiveRoom = false
+  hasActiveRoom = false,
+  onUpdateUser,
 }) {
   const [isMuted, setIsMuted] = useState(sound.isMuted());
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -67,6 +69,7 @@ export default function Navbar({
   const [unreadCount, setUnreadCount] = useState(0);
   const [toastUpdate, setToastUpdate] = useState(null);
   const [selectedUpdateModal, setSelectedUpdateModal] = useState(null);
+  const [streakModalOpen, setStreakModalOpen] = useState(false);
   const [isCollapsed, setIsCollapsed] = useState(() => {
     try {
       return localStorage.getItem('jee_sidebar_collapsed') === 'true';
@@ -200,13 +203,32 @@ export default function Navbar({
             <div
               onClick={() => handleTabClick('profile')}
               className={`p-2 rounded-xl bg-[#202636] border border-orange-500/25 hover:border-orange-500/60 cursor-pointer transition flex items-center group ${
-                isCollapsed ? 'justify-center' : 'gap-2.5'
+                isCollapsed ? 'flex-col gap-1 justify-center' : 'gap-2.5'
               }`}
-              title={isCollapsed ? `${user.username} (${Math.round(user.overall_elo)} Elo)` : undefined}
+              title={isCollapsed ? `${user.username} (${Math.round(user.overall_elo)} Elo • 🔥 ${user.current_streak || 0} Streak)` : undefined}
             >
               <div className="w-8 h-8 rounded-lg bg-orange-950/90 border border-orange-500/40 flex items-center justify-center text-base shrink-0 group-hover:scale-105 transition">
                 {renderAvatarEmoji(user.avatar_id)}
               </div>
+              {isCollapsed && (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    sound.click();
+                    setStreakModalOpen(true);
+                  }}
+                  title={`Daily Study Streak: ${user.current_streak || 0} Days`}
+                  className={`flex items-center gap-0.5 px-1 py-0.5 rounded text-[9px] font-bold border transition cursor-pointer ${
+                    user.is_streak_active_today
+                      ? 'bg-orange-500/25 text-orange-400 border-orange-500/40'
+                      : 'bg-amber-500/15 text-amber-300 border-amber-500/30 animate-pulse'
+                  }`}
+                >
+                  <Flame className="w-2.5 h-2.5 fill-current" />
+                  <span>{user.current_streak || 0}</span>
+                </button>
+              )}
               {!isCollapsed && (
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center justify-between">
@@ -228,9 +250,28 @@ export default function Navbar({
                       Switch
                     </button>
                   </div>
-                  <div className="text-[10px] text-slate-400 font-mono">
-                    <span className="text-orange-400 font-bold">{Math.round(user.overall_elo)}</span> Elo •{' '}
-                    <span className="text-amber-400 font-bold">{user.weekly_rp}</span> RP
+                  <div className="flex items-center justify-between text-[10px] text-slate-400 font-mono mt-0.5">
+                    <div>
+                      <span className="text-orange-400 font-bold">{Math.round(user.overall_elo)}</span> Elo •{' '}
+                      <span className="text-amber-400 font-bold">{user.weekly_rp}</span> RP
+                    </div>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        sound.click();
+                        setStreakModalOpen(true);
+                      }}
+                      title="Daily Study Streak & Milestones"
+                      className={`flex items-center gap-1 px-1.5 py-0.2 rounded-full border transition cursor-pointer font-bold shrink-0 ${
+                        user.is_streak_active_today
+                          ? 'bg-orange-500/20 text-orange-400 border-orange-500/40 hover:bg-orange-500/30'
+                          : 'bg-amber-500/10 text-amber-300 border-amber-500/30 animate-pulse hover:bg-amber-500/20'
+                      }`}
+                    >
+                      <Flame className="w-2.5 h-2.5 fill-current" />
+                      <span>{user.current_streak || 0}</span>
+                    </button>
                   </div>
                 </div>
               )}
@@ -353,6 +394,26 @@ export default function Navbar({
 
         {/* Right side controls on mobile header */}
         <div className="flex items-center gap-2">
+          {/* Streak Flame Badge on mobile */}
+          {user && (
+            <button
+              type="button"
+              onClick={() => {
+                sound.click();
+                setStreakModalOpen(true);
+              }}
+              className={`px-2 py-1 rounded-lg text-xs font-bold border transition flex items-center gap-1 cursor-pointer ${
+                user.is_streak_active_today
+                  ? 'bg-orange-500/20 text-orange-400 border-orange-500/40'
+                  : 'bg-amber-500/10 text-amber-300 border-amber-500/30 animate-pulse'
+              }`}
+              title={`Daily Study Streak: ${user.current_streak || 0} Days`}
+            >
+              <Flame className="w-3.5 h-3.5 fill-current" />
+              <span>{user.current_streak || 0}</span>
+            </button>
+          )}
+
           {/* Notifications bell on mobile */}
           {user && (
             <div className="relative">
@@ -555,6 +616,14 @@ export default function Navbar({
             await api.updates.markRead(id);
           } catch (_) {}
         }}
+      />
+
+      {/* Daily Study Streak Modal */}
+      <StreakModal
+        isOpen={streakModalOpen}
+        onClose={() => setStreakModalOpen(false)}
+        user={user}
+        onUpdateUser={onUpdateUser}
       />
     </>
   );

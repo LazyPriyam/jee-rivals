@@ -430,8 +430,8 @@ export default function ProfileView({
               )}
             </div>
 
-            {/* Medals Trophy Rack */}
-            <div className="flex items-center justify-center gap-4 bg-black/40 px-4 py-2.5 rounded-2xl border border-white/10 w-full sm:w-auto">
+            {/* Medals & Streak Trophy Rack */}
+            <div className="flex items-center justify-center gap-3 sm:gap-4 bg-black/40 px-4 py-2.5 rounded-2xl border border-white/10 w-full sm:w-auto">
               <div className="text-center px-1">
                 <span className="text-base block">🥇</span>
                 <span className="text-xs font-mono font-bold text-white">{p.gold_medals || 0}</span>
@@ -446,6 +446,11 @@ export default function ProfileView({
                 <span className="text-base block">🥉</span>
                 <span className="text-xs font-mono font-bold text-white">{p.bronze_medals || 0}</span>
                 <span className="text-[9px] text-slate-400 uppercase block">Bronze</span>
+              </div>
+              <div className="text-center px-1 border-l border-white/10">
+                <span className="text-base block">🔥</span>
+                <span className="text-xs font-mono font-bold text-orange-400">{p.current_streak || 0}d</span>
+                <span className="text-[9px] text-slate-400 uppercase block">Streak</span>
               </div>
             </div>
           </div>

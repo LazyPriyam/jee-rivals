@@ -89,6 +89,9 @@ def format_user_profile(user: dict, cursor=None) -> UserProfile:
         except Exception:
             pass
 
+    from backend.app.tools.streaks_engine import get_user_streak_meta
+    streak_meta = get_user_streak_meta(user, cursor)
+
     return UserProfile(
         id=user["id"],
         username=user["username"],
@@ -121,7 +124,13 @@ def format_user_profile(user: dict, cursor=None) -> UserProfile:
         learnt_chapters=learnt,
         target_exam=target_exam,
         chat_settings=chat_set,
-        division_meta=div_eval
+        division_meta=div_eval,
+        current_streak=streak_meta["current_streak"],
+        longest_streak=streak_meta["longest_streak"],
+        last_active_date=streak_meta["last_active_date"],
+        streak_freezes=streak_meta["streak_freezes"],
+        is_streak_active_today=streak_meta["is_active_today"],
+        streak_meta=streak_meta
     )
 
 

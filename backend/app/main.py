@@ -21,6 +21,7 @@ from backend.app.routes.tournaments import router as tournaments_router
 from backend.app.routes.adaptive import router as adaptive_router
 from backend.app.routes.updates import router as updates_router
 from backend.app.routes.mastery import router as mastery_router
+from backend.app.routes.streaks import router as streaks_router
 
 # Initialize Database
 init_db()
@@ -67,6 +68,7 @@ app.include_router(leaderboards_router)
 app.include_router(sync_router)
 app.include_router(updates_router)
 app.include_router(mastery_router)
+app.include_router(streaks_router)
 
 
 # WebSocket Endpoint for Live Rooms

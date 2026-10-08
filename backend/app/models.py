@@ -43,6 +43,12 @@ class UserProfile(BaseModel):
     target_exam: Optional[str] = "MIXED"
     chat_settings: Optional[Dict[str, Any]] = {}
     division_meta: Optional[Dict[str, Any]] = None
+    current_streak: Optional[int] = 0
+    longest_streak: Optional[int] = 0
+    last_active_date: Optional[str] = None
+    streak_freezes: Optional[int] = 1
+    is_streak_active_today: Optional[bool] = False
+    streak_meta: Optional[Dict[str, Any]] = None
 
 class ProfileUpdateRequest(BaseModel):
     target_college: Optional[str] = None

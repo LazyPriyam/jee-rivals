@@ -170,6 +170,47 @@ ACHIEVEMENTS_REGISTRY = [
         "target": 1,
         "check": lambda u, s: u.get("gold_medals", 0) >= 1,
         "progress": lambda u, s: min(u.get("gold_medals", 0), 1),
+    },
+    # --- DAILY STUDY STREAK ACHIEVEMENTS ---
+    {
+        "id": "daily_streak_3",
+        "title": "Spark of Fire",
+        "description": "Maintain a 3-day continuous daily study and duel streak.",
+        "category": "STREAK",
+        "icon": "🔥",
+        "target": 3,
+        "check": lambda u, s: max(u.get("current_streak", 0), u.get("longest_streak", 0)) >= 3,
+        "progress": lambda u, s: min(max(u.get("current_streak", 0), u.get("longest_streak", 0)), 3),
+    },
+    {
+        "id": "daily_streak_7",
+        "title": "Week of Fire",
+        "description": "Maintain a 7-day unbroken daily study and practice streak.",
+        "category": "STREAK",
+        "icon": "⚡",
+        "target": 7,
+        "check": lambda u, s: max(u.get("current_streak", 0), u.get("longest_streak", 0)) >= 7,
+        "progress": lambda u, s: min(max(u.get("current_streak", 0), u.get("longest_streak", 0)), 7),
+    },
+    {
+        "id": "daily_streak_14",
+        "title": "Two-Week Grinder",
+        "description": "Maintain a 14-day continuous daily study streak.",
+        "category": "STREAK",
+        "icon": "🌋",
+        "target": 14,
+        "check": lambda u, s: max(u.get("current_streak", 0), u.get("longest_streak", 0)) >= 14,
+        "progress": lambda u, s: min(max(u.get("current_streak", 0), u.get("longest_streak", 0)), 14),
+    },
+    {
+        "id": "daily_streak_30",
+        "title": "Unbroken Titan",
+        "description": "Attain a monumental 30-day continuous study and duel streak.",
+        "category": "STREAK",
+        "icon": "👑",
+        "target": 30,
+        "check": lambda u, s: max(u.get("current_streak", 0), u.get("longest_streak", 0)) >= 30,
+        "progress": lambda u, s: min(max(u.get("current_streak", 0), u.get("longest_streak", 0)), 30),
     }
 ]
 

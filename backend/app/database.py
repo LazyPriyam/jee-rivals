@@ -390,17 +390,22 @@ def init_db():
 
     # Safe migration for user profile customization columns
     for col, default_val in [
-        ("target_college", "'IIT Bombay (Computer Science)'"),
-        ("target_exam_date", "'JEE Main Jan 2026'"),
-        ("bio", "'Aiming for Top 500 AIR. PvP Aspirant.'"),
-        ("banner_theme", "'orange_cyber'"),
-        ("pinned_badges", "'[\"elo_bronze\", \"first_blood\"]'"),
-        ("learnt_chapters", "'[]'"),
-        ("chat_settings", "'{}'"),
-        ("target_exam", "'MIXED'")
+        ("target_college", "TEXT DEFAULT 'IIT Bombay (Computer Science)'"),
+        ("target_exam_date", "TEXT DEFAULT 'JEE Main Jan 2026'"),
+        ("bio", "TEXT DEFAULT 'Aiming for Top 500 AIR. PvP Aspirant.'"),
+        ("banner_theme", "TEXT DEFAULT 'orange_cyber'"),
+        ("pinned_badges", "TEXT DEFAULT '[\"elo_bronze\", \"first_blood\"]'"),
+        ("learnt_chapters", "TEXT DEFAULT '[]'"),
+        ("chat_settings", "TEXT DEFAULT '{}'"),
+        ("target_exam", "TEXT DEFAULT 'MIXED'"),
+        ("current_streak", "INTEGER DEFAULT 0"),
+        ("longest_streak", "INTEGER DEFAULT 0"),
+        ("last_active_date", "TEXT DEFAULT NULL"),
+        ("streak_freezes", "INTEGER DEFAULT 1"),
+        ("streak_history", "TEXT DEFAULT '[]'"),
     ]:
         try:
-            cursor.execute(f"ALTER TABLE users ADD COLUMN {col} TEXT DEFAULT {default_val};")
+            cursor.execute(f"ALTER TABLE users ADD COLUMN {col} {default_val};")
         except Exception:
             pass
 

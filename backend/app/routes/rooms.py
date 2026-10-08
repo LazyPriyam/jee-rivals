@@ -1120,6 +1120,11 @@ async def submit_bulk_mock(code: str, req: BulkSubmissionRequest, user: dict = D
             """, (user["id"], q["id"], q["subject"], q["chapter"], 1 if is_corr else 0, time_per_item, q_elo_delta, room["mode"], now))
             from backend.app.tools.elo_engine import record_chapter_attempt
             record_chapter_attempt(c, user["id"], q["subject"], q["chapter"], is_corr)
+            try:
+                from backend.app.tools.streaks_engine import record_daily_activity
+                record_daily_activity(user["id"], c)
+            except Exception:
+                pass
 
         total_score += delta_score
         total_marks += delta_marks
@@ -1365,6 +1370,11 @@ async def submit_answer(code: str, submission: AnswerSubmissionRequest, user: di
     """, (user["id"], q["id"], q["subject"], q["chapter"], 1 if is_correct else 0, time_spent, q_elo_delta, room["mode"], now))
     from backend.app.tools.elo_engine import record_chapter_attempt
     record_chapter_attempt(c, user["id"], q["subject"], q["chapter"], is_correct)
+    try:
+        from backend.app.tools.streaks_engine import record_daily_activity
+        record_daily_activity(user["id"], c)
+    except Exception:
+        pass
 
     c.execute("SELECT COUNT(*) as unfinished FROM room_participants WHERE room_id = ? AND is_finished = 0", (room_id,))
     unfinished_count = c.fetchone()["unfinished"]

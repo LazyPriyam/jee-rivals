@@ -413,3 +413,10 @@ def apply_adaptive_result_to_profile(
             INSERT INTO user_rank_history (user_id, overall_elo, predicted_air_bracket, created_at)
             VALUES (?, ?, ?, ?)
         """, (user_id, round(new_ov, 1), air_b, now[:10]))
+
+    # 6. Record Daily Study Streak Activity
+    try:
+        from backend.app.tools.streaks_engine import record_daily_activity
+        record_daily_activity(user_id, cursor)
+    except Exception:
+        pass

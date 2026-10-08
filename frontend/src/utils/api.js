@@ -457,5 +457,10 @@ export const api = {
         body: JSON.stringify({ question_ids: questionIds, count }),
       }),
   },
+  streaks: {
+    getMe: () => request('/api/streaks/me'),
+    checkIn: () => request('/api/streaks/check-in', { method: 'POST' }),
+    buyFreeze: () => request('/api/streaks/buy-freeze', { method: 'POST' }),
+  },
 };
 

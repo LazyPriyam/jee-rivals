@@ -278,6 +278,7 @@ export default function App() {
               handleJoinRoomCode(room);
             } catch (_) {}
           }}
+          onUpdateUser={setUser}
         />
       )}
 
@@ -385,6 +386,7 @@ export default function App() {
               activeMatch={activeMatch}
               onResumeMatch={handleResumeMatch}
               onForfeitMatch={handleForfeitMatch}
+              onUpdateUser={setUser}
             />
           )}
         </div>

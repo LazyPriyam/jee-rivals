@@ -82,7 +82,7 @@ def get_weekly_leaderboard(limit: int = Query(50, ge=1, le=100)):
 
     c.execute("""
         SELECT id, username, avatar_id, title, weekly_rp, total_solved, total_correct, overall_elo,
-               gold_medals, silver_medals, bronze_medals
+               gold_medals, silver_medals, bronze_medals, current_streak
         FROM users
         ORDER BY weekly_rp DESC, overall_elo DESC
         LIMIT ?
@@ -115,6 +115,7 @@ def get_weekly_leaderboard(limit: int = Query(50, ge=1, le=100)):
             "avatar_id": u.get("avatar_id") or "default",
             "title": u.get("title") or "JEE Aspirant",
             "weekly_rp": u.get("weekly_rp", 0),
+            "streak": u.get("current_streak") or 0,
             "division": div_meta["full_name"],
             "division_id": div_meta["tier_id"],
             "division_sub": div_meta["subdivision"],
