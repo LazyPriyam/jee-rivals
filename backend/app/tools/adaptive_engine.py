@@ -129,7 +129,7 @@ def select_next_adaptive_question(
     base_query = """
         SELECT * FROM questions 
         WHERE solution_text IS NOT NULL AND solution_text != ''
-          AND (validation_status IS NULL OR validation_status != 'QUARANTINED')
+          AND (validation_status IS NULL OR validation_status NOT IN ('QUARANTINED', 'SUPERSEDED_BY_SUBQUESTIONS'))
     """
     params = []
 
@@ -183,7 +183,7 @@ def select_next_adaptive_question(
         fallback_query = """
             SELECT * FROM questions 
             WHERE solution_text IS NOT NULL AND solution_text != ''
-              AND (validation_status IS NULL OR validation_status != 'QUARANTINED')
+              AND (validation_status IS NULL OR validation_status NOT IN ('QUARANTINED', 'SUPERSEDED_BY_SUBQUESTIONS'))
         """
         fb_params = []
         if subject != "Full Syllabus":
@@ -204,7 +204,7 @@ def select_next_adaptive_question(
         # Ultimate fallback: Any unquarantined question in allowed syllabus
         fb_ult = """
             SELECT * FROM questions 
-            WHERE (validation_status IS NULL OR validation_status != 'QUARANTINED')
+            WHERE (validation_status IS NULL OR validation_status NOT IN ('QUARANTINED', 'SUPERSEDED_BY_SUBQUESTIONS'))
         """
         ult_params = []
         if effective_allowed:

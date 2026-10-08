@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { api, getToken } from '../utils/api';
 import MathRenderer from './MathRenderer';
 import { sound } from '../utils/sound';
-import { Timer, Zap, Trophy, CheckCircle2, XCircle, ArrowRight, Image as ImageIcon, Flame, Flag } from 'lucide-react';
+import { Timer, Zap, Trophy, CheckCircle2, XCircle, ArrowRight, Image as ImageIcon, Flame, Flag, BookOpen } from 'lucide-react';
 
 const LANE_THEMES = [
   {
@@ -508,6 +508,32 @@ export default function SpeedDuelView({
             )}
           </div>
         </div>
+
+        {/* Comprehension / Paragraph Box */}
+        {currentQ.passage_text && (
+          <div className="mb-6 rounded-2xl bg-[#1a2133] border-2 border-blue-500/40 shadow-lg overflow-hidden">
+            <div className="bg-gradient-to-r from-blue-950/80 via-[#1f293d] to-[#1a2133] border-b border-blue-500/30 px-4 py-2.5 flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <BookOpen className="w-4 h-4 text-blue-400 shrink-0" />
+                <span className="text-xs font-black uppercase tracking-wider text-blue-200">
+                  {currentQ.passage_title || 'Comprehension Passage'}
+                </span>
+              </div>
+              {currentQ.subquestion_index && currentQ.subquestion_total && (
+                <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-blue-500/20 text-blue-300 font-bold border border-blue-400/30">
+                  Question {currentQ.subquestion_index} of {currentQ.subquestion_total} based on this passage
+                </span>
+              )}
+            </div>
+            <div className="p-4 sm:p-5 text-sm sm:text-base leading-relaxed text-slate-200 font-normal max-h-72 overflow-y-auto border-b border-white/5 bg-[#141a29]/80">
+              <MathRenderer content={currentQ.passage_text} />
+            </div>
+            <div className="px-4 py-1.5 bg-blue-950/40 text-[11px] text-blue-300 font-medium flex items-center justify-between">
+              <span>Read the passage carefully and answer the question below:</span>
+              <span className="font-mono text-[10px] text-blue-400 uppercase">JEE Advanced Format</span>
+            </div>
+          </div>
+        )}
 
         {/* Question Text */}
         <div className="text-base sm:text-lg text-slate-100 mb-6 font-medium leading-relaxed">

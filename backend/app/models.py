@@ -103,6 +103,12 @@ class QuestionOut(BaseModel):
     diagram_urls: List[str]
     difficulty_tier: str
     elo_rating: int
+    passage_id: Optional[str] = None
+    passage_title: Optional[str] = None
+    passage_text: Optional[str] = None
+    subquestion_index: Optional[int] = None
+    subquestion_total: Optional[int] = None
+    is_comprehension: Optional[bool] = False
 
 class QuestionSolutionOut(BaseModel):
     id: str

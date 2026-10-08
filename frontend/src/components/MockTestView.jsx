@@ -3,15 +3,20 @@ import { api } from '../utils/api';
 import MathRenderer from './MathRenderer';
 import { sound } from '../utils/sound';
 import ReportQuestionModal from './ReportQuestionModal';
-import { Clock, AlertTriangle, FileText, X, Image as ImageIcon, CheckCircle, ChevronLeft, ChevronRight, User, Flag } from 'lucide-react';
+import { Clock, AlertTriangle, FileText, X, Image as ImageIcon, CheckCircle, ChevronLeft, ChevronRight, User, Flag, BookOpen } from 'lucide-react';
+import { normalizeQuestionsWithComprehensions, buildComprehensionGroupMap } from '../utils/comprehension';
 
   const sortQuestionsBySubject = (raw) => {
     if (!raw || raw.length === 0) return [];
+    const normalized = normalizeQuestionsWithComprehensions(raw);
     const order = { 'physics': 1, 'chemistry': 2, 'mathematics': 3, 'maths': 3 };
-    return [...raw].sort((a, b) => {
+    return [...normalized].sort((a, b) => {
       const oA = order[(a.subject || '').toLowerCase()] || 99;
       const oB = order[(b.subject || '').toLowerCase()] || 99;
       if (oA !== oB) return oA - oB;
+      if (a.passage_id && b.passage_id && a.passage_id === b.passage_id) {
+        return (a.subquestion_index || 0) - (b.subquestion_index || 0);
+      }
       return (a.id || '').localeCompare(b.id || '');
     });
   };
@@ -192,6 +197,8 @@ export default function MockTestView({ room, user, onMatchComplete, onExitToDash
   };
 
   const currentQ = questions[currentIndex];
+  const compGroupMap = React.useMemo(() => buildComprehensionGroupMap(questions), [questions]);
+  const currentCompGroup = compGroupMap[currentIndex];
 
   // Distinct subjects in exam strictly ordered: Physics -> Chemistry -> Mathematics
   const rawSubjects = Array.from(new Set(questions.map((q) => q.subject))).filter(Boolean);
@@ -463,7 +470,7 @@ export default function MockTestView({ room, user, onMatchComplete, onExitToDash
                 <span className="text-slate-500 text-[11px] truncate max-w-[180px]">{currentQ.chapter}</span>
                 <span className="text-slate-400">|</span>
                 <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-orange-100 text-orange-800 font-bold uppercase">
-                  {currentQ.question_type ? currentQ.question_type.replace('_', ' ') : 'MCQ'}
+                  {currentCompGroup?.isPassage ? 'PARAGRAPH / COMPREHENSION' : (currentQ.question_type ? currentQ.question_type.replace('_', ' ') : 'MCQ')}
                 </span>
               </div>
               <div className="flex items-center gap-2.5 font-mono text-[11px]">
@@ -490,6 +497,32 @@ export default function MockTestView({ room, user, onMatchComplete, onExitToDash
 
             {/* Question Body */}
             <div className="p-4 sm:p-6 overflow-y-auto max-h-[calc(100vh-290px)]">
+              {/* Official JEE Comprehension Context Box */}
+              {(currentCompGroup?.isPassage || currentQ.passage_text) && (
+                <div className="mb-6 rounded-xl bg-blue-50/70 border-2 border-blue-200/90 shadow-sm overflow-hidden">
+                  <div className="bg-gradient-to-r from-blue-100 via-indigo-50 to-blue-50 border-b border-blue-200 px-4 py-2 flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <BookOpen className="w-4 h-4 text-blue-700 shrink-0" />
+                      <span className="text-xs font-black uppercase tracking-wider text-blue-900">
+                        {currentCompGroup?.groupLabel || currentQ.passage_title || 'Comprehension Passage'}
+                      </span>
+                    </div>
+                    {(currentCompGroup?.subIndex || currentQ.subquestion_index) && (
+                      <span className="text-[10px] font-mono px-2.5 py-0.5 rounded-full bg-blue-200 text-blue-950 font-black border border-blue-300">
+                        Question {currentCompGroup?.subIndex || currentQ.subquestion_index} of {currentCompGroup?.subTotal || currentQ.subquestion_total} based on this passage
+                      </span>
+                    )}
+                  </div>
+                  <div className="p-4 sm:p-5 text-sm sm:text-base leading-relaxed text-slate-800 font-normal max-h-72 overflow-y-auto border-b border-blue-100 bg-white/75">
+                    <MathRenderer content={currentCompGroup?.passageText || currentQ.passage_text} />
+                  </div>
+                  <div className="px-4 py-1.5 bg-blue-50/90 text-[11px] text-blue-800 font-semibold flex items-center justify-between">
+                    <span>Read the paragraph above and answer the question below:</span>
+                    <span className="font-mono text-[10px] text-blue-700 uppercase font-bold">NTA CBT Standard</span>
+                  </div>
+                </div>
+              )}
+
               {/* Question Statement */}
               <div className="text-sm sm:text-base text-slate-900 leading-relaxed font-normal mb-6">
                 <MathRenderer content={currentQ.text} />
@@ -667,6 +700,7 @@ export default function MockTestView({ room, user, onMatchComplete, onExitToDash
                   const q = questions[idx];
                   const ntaState = getQuestionNTAState(idx);
                   const isCurrent = idx === currentIndex;
+                  const groupInfo = compGroupMap[idx];
 
                   let shapeClass = 'nta-shape-not-visited';
                   if (ntaState === 'ANSWERED') shapeClass = 'nta-shape-answered';
@@ -678,11 +712,15 @@ export default function MockTestView({ room, user, onMatchComplete, onExitToDash
                     <button
                       key={q.id}
                       onClick={() => goToQuestion(idx)}
-                      className={`h-9 w-9 text-xs font-mono font-bold flex items-center justify-center cursor-pointer transition ${shapeClass} ${
+                      title={groupInfo?.isPassage ? `${groupInfo.groupLabel} (Sub-question ${groupInfo.subIndex})` : `Question ${idx + 1}`}
+                      className={`h-9 w-9 text-xs font-mono font-bold flex flex-col items-center justify-center cursor-pointer transition relative ${shapeClass} ${
                         isCurrent ? 'ring-2 ring-blue-600 ring-offset-2 scale-105' : 'hover:opacity-90'
                       }`}
                     >
-                      {idx + 1}
+                      <span>{idx + 1}</span>
+                      {groupInfo?.isPassage && (
+                        <span className="text-[7px] leading-none opacity-85 font-sans font-black tracking-tighter text-blue-200">¶</span>
+                      )}
                     </button>
                   );
                 })}
@@ -723,7 +761,21 @@ export default function MockTestView({ room, user, onMatchComplete, onExitToDash
                     <span>Q{idx + 1}</span>
                     <span>• {q.subject}</span>
                     <span className="text-slate-500">• {q.chapter}</span>
+                    {q.passage_text && (
+                      <span className="text-[10px] font-mono px-1.5 py-0.2 bg-blue-100 text-blue-800 rounded">
+                        Sub-Q {q.subquestion_index || 1}
+                      </span>
+                    )}
                   </div>
+                  {q.passage_text && (compGroupMap[idx]?.isFirstInGroup ?? true) && (
+                    <div className="mb-3 p-3 bg-blue-50/80 border border-blue-200 rounded text-xs leading-relaxed text-slate-800">
+                      <div className="font-bold text-blue-900 mb-1 flex items-center gap-1.5">
+                        <BookOpen className="w-3.5 h-3.5" />
+                        <span>{compGroupMap[idx]?.groupLabel || q.passage_title || 'Comprehension Passage'}</span>
+                      </div>
+                      <MathRenderer content={q.passage_text} />
+                    </div>
+                  )}
                   <div className="mb-3">
                     <MathRenderer content={q.text} />
                   </div>

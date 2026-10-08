@@ -159,7 +159,7 @@ def detect_question_defects(q: dict) -> List[str]:
                 break
 
     # 7. Incomplete Comprehension Context
-    if q_type == "COMPREHENSION" and len(clean_text) < 45:
+    if q_type == "COMPREHENSION" and not q.get("passage_text") and len(clean_text) < 45:
         defects.append("INCOMPLETE_COMPREHENSION: Subquestion lacks necessary passage or background context")
 
     return defects

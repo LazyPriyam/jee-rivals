@@ -767,6 +767,26 @@ export default function TestAnalysisView({ roomCode, user, onBack, onStartPreset
                   </div>
                 </div>
 
+                {/* Comprehension / Paragraph Box */}
+                {q.passage_text && (
+                  <div className="mb-4 rounded-xl bg-blue-950/30 border border-blue-500/30 overflow-hidden shadow-sm">
+                    <div className="bg-blue-900/30 border-b border-blue-500/20 px-3 py-1.5 flex items-center justify-between text-xs">
+                      <div className="flex items-center gap-1.5 font-bold text-blue-200">
+                        <BookOpen className="w-3.5 h-3.5 text-blue-400" />
+                        <span>{q.passage_title || 'Comprehension Passage Context'}</span>
+                      </div>
+                      {q.subquestion_index && q.subquestion_total && (
+                        <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-blue-500/20 text-blue-300 font-bold border border-blue-400/30">
+                          Sub-question {q.subquestion_index} of {q.subquestion_total}
+                        </span>
+                      )}
+                    </div>
+                    <div className="p-3.5 text-xs sm:text-sm leading-relaxed text-slate-300 max-h-56 overflow-y-auto">
+                      <MathRenderer text={q.passage_text} />
+                    </div>
+                  </div>
+                )}
+
                 {/* Text */}
                 <div className="text-sm text-slate-200 leading-relaxed overflow-x-auto mb-4">
                   <MathRenderer text={q.text} />

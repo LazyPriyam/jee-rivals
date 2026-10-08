@@ -76,8 +76,19 @@ def init_db():
         cursor.execute("ALTER TABLE questions ADD COLUMN validation_status TEXT DEFAULT 'VALIDATED';")
     if "validation_flags" not in q_cols:
         cursor.execute("ALTER TABLE questions ADD COLUMN validation_flags TEXT DEFAULT '[]';")
+    if "passage_id" not in q_cols:
+        cursor.execute("ALTER TABLE questions ADD COLUMN passage_id TEXT;")
+    if "passage_title" not in q_cols:
+        cursor.execute("ALTER TABLE questions ADD COLUMN passage_title TEXT;")
+    if "passage_text" not in q_cols:
+        cursor.execute("ALTER TABLE questions ADD COLUMN passage_text TEXT;")
+    if "subquestion_index" not in q_cols:
+        cursor.execute("ALTER TABLE questions ADD COLUMN subquestion_index INTEGER DEFAULT 1;")
+    if "subquestion_total" not in q_cols:
+        cursor.execute("ALTER TABLE questions ADD COLUMN subquestion_total INTEGER DEFAULT 1;")
 
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_questions_val_status ON questions(validation_status);")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_questions_passage_id ON questions(passage_id);")
 
     # Quarantine Table
     cursor.execute("""
@@ -403,6 +414,12 @@ def init_db():
     try:
         from backend.app.tools.system_updates_engine import seed_default_updates_if_needed
         seed_default_updates_if_needed(cursor)
+    except Exception:
+        pass
+
+    try:
+        from backend.app.tools.comprehension_engine import migrate_comprehension_questions
+        migrate_comprehension_questions(cursor)
     except Exception:
         pass
 

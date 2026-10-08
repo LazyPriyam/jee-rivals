@@ -59,6 +59,9 @@ def row_to_question_out(row: dict) -> QuestionOut:
                 fn = Path(u_str.replace("\\", "/")).name
                 clean_urls.append(f"/diagrams/{fn}")
 
+    passage_text_clean = clean_escapes(row.get("passage_text")) if row.get("passage_text") else None
+    is_comp = bool(passage_text_clean or row.get("passage_id") or (row.get("question_type") and row.get("question_type").upper() == "COMPREHENSION"))
+
     return QuestionOut(
         id=row["id"],
         subject=row["subject"],
@@ -70,7 +73,13 @@ def row_to_question_out(row: dict) -> QuestionOut:
         has_diagram=bool(row.get("has_diagram")),
         diagram_urls=clean_urls,
         difficulty_tier=row.get("difficulty_tier", "MEDIUM"),
-        elo_rating=row.get("elo_rating", 1500)
+        elo_rating=row.get("elo_rating", 1500),
+        passage_id=row.get("passage_id"),
+        passage_title=row.get("passage_title") or ("Comprehension Passage" if is_comp else None),
+        passage_text=passage_text_clean,
+        subquestion_index=row.get("subquestion_index"),
+        subquestion_total=row.get("subquestion_total"),
+        is_comprehension=is_comp
     )
 
 
@@ -152,7 +161,7 @@ def get_daily_challenge():
     c.execute("""
         SELECT * FROM questions 
         WHERE solution_text IS NOT NULL AND solution_text != ''
-          AND (validation_status IS NULL OR validation_status != 'QUARANTINED')
+          AND (validation_status IS NULL OR validation_status NOT IN ('QUARANTINED', 'SUPERSEDED_BY_SUBQUESTIONS'))
     """)
     rows = [dict(r) for r in c.fetchall()]
     conn.close()
@@ -187,7 +196,7 @@ def get_random_questions(
     query = """
         SELECT * FROM questions 
         WHERE solution_text IS NOT NULL AND solution_text != ''
-          AND (validation_status IS NULL OR validation_status != 'QUARANTINED')
+          AND (validation_status IS NULL OR validation_status NOT IN ('QUARANTINED', 'SUPERSEDED_BY_SUBQUESTIONS'))
     """
     params = []
 

@@ -263,7 +263,7 @@ def create_room(req: RoomCreateRequest, user: dict = Depends(get_current_user)):
         filter_subjects = req.subjects or ([req.subject] if req.subject and req.subject.lower() not in ("all", "any") else [])
         filter_chapters = req.chapters or ([req.chapter] if req.chapter and req.chapter.lower() not in ("all", "any") else [])
 
-        base_where = "solution_text IS NOT NULL AND solution_text != '' AND (validation_status IS NULL OR validation_status != 'QUARANTINED')"
+        base_where = "solution_text IS NOT NULL AND solution_text != '' AND (validation_status IS NULL OR validation_status NOT IN ('QUARANTINED', 'SUPERSEDED_BY_SUBQUESTIONS'))"
         q_query = f"SELECT * FROM questions WHERE {base_where}"
         params = []
 
@@ -331,7 +331,27 @@ def create_room(req: RoomCreateRequest, user: dict = Depends(get_current_user)):
         candidate_rows = [dict(r) for r in c.fetchall()]
 
         verified_rows = []
+        seen_passages = set()
+        from backend.app.tools.comprehension_engine import get_passage_siblings
+
         for cand in candidate_rows:
+            if any(cand["id"] == vr["id"] for vr in verified_rows):
+                continue
+            passage_id = cand.get("passage_id")
+            if passage_id:
+                if passage_id in seen_passages:
+                    continue
+                seen_passages.add(passage_id)
+                siblings = get_passage_siblings(c, passage_id)
+                if siblings:
+                    for sib in siblings:
+                        is_valid, healed_q, _ = audit_and_heal_question(sib)
+                        if is_valid and healed_q and not any(healed_q["id"] == vr["id"] for vr in verified_rows):
+                            verified_rows.append(healed_q)
+                    if len(verified_rows) >= target_count:
+                        break
+                    continue
+
             is_valid, healed_q, _ = audit_and_heal_question(cand)
             if is_valid and healed_q:
                 verified_rows.append(healed_q)
@@ -358,6 +378,21 @@ def create_room(req: RoomCreateRequest, user: dict = Depends(get_current_user)):
             for cand in candidate_rows:
                 if any(cand["id"] == vr["id"] for vr in verified_rows):
                     continue
+                passage_id = cand.get("passage_id")
+                if passage_id:
+                    if passage_id in seen_passages:
+                        continue
+                    seen_passages.add(passage_id)
+                    siblings = get_passage_siblings(c, passage_id)
+                    if siblings:
+                        for sib in siblings:
+                            is_valid, healed_q, _ = audit_and_heal_question(sib)
+                            if is_valid and healed_q and not any(healed_q["id"] == vr["id"] for vr in verified_rows):
+                                verified_rows.append(healed_q)
+                        if len(verified_rows) >= target_count:
+                            break
+                        continue
+
                 is_valid, healed_q, _ = audit_and_heal_question(cand)
                 if is_valid and healed_q:
                     verified_rows.append(healed_q)
@@ -370,6 +405,21 @@ def create_room(req: RoomCreateRequest, user: dict = Depends(get_current_user)):
             for cand in candidate_rows:
                 if any(cand["id"] == vr["id"] for vr in verified_rows):
                     continue
+                passage_id = cand.get("passage_id")
+                if passage_id:
+                    if passage_id in seen_passages:
+                        continue
+                    seen_passages.add(passage_id)
+                    siblings = get_passage_siblings(c, passage_id)
+                    if siblings:
+                        for sib in siblings:
+                            is_valid, healed_q, _ = audit_and_heal_question(sib)
+                            if is_valid and healed_q and not any(healed_q["id"] == vr["id"] for vr in verified_rows):
+                                verified_rows.append(healed_q)
+                        if len(verified_rows) >= target_count:
+                            break
+                        continue
+
                 is_valid, healed_q, _ = audit_and_heal_question(cand)
                 if is_valid and healed_q:
                     verified_rows.append(healed_q)
@@ -385,9 +435,14 @@ def create_room(req: RoomCreateRequest, user: dict = Depends(get_current_user)):
             detail="No questions available matching your filters. Please adjust chapter selection or run 'jee cloud push'."
         )
 
-    # Sort questions by subject (Physics -> Chemistry -> Mathematics) so questions never jump between subjects!
+    # Sort questions by subject (Physics -> Chemistry -> Mathematics) while keeping comprehension passages contiguous!
     subj_sort = {"physics": 1, "chemistry": 2, "mathematics": 3, "maths": 3}
-    q_rows.sort(key=lambda r: (subj_sort.get((r.get("subject") or "").lower(), 99), r.get("id")))
+    q_rows.sort(key=lambda r: (
+        subj_sort.get((r.get("subject") or "").lower(), 99),
+        r.get("passage_id") or r.get("id"),
+        r.get("subquestion_index") or 0,
+        r.get("id")
+    ))
 
     question_ids = [r["id"] for r in q_rows]
     room_id = str(uuid.uuid4())
@@ -600,7 +655,12 @@ def get_room_state(code: str, user: dict) -> RoomState:
 
         if is_mock and all_qs:
             subj_sort = {"physics": 1, "chemistry": 2, "mathematics": 3, "maths": 3}
-            all_qs.sort(key=lambda q: (subj_sort.get((q.subject or "").lower(), 99), q.id))
+            all_qs.sort(key=lambda q: (
+                subj_sort.get((q.subject or "").lower(), 99),
+                q.passage_id or q.id,
+                q.subquestion_index or 0,
+                q.id
+            ))
 
     if in_progress and not is_mock:
         # Find calling user's current question in Speed Duel
