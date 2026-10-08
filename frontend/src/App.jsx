@@ -38,6 +38,7 @@ export default function App() {
   });
   const [activeTab, setActiveTab] = useState('arena');
   const [currentRoom, setCurrentRoom] = useState(null);
+  const [activeMatch, setActiveMatch] = useState(null);
   const [roomViewMode, setRoomViewMode] = useState(null); // null, 'lobby', 'battle', 'waiting', 'results'
   const [authModalOpen, setAuthModalOpen] = useState(false);
   const [createRoomModalOpen, setCreateRoomModalOpen] = useState(false);
@@ -45,27 +46,32 @@ export default function App() {
   const [inspectTestCode, setInspectTestCode] = useState(null);
   const [skillTreePayload, setSkillTreePayload] = useState(null);
 
-  // Restore active test on page refresh (prevents losing test session)
-  useEffect(() => {
+  const fetchActiveMatch = async () => {
+    if (!getToken()) return null;
     try {
-      const activeCode = localStorage.getItem('jee_active_test_room');
-      if (activeCode) {
-        api.rooms.get(activeCode)
-          .then((r) => {
-            if (r && r.status === 'IN_PROGRESS') {
-              setCurrentRoom(r);
-              setRoomViewMode('battle');
-              setActiveTab('arena');
-            } else {
-              localStorage.removeItem('jee_active_test_room');
-            }
-          })
-          .catch(() => {
-            localStorage.removeItem('jee_active_test_room');
-          });
+      const res = await api.rooms.getActive();
+      if (res?.active_room) {
+        setActiveMatch(res.active_room);
+        setCurrentRoom(res.active_room);
+        return res.active_room;
+      } else {
+        setActiveMatch(null);
+        try {
+          localStorage.removeItem('jee_active_test_room');
+        } catch (_) {}
       }
     } catch (_) {}
-  }, []);
+    return null;
+  };
+
+  // On page reload or refresh: move user out from the test screen to Dashboard.
+  // We keep currentRoom populated from the API so that the Dashboard displays
+  // the ongoing match status card (Chess.com style) with a "Resume Match" button.
+  useEffect(() => {
+    fetchActiveMatch();
+    // Notice: We intentionally do NOT call setRoomViewMode('battle')!
+    // roomViewMode remains null so the user lands cleanly on the Dashboard.
+  }, [user?.id]);
 
   // Fetch skill tree data for standalone Skill Tree tab
   useEffect(() => {
@@ -218,6 +224,34 @@ export default function App() {
     }
   };
 
+  const handleResumeMatch = (room) => {
+    setCurrentRoom(room);
+    setActiveMatch(room);
+    try {
+      localStorage.setItem('jee_active_test_room', room.code);
+    } catch (_) {}
+    const myPart = room.participants?.find((p) => p.user_id === user?.id);
+    if (myPart?.is_finished) {
+      setRoomViewMode('waiting');
+    } else {
+      setRoomViewMode('battle');
+    }
+    setActiveTab('arena');
+  };
+
+  const handleForfeitMatch = async (code) => {
+    try {
+      await api.rooms.forfeit(code);
+    } catch (_) {}
+    setActiveMatch(null);
+    setCurrentRoom(null);
+    setRoomViewMode(null);
+    try {
+      localStorage.removeItem('jee_active_test_room');
+    } catch (_) {}
+    refreshUser();
+  };
+
   const refreshUser = () => {
     api.auth.getMe().then((u) => setUser(u)).catch(() => {});
   };
@@ -294,6 +328,11 @@ export default function App() {
                   setRoomViewMode('results');
                   refreshUser();
                 }}
+                onExitToDashboard={() => {
+                  setRoomViewMode(null);
+                  setActiveTab('arena');
+                  fetchActiveMatch();
+                }}
               />
             ) : (
               <SpeedDuelView
@@ -304,6 +343,12 @@ export default function App() {
                   setRoomViewMode('results');
                   refreshUser();
                 }}
+                onExitToDashboard={() => {
+                  setRoomViewMode(null);
+                  setActiveTab('arena');
+                  fetchActiveMatch();
+                }}
+                onForfeit={handleForfeitMatch}
               />
             )
           ) : roomViewMode === 'waiting' && currentRoom ? (
@@ -337,6 +382,9 @@ export default function App() {
               onOpenCreateRoom={() => switchTab('generator')}
               onJoinRoomCode={handleJoinRoomCode}
               onStartPreset={handleStartPreset}
+              activeMatch={activeMatch}
+              onResumeMatch={handleResumeMatch}
+              onForfeitMatch={handleForfeitMatch}
             />
           )}
         </div>

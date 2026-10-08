@@ -165,9 +165,19 @@ def init_db():
         answers TEXT DEFAULT '{}',
         is_finished INTEGER DEFAULT 0,
         finished_at TEXT,
+        question_started_at TEXT,
         PRIMARY KEY (room_id, user_id)
     );
     """)
+
+    # Safe column migrations for room_participants
+    cursor.execute("PRAGMA table_info(room_participants);")
+    existing_part_cols = {row[1] for row in cursor.fetchall()}
+    if "question_started_at" not in existing_part_cols:
+        try:
+            cursor.execute("ALTER TABLE room_participants ADD COLUMN question_started_at TEXT;")
+        except Exception:
+            pass
 
     # Attempt / Activity Log for Radars & History
     cursor.execute("""

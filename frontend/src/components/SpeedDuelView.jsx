@@ -38,18 +38,39 @@ const ME_THEME = {
   core: 'bg-white',
 };
 
-export default function SpeedDuelView({ room, user, onPlayerFinished, onMatchComplete }) {
+export default function SpeedDuelView({
+  room,
+  user,
+  onPlayerFinished,
+  onMatchComplete,
+  onExitToDashboard,
+  onForfeit
+}) {
   const [roomState, setRoomState] = useState(room);
   const [currentQ, setCurrentQ] = useState(room.current_question || null);
   const [selectedOption, setSelectedOption] = useState('');
   const [submitting, setSubmitting] = useState(false);
-  const [timeRemaining, setTimeRemaining] = useState(room.time_per_question || 90);
   const [startTime, setStartTime] = useState(Date.now());
   const [feedback, setFeedback] = useState(null);
   const [diagramZoom, setDiagramZoom] = useState(false);
+  const [forfeitConfirmOpen, setForfeitConfirmOpen] = useState(false);
+
+  // Compute wall-clock deadline for current question
+  const getInitialDeadline = () => {
+    if (room.time_remaining_seconds != null) {
+      return Date.now() + room.time_remaining_seconds * 1000;
+    }
+    return Date.now() + (room.time_per_question || 90) * 1000;
+  };
+
+  const deadlineRef = useRef(getInitialDeadline());
+  const [timeRemaining, setTimeRemaining] = useState(() => {
+    return Math.max(0, Math.ceil((deadlineRef.current - Date.now()) / 1000));
+  });
 
   const timerRef = useRef(null);
   const wsRef = useRef(null);
+  const submittingRef = useRef(false);
 
   // Setup WebSocket for live score surges
   useEffect(() => {
@@ -80,13 +101,24 @@ export default function SpeedDuelView({ room, user, onPlayerFinished, onMatchCom
     };
   }, [room.code]);
 
-  // Polling fallback to keep participants and match completion synced in case of WS jitter
+  // Polling fallback to keep participants, server deadline, and match completion synced
   useEffect(() => {
     let active = true;
     const pollInterval = setInterval(() => {
       api.rooms.get(room.code).then((updated) => {
         if (!active || !updated) return;
         setRoomState((prev) => ({ ...prev, participants: updated.participants }));
+
+        // Recalibrate deadline if server clock differs by > 2s
+        if (updated.time_remaining_seconds != null && !submittingRef.current && !feedback) {
+          const serverRem = updated.time_remaining_seconds;
+          const currentLocalRem = Math.max(0, Math.ceil((deadlineRef.current - Date.now()) / 1000));
+          if (Math.abs(serverRem - currentLocalRem) > 2) {
+            deadlineRef.current = Date.now() + serverRem * 1000;
+            setTimeRemaining(serverRem);
+          }
+        }
+
         if (updated.status === 'COMPLETED') {
           onMatchComplete();
         } else if (updated.participants?.find((p) => p.user_id === user?.id)?.is_finished) {
@@ -108,7 +140,9 @@ export default function SpeedDuelView({ room, user, onPlayerFinished, onMatchCom
         setRoomState(data);
         if (data.current_question) {
           setCurrentQ(data.current_question);
-          setTimeRemaining(data.time_per_question || 90);
+          const perQ = data.time_remaining_seconds != null ? data.time_remaining_seconds : (data.time_per_question || 90);
+          deadlineRef.current = Date.now() + perQ * 1000;
+          setTimeRemaining(perQ);
           setStartTime(Date.now());
           setSelectedOption('');
         } else if (data.status === 'COMPLETED') {
@@ -120,29 +154,44 @@ export default function SpeedDuelView({ room, user, onPlayerFinished, onMatchCom
     }
   }, [currentQ]);
 
-  const submittingRef = useRef(false);
-
-  // Countdown Timer
+  // Wall-Clock Countdown Timer with Tab-Switch Proof Synchronization
   useEffect(() => {
     clearInterval(timerRef.current);
     if (!currentQ || submitting || feedback) return;
 
-    timerRef.current = setInterval(() => {
-      setTimeRemaining((prev) => {
-        if (prev <= 5 && prev > 1) {
-          sound.tick();
-        }
-        if (prev <= 1) {
-          clearInterval(timerRef.current);
-          handleAutoTimeout();
-          return 0;
-        }
-        return prev - 1;
-      });
-    }, 1000);
+    const tick = () => {
+      const rem = Math.max(0, Math.ceil((deadlineRef.current - Date.now()) / 1000));
+      setTimeRemaining(rem);
+      if (rem <= 5 && rem > 0) {
+        sound.tick();
+      }
+      if (rem <= 0) {
+        clearInterval(timerRef.current);
+        handleAutoTimeout();
+      }
+    };
 
-    return () => clearInterval(timerRef.current);
-  }, [currentQ, submitting, feedback]);
+    tick();
+    timerRef.current = setInterval(tick, 1000);
+
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        tick();
+      }
+    };
+    const handleFocus = () => {
+      tick();
+    };
+
+    document.addEventListener('visibilitychange', handleVisibility);
+    window.addEventListener('focus', handleFocus);
+
+    return () => {
+      clearInterval(timerRef.current);
+      document.removeEventListener('visibilitychange', handleVisibility);
+      window.removeEventListener('focus', handleFocus);
+    };
+  }, [currentQ?.id, submitting, feedback]);
 
   const handleAutoTimeout = () => {
     if (!currentQ || submittingRef.current) return;
@@ -188,14 +237,21 @@ export default function SpeedDuelView({ room, user, onPlayerFinished, onMatchCom
           onPlayerFinished();
         } else {
           // Advance directly to next_question from server response
+          const perQ = roomState.time_per_question || 90;
+          deadlineRef.current = Date.now() + perQ * 1000;
+          setTimeRemaining(perQ);
+
           if (res.next_question) {
             setCurrentQ(res.next_question);
           } else {
             const nextState = await api.rooms.get(room.code);
             setRoomState(nextState);
             setCurrentQ(nextState.current_question);
+            if (nextState.time_remaining_seconds != null) {
+              deadlineRef.current = Date.now() + nextState.time_remaining_seconds * 1000;
+              setTimeRemaining(nextState.time_remaining_seconds);
+            }
           }
-          setTimeRemaining(roomState.time_per_question || 90);
           setStartTime(Date.now());
           setSelectedOption('');
         }
@@ -418,11 +474,38 @@ export default function SpeedDuelView({ room, user, onPlayerFinished, onMatchCom
             </span>
           </div>
 
-          <div className="flex items-center gap-2 text-sm font-mono font-bold text-slate-200 bg-[#1e2433] px-3.5 py-1.5 rounded-xl border border-white/10">
-            <Timer className="w-4 h-4 text-orange-400" />
-            <span className={timeRemaining <= 15 ? 'text-red-400 font-black animate-pulse' : 'text-white'}>
-              {timeRemaining}s
-            </span>
+          <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 text-sm font-mono font-bold text-slate-200 bg-[#1e2433] px-3.5 py-1.5 rounded-xl border border-white/10">
+              <Timer className="w-4 h-4 text-orange-400" />
+              <span className={timeRemaining <= 15 ? 'text-red-400 font-black animate-pulse' : 'text-white'}>
+                {timeRemaining}s
+              </span>
+            </div>
+
+            {onExitToDashboard && (
+              <button
+                type="button"
+                onClick={() => {
+                  sound.click();
+                  onExitToDashboard();
+                }}
+                className="px-3 py-1.5 bg-[#1e2433] hover:bg-[#293247] text-slate-300 hover:text-white text-xs font-bold rounded-xl border border-white/10 transition cursor-pointer"
+                title="Pause screen and return to Dashboard (Match remains active)"
+              >
+                Dashboard
+              </button>
+            )}
+
+            {onForfeit && (
+              <button
+                type="button"
+                onClick={() => setForfeitConfirmOpen(true)}
+                className="px-2.5 py-1.5 bg-[#1e2433] hover:bg-rose-950/40 text-slate-400 hover:text-rose-400 text-xs font-bold rounded-xl border border-white/10 hover:border-rose-500/30 transition cursor-pointer"
+                title="Forfeit Match"
+              >
+                Forfeit
+              </button>
+            )}
           </div>
         </div>
 
@@ -549,6 +632,40 @@ export default function SpeedDuelView({ room, user, onPlayerFinished, onMatchCom
           </button>
         </div>
       </div>
+
+      {/* Forfeit Confirmation Modal */}
+      {forfeitConfirmOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-150">
+          <div className="bg-[#1b2232] border border-rose-500/40 rounded-3xl max-w-md w-full p-6 text-slate-100 shadow-2xl space-y-4">
+            <h3 className="text-base font-black text-rose-400">Forfeit Speed Duel?</h3>
+            <p className="text-xs sm:text-sm text-slate-300 leading-relaxed">
+              Are you sure you want to forfeit? Your match will conclude immediately and you will receive zero points for remaining questions.
+            </p>
+            <div className="flex items-center justify-end gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() => setForfeitConfirmOpen(false)}
+                className="px-4 py-2 bg-[#293247] hover:bg-[#343e57] text-slate-200 font-bold text-xs rounded-xl transition cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={async () => {
+                  sound.click();
+                  setForfeitConfirmOpen(false);
+                  if (onForfeit) {
+                    await onForfeit(room.code);
+                  }
+                }}
+                className="px-5 py-2 bg-rose-600 hover:bg-rose-500 text-white font-black text-xs rounded-xl shadow-lg transition cursor-pointer"
+              >
+                Confirm Forfeit
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

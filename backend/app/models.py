@@ -146,6 +146,7 @@ class ParticipantScore(BaseModel):
     current_question_index: int
     is_finished: bool
     rank: int = 1
+    question_started_at: Optional[str] = None
 
 class RoomState(BaseModel):
     id: str
@@ -174,6 +175,8 @@ class RoomState(BaseModel):
     current_question: Optional[QuestionOut] = None
     all_questions: Optional[List[QuestionOut]] = None
     time_remaining_seconds: Optional[int] = None
+    started_at: Optional[str] = None
+    server_time: Optional[str] = None
     tournament_id: Optional[str] = None
     tournament_match_id: Optional[str] = None
 

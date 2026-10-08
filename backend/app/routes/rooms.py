@@ -581,7 +581,8 @@ def get_room_state(code: str, user: dict) -> RoomState:
             marks=display_marks,
             current_question_index=p["current_question_index"],
             is_finished=bool(p["is_finished"]),
-            rank=idx
+            rank=idx,
+            question_started_at=p.get("question_started_at")
         ))
 
     # Fetch questions
@@ -626,6 +627,34 @@ def get_room_state(code: str, user: dict) -> RoomState:
         except Exception:
             chapters_list = [room["chapters"]]
 
+    # Global server-synchronized time calculation
+    time_rem_sec = None
+    started_at_str = room.get("started_at")
+    now_iso = datetime.datetime.utcnow().isoformat()
+    if in_progress and started_at_str:
+        try:
+            started_dt = datetime.datetime.fromisoformat(started_at_str.replace("Z", "+00:00")).replace(tzinfo=None)
+            now_dt = datetime.datetime.utcnow()
+            elapsed_total = int((now_dt - started_dt).total_seconds())
+
+            if is_mock:
+                total_sec = (room.get("total_duration_minutes") or 60) * 60
+                time_rem_sec = max(0, total_sec - elapsed_total)
+            else:
+                # Speed Duel: compute remaining time on current question for this player
+                my_p = next((p for p in part_rows if p["user_id"] == user["id"]), None)
+                if my_p and not my_p.get("is_finished"):
+                    q_start_str = my_p.get("question_started_at") or started_at_str
+                    q_start_dt = datetime.datetime.fromisoformat(q_start_str.replace("Z", "+00:00")).replace(tzinfo=None)
+                    q_elapsed = int((now_dt - q_start_dt).total_seconds())
+                    time_per_q = room.get("time_per_question") or 90
+                    time_rem_sec = max(0, time_per_q - q_elapsed)
+                else:
+                    total_duel_sec = room["total_questions"] * (room.get("time_per_question") or 90)
+                    time_rem_sec = max(0, total_duel_sec - elapsed_total)
+        except Exception:
+            time_rem_sec = None
+
     return RoomState(
         id=room["id"],
         code=room["code"],
@@ -652,7 +681,9 @@ def get_room_state(code: str, user: dict) -> RoomState:
         participants=participants,
         current_question=current_q,
         all_questions=all_qs if is_mock else None,
-        time_remaining_seconds=None,
+        time_remaining_seconds=time_rem_sec,
+        started_at=started_at_str,
+        server_time=now_iso,
         tournament_id=room.get("tournament_id"),
         tournament_match_id=room.get("tournament_match_id")
     )
@@ -768,6 +799,90 @@ async def leave_room(code: str, user: dict = Depends(get_current_user)):
         "host_changed": host_changed,
         "new_host_id": new_host_id
     }
+
+
+@router.get("/user/active")
+def get_user_active_room(user: dict = Depends(get_current_user)):
+    """
+    Returns the user's current active IN_PROGRESS room if any, else null.
+    Powers the Chess.com-style ongoing match banner on the Dashboard.
+    """
+    clean_abandoned_rooms()
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute("""
+        SELECT r.code
+        FROM rooms r
+        JOIN room_participants p ON r.id = p.room_id
+        WHERE p.user_id = ? AND r.status = 'IN_PROGRESS' AND p.is_finished = 0
+        ORDER BY r.created_at DESC
+        LIMIT 1
+    """, (user["id"],))
+    row = c.fetchone()
+    conn.close()
+    if not row:
+        return {"active_room": None}
+    try:
+        state = get_room_state(row["code"], user)
+        return {"active_room": state}
+    except Exception:
+        return {"active_room": None}
+
+
+@router.post("/{code}/forfeit")
+async def forfeit_room(code: str, user: dict = Depends(get_current_user)):
+    """
+    Forfeits/abandons an active match for the calling player.
+    Marks them as finished and triggers match completion if all players are done.
+    """
+    code = code.strip().upper()
+    conn = get_connection()
+    c = conn.cursor()
+
+    c.execute("SELECT * FROM rooms WHERE code = ?", (code,))
+    room_row = c.fetchone()
+    if not room_row:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Room not found.")
+
+    room = dict(room_row)
+    room_id = room["id"]
+    now = datetime.datetime.utcnow().isoformat()
+
+    c.execute("SELECT * FROM room_participants WHERE room_id = ? AND user_id = ?", (room_id, user["id"]))
+    p_row = c.fetchone()
+    if not p_row:
+        conn.close()
+        raise HTTPException(status_code=400, detail="You are not a participant in this room.")
+
+    c.execute("""
+        UPDATE room_participants
+        SET is_finished = 1, finished_at = ?
+        WHERE room_id = ? AND user_id = ?
+    """, (now, room_id, user["id"]))
+
+    c.execute("SELECT COUNT(*) as unfinished FROM room_participants WHERE room_id = ? AND is_finished = 0", (room_id,))
+    unfinished_count = c.fetchone()["unfinished"]
+
+    match_completed = False
+    if unfinished_count == 0:
+        c.execute("UPDATE rooms SET status = 'COMPLETED', completed_at = ? WHERE id = ?", (now, room_id))
+        match_completed = True
+
+    conn.commit()
+    conn.close()
+
+    await room_hub.broadcast_to_room(code, "PLAYER_FINISHED", {
+        "user_id": user["id"],
+        "username": user["username"],
+        "is_finished": True,
+        "is_forfeit": True
+    })
+
+    if match_completed:
+        await room_hub.broadcast_to_room(code, "MATCH_COMPLETED", {"completed_at": now})
+
+    return {"success": True, "message": "Match forfeited successfully.", "match_completed": match_completed}
 
 
 @router.post("/{code}/transfer_host")
@@ -911,6 +1026,7 @@ async def start_room(code: str, user: dict = Depends(get_current_user)):
 
     now = datetime.datetime.utcnow().isoformat()
     c.execute("UPDATE rooms SET status = 'IN_PROGRESS', started_at = ? WHERE id = ?", (now, room_id))
+    c.execute("UPDATE room_participants SET question_started_at = ? WHERE room_id = ?", (now, room_id))
     conn.commit()
 
     conn.close()
@@ -1218,9 +1334,9 @@ async def submit_answer(code: str, submission: AnswerSubmissionRequest, user: di
 
     c.execute("""
         UPDATE room_participants
-        SET score = ?, marks = ?, current_question_index = ?, answers = ?, is_finished = ?, finished_at = ?
+        SET score = ?, marks = ?, current_question_index = ?, answers = ?, is_finished = ?, finished_at = ?, question_started_at = ?
         WHERE room_id = ? AND user_id = ?
-    """, (new_score, new_marks, new_idx, json.dumps(answers_dict), is_finished, finished_at, room_id, user["id"]))
+    """, (new_score, new_marks, new_idx, json.dumps(answers_dict), is_finished, finished_at, now, room_id, user["id"]))
 
     user_rp_gain = max(5, delta_score if delta_score > 0 else 5)
     c.execute("""

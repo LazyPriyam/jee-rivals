@@ -314,6 +314,11 @@ export const api = {
       }),
     results: (code) => request(`/api/rooms/${code}/results`),
     getMyHistory: () => request("/api/rooms/my/history"),
+    getActive: () => request("/api/rooms/user/active"),
+    forfeit: (code) =>
+      request(`/api/rooms/${code}/forfeit`, {
+        method: "POST",
+      }),
   },
   leaderboards: {
     getWeekly: (limit = 50) => request(`/api/leaderboards/weekly?limit=${limit}`),

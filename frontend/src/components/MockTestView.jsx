@@ -16,7 +16,7 @@ import { Clock, AlertTriangle, FileText, X, Image as ImageIcon, CheckCircle, Che
     });
   };
 
-export default function MockTestView({ room, user, onMatchComplete }) {
+export default function MockTestView({ room, user, onMatchComplete, onExitToDashboard }) {
   const storageKey = `jee_mock_test_progress_${room.code}`;
   const getSavedProgress = () => {
     try {
@@ -44,28 +44,38 @@ export default function MockTestView({ room, user, onMatchComplete }) {
 
   // Exam Duration in seconds (e.g. 60 min -> 3600s, or room.total_duration_minutes)
   const initialDuration = (room.total_duration_minutes || 60) * 60;
-  const [timeRemaining, setTimeRemaining] = useState(() => {
+
+  // Global server-synchronized deadline
+  const getExamDeadline = () => {
+    if (room.started_at) {
+      try {
+        const startEpoch = new Date(room.started_at.replace('Z', '+00:00')).getTime();
+        return startEpoch + initialDuration * 1000;
+      } catch (_) {}
+    }
+    if (room.time_remaining_seconds != null) {
+      return Date.now() + room.time_remaining_seconds * 1000;
+    }
+    if (savedProgress?.deadline) {
+      return savedProgress.deadline;
+    }
     if (savedProgress?.timeRemaining !== undefined && savedProgress?.timestamp) {
       const elapsed = Math.floor((Date.now() - savedProgress.timestamp) / 1000);
-      return Math.max(1, savedProgress.timeRemaining - elapsed);
+      const rem = Math.max(0, savedProgress.timeRemaining - elapsed);
+      return Date.now() + rem * 1000;
     }
-    return initialDuration;
+    return Date.now() + initialDuration * 1000;
+  };
+
+  const deadlineRef = useRef(getExamDeadline());
+  const [timeRemaining, setTimeRemaining] = useState(() => {
+    return Math.max(0, Math.ceil((deadlineRef.current - Date.now()) / 1000));
   });
+
   const startTimeRef = useRef(Date.now());
   const timerRef = useRef(null);
 
-  // 1. Prevent accidental window/tab close or refresh without warning
-  useEffect(() => {
-    const handleBeforeUnload = (e) => {
-      e.preventDefault();
-      e.returnValue = 'Your examination is currently in progress. Refreshing or leaving will disrupt your session.';
-      return e.returnValue;
-    };
-    window.addEventListener('beforeunload', handleBeforeUnload);
-    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
-  }, []);
-
-  // 2. Intercept browser back button and trigger exit warning modal
+  // Intercept browser back button and trigger exit warning modal
   useEffect(() => {
     window.history.pushState({ inMockTest: true }, '', window.location.href);
 
@@ -78,7 +88,7 @@ export default function MockTestView({ room, user, onMatchComplete }) {
     return () => window.removeEventListener('popstate', handlePopState);
   }, []);
 
-  // 3. Save active room code and question progress to localStorage
+  // Save active room code and question progress to localStorage
   useEffect(() => {
     try {
       localStorage.setItem('jee_active_test_room', room.code);
@@ -87,6 +97,7 @@ export default function MockTestView({ room, user, onMatchComplete }) {
         answers,
         reviewMarks,
         visited,
+        deadline: deadlineRef.current,
         timeRemaining,
         timestamp: Date.now()
       }));
@@ -116,22 +127,61 @@ export default function MockTestView({ room, user, onMatchComplete }) {
     }
   }, [room.code]);
 
-  // Countdown timer
+  // Global Countdown Timer (immune to tab-switching throttling)
   useEffect(() => {
     clearInterval(timerRef.current);
-    timerRef.current = setInterval(() => {
-      setTimeRemaining((prev) => {
-        if (prev <= 1) {
-          clearInterval(timerRef.current);
-          handleFinalSubmit();
-          return 0;
-        }
-        return prev - 1;
-      });
-    }, 1000);
 
-    return () => clearInterval(timerRef.current);
+    const tick = () => {
+      const rem = Math.max(0, Math.ceil((deadlineRef.current - Date.now()) / 1000));
+      setTimeRemaining(rem);
+      if (rem <= 0) {
+        clearInterval(timerRef.current);
+        handleFinalSubmit();
+      }
+    };
+
+    tick();
+    timerRef.current = setInterval(tick, 1000);
+
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        tick();
+      }
+    };
+    const handleFocus = () => {
+      tick();
+    };
+
+    document.addEventListener('visibilitychange', handleVisibility);
+    window.addEventListener('focus', handleFocus);
+
+    return () => {
+      clearInterval(timerRef.current);
+      document.removeEventListener('visibilitychange', handleVisibility);
+      window.removeEventListener('focus', handleFocus);
+    };
   }, []);
+
+  // Periodic server sync for remaining exam time and status
+  useEffect(() => {
+    const syncInterval = setInterval(() => {
+      api.rooms.get(room.code).then((data) => {
+        if (!data) return;
+        if (data.status === 'COMPLETED') {
+          onMatchComplete();
+        } else if (data.time_remaining_seconds != null) {
+          const serverRem = data.time_remaining_seconds;
+          const localRem = Math.max(0, Math.ceil((deadlineRef.current - Date.now()) / 1000));
+          if (Math.abs(serverRem - localRem) > 3) {
+            deadlineRef.current = Date.now() + serverRem * 1000;
+            setTimeRemaining(serverRem);
+          }
+        }
+      }).catch(() => {});
+    }, 5000);
+
+    return () => clearInterval(syncInterval);
+  }, [room.code]);
 
   // Format timer as HH:MM:SS
   const formatTime = (seconds) => {
@@ -329,6 +379,20 @@ export default function MockTestView({ room, user, onMatchComplete }) {
                 <span className="text-slate-400 font-mono">Roll: JEE2026</span>
               </div>
             </div>
+
+            {onExitToDashboard && (
+              <button
+                type="button"
+                onClick={() => {
+                  sound.click();
+                  onExitToDashboard();
+                }}
+                className="px-3 py-1.5 bg-[#0f172a] hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-700 hover:border-slate-500 rounded-lg text-xs font-bold transition cursor-pointer flex items-center gap-1.5"
+                title="Pause screen and return to Dashboard (Match remains live on Dashboard)"
+              >
+                <span>Dashboard</span>
+              </button>
+            )}
           </div>
         </div>
       </header>
@@ -796,6 +860,17 @@ export default function MockTestView({ room, user, onMatchComplete }) {
                 >
                   Stay in Examination
                 </button>
+                {onExitToDashboard && (
+                  <button
+                    onClick={() => {
+                      setExitWarningModalOpen(false);
+                      onExitToDashboard();
+                    }}
+                    className="px-4 py-2.5 rounded-xl bg-slate-200 hover:bg-slate-300 text-slate-800 font-bold text-xs cursor-pointer transition"
+                  >
+                    Exit to Dashboard
+                  </button>
+                )}
                 <button
                   onClick={handleFinalSubmit}
                   className="px-4 py-2.5 rounded-xl bg-slate-200 hover:bg-red-500 hover:text-white text-slate-700 font-bold text-xs cursor-pointer transition"

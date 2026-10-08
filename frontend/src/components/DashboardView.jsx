@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Swords, Zap, Trophy, Shield, Play, ArrowRight, Sparkles, BookOpen, Clock, AlertCircle, Users, Globe, Lock, Flame, Sliders, UserPlus, Brain } from 'lucide-react';
 import { api } from '../utils/api';
 import { sound } from '../utils/sound';
+import OngoingMatchCard from './OngoingMatchCard';
 
 export default function DashboardView({
   user,
@@ -9,7 +10,10 @@ export default function DashboardView({
   onOpenCreateRoom,
   onJoinRoomCode,
   onStartDailyDrill,
-  onStartPreset
+  onStartPreset,
+  activeMatch,
+  onResumeMatch,
+  onForfeitMatch,
 }) {
   const [joinCode, setJoinCode] = useState('');
   const [passcode, setPasscode] = useState('');
@@ -17,6 +21,39 @@ export default function DashboardView({
   const [joining, setJoining] = useState(false);
   const [openRooms, setOpenRooms] = useState([]);
   const [loadingRooms, setLoadingRooms] = useState(true);
+  const [currentActiveMatch, setCurrentActiveMatch] = useState(activeMatch || null);
+
+  // Sync prop changes into state
+  useEffect(() => {
+    if (activeMatch !== undefined) {
+      setCurrentActiveMatch(activeMatch);
+    }
+  }, [activeMatch]);
+
+  // Periodic poll for active matches (Chess.com style real-time match recovery)
+  useEffect(() => {
+    let isMounted = true;
+    const fetchActive = async () => {
+      if (!user) return;
+      try {
+        const res = await api.rooms.getActive();
+        if (isMounted) {
+          if (res?.active_room) {
+            setCurrentActiveMatch(res.active_room);
+          } else {
+            setCurrentActiveMatch(null);
+          }
+        }
+      } catch (_) {}
+    };
+
+    fetchActive();
+    const activeInterval = setInterval(fetchActive, 4000);
+    return () => {
+      isMounted = false;
+      clearInterval(activeInterval);
+    };
+  }, [user?.id]);
 
   useEffect(() => {
     fetchOpenRooms();
@@ -30,6 +67,19 @@ export default function DashboardView({
       setOpenRooms(data || []);
     } catch (_) {} finally {
       setLoadingRooms(false);
+    }
+  };
+
+  const handleForfeit = async (code) => {
+    try {
+      await api.rooms.forfeit(code);
+      setCurrentActiveMatch(null);
+      try {
+        localStorage.removeItem('jee_active_test_room');
+      } catch (_) {}
+      if (onForfeitMatch) onForfeitMatch(code);
+    } catch (err) {
+      console.error('Error forfeiting match:', err);
     }
   };
 
@@ -64,6 +114,17 @@ export default function DashboardView({
 
   return (
     <div className="max-w-6xl mx-auto px-4 py-8 page-transition">
+      {/* 0. Chess.com-Style Ongoing Match Card */}
+      {currentActiveMatch && (
+        <OngoingMatchCard
+          match={currentActiveMatch}
+          currentUser={user}
+          onResume={() => {
+            if (onResumeMatch) onResumeMatch(currentActiveMatch);
+          }}
+          onForfeit={handleForfeit}
+        />
+      )}
       {/* Hero Battle Section - Captivating Orange & White on Soft Slate Grey */}
       <div className="relative bg-gradient-to-br from-[#2b3345] via-[#242b3b] to-[#1e2330] border border-orange-500/30 rounded-3xl p-6 sm:p-12 shadow-2xl glow-orange-subtle overflow-hidden mb-10">
         <div className="absolute top-0 right-0 w-96 h-96 bg-orange-500/10 rounded-full blur-3xl -z-10"></div>
