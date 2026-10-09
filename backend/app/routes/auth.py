@@ -6,7 +6,8 @@ from fastapi import APIRouter, HTTPException, Depends, status
 import re
 from backend.app.models import (
     UserRegisterRequest, UserLoginRequest, AuthResponse, UserProfile,
-    ChangeUsernameRequest, ChangePinRequest, ChatSettingsUpdateRequest
+    ChangeUsernameRequest, ChangePinRequest, ChatSettingsUpdateRequest,
+    DeleteAccountRequest
 )
 from backend.app.database import get_connection, get_user_by_username, get_user_by_id
 from backend.app.auth import hash_pin, verify_pin, create_access_token, get_current_user
@@ -449,3 +450,60 @@ def reset_user_data(user: dict = Depends(get_current_user)):
         "message": "Practice and drill stats successfully reset to baseline.",
         "user": format_user_profile(updated)
     }
+
+
+@router.post("/delete-account")
+@router.delete("/account")
+def delete_account(req: DeleteAccountRequest, user: dict = Depends(get_current_user)):
+    """
+    Permanently purges the aspirant's account and all associated telemetry,
+    ratings, bookmarks, friend relationships, chat messages, and activity logs.
+    Requires correct security PIN verification.
+    """
+    pin = req.pin.strip() if req.pin else ""
+    if not verify_pin(pin, user.get("pin_hash", "")):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Security PIN is incorrect. Account deletion rejected."
+        )
+
+    user_id = user["id"]
+    conn = get_connection()
+    c = conn.cursor()
+
+    try:
+        # 1. Activity logs and sessions
+        c.execute("DELETE FROM activity_log WHERE user_id = ?", (user_id,))
+        c.execute("DELETE FROM adaptive_sessions WHERE user_id = ?", (user_id,))
+        c.execute("DELETE FROM user_rank_history WHERE user_id = ?", (user_id,))
+
+        # 2. Mastery and FSRS memory
+        c.execute("DELETE FROM user_chapter_elo WHERE user_id = ?", (user_id,))
+        c.execute("DELETE FROM user_fsrs_states WHERE user_id = ?", (user_id,))
+        c.execute("DELETE FROM question_bookmarks WHERE user_id = ?", (user_id,))
+
+        # 3. Multiplayer rooms & tournaments
+        c.execute("DELETE FROM room_participants WHERE user_id = ?", (user_id,))
+        c.execute("DELETE FROM tournament_participants WHERE user_id = ?", (user_id,))
+
+        # 4. Social graph: friendships, challenges, messages
+        c.execute("DELETE FROM friends WHERE user_id = ? OR friend_id = ?", (user_id, user_id))
+        c.execute("DELETE FROM direct_challenges WHERE sender_id = ? OR receiver_id = ?", (user_id, user_id))
+        c.execute("DELETE FROM direct_messages WHERE sender_id = ? OR receiver_id = ?", (user_id, user_id))
+
+        # 5. Notifications and update tracking
+        c.execute("DELETE FROM user_notifications WHERE user_id = ?", (user_id,))
+        c.execute("DELETE FROM user_update_reads WHERE user_id = ?", (user_id,))
+
+        # 6. Primary user record
+        c.execute("DELETE FROM users WHERE id = ?", (user_id,))
+
+        conn.commit()
+    finally:
+        conn.close()
+
+    return {
+        "message": f"Aspirant account '{user['username']}' and all associated records have been permanently deleted.",
+        "success": True
+    }
+

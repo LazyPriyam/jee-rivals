@@ -83,6 +83,10 @@ class ChangePinRequest(BaseModel):
 class ChatSettingsUpdateRequest(BaseModel):
     chat_settings: Dict[str, Any]
 
+class DeleteAccountRequest(BaseModel):
+    pin: str
+    confirmation: Optional[str] = "DELETE"
+
 class AuthResponse(BaseModel):
     token: str
     user: UserProfile

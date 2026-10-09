@@ -26,7 +26,8 @@ import {
   Flame,
   Radio,
   X,
-  ArrowRight
+  ArrowRight,
+  Trash2
 } from 'lucide-react';
 import {
   api,
@@ -140,6 +141,13 @@ export default function SettingsView({
   // Danger zone reset modal
   const [resetModalOpen, setResetModalOpen] = useState(false);
   const [resettingData, setResettingData] = useState(false);
+
+  // Danger zone delete account modal
+  const [deleteModalOpen, setDeleteModalOpen] = useState(false);
+  const [deletePin, setDeletePin] = useState('');
+  const [deleteConfirmation, setDeleteConfirmation] = useState('');
+  const [deleteError, setDeleteError] = useState('');
+  const [deletingAccount, setDeletingAccount] = useState(false);
 
   // Remember Me & Saved Accounts State
   const [rememberMeActive, setRememberMeActive] = useState(() => isRememberMeEnabled());
@@ -398,6 +406,41 @@ export default function SettingsView({
       setResetModalOpen(false);
     } finally {
       setResettingData(false);
+    }
+  };
+
+  // Handle Permanent Account Deletion (Danger Zone)
+  const handleConfirmDeleteAccount = async (e) => {
+    e?.preventDefault();
+    if (!deletePin.trim()) {
+      setDeleteError('Please enter your security PIN to confirm deletion.');
+      return;
+    }
+    if (deleteConfirmation.trim().toUpperCase() !== 'DELETE') {
+      setDeleteError('Please type DELETE to confirm permanent account purge.');
+      return;
+    }
+
+    setDeletingAccount(true);
+    setDeleteError('');
+    try {
+      sound.click();
+      await api.auth.deleteAccount(deletePin.trim(), deleteConfirmation.trim());
+      sound.correct();
+      if (user?.username) {
+        removeSavedAccount(user.username);
+      }
+      setToken('', false);
+      setDeleteModalOpen(false);
+      if (onLogout) {
+        onLogout();
+      } else {
+        window.location.reload();
+      }
+    } catch (err) {
+      setDeleteError(err.message || 'Failed to delete account. Please verify your PIN.');
+    } finally {
+      setDeletingAccount(false);
     }
   };
 
@@ -1011,6 +1054,31 @@ export default function SettingsView({
                 <span>Sign Out</span>
               </button>
             </div>
+
+            <div className="border-t border-red-500/20 pt-4 flex flex-col sm:flex-row items-center justify-between gap-4">
+              <div>
+                <div className="text-xs font-bold text-red-400 flex items-center gap-1.5">
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>Delete Aspirant Account</span>
+                </div>
+                <div className="text-[11px] text-slate-400 mt-0.5">
+                  Permanently deletes your account callsign, rating Elo, bookmarks, friendships, and leaderboard rankings. Irreversible.
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  sound.click();
+                  setDeletePin('');
+                  setDeleteConfirmation('');
+                  setDeleteError('');
+                  setDeleteModalOpen(true);
+                }}
+                className="px-4 py-2 bg-red-600 hover:bg-red-500 text-white font-black text-xs rounded-xl transition cursor-pointer shrink-0 shadow-lg shadow-red-950/60"
+              >
+                Delete Account
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -1400,6 +1468,93 @@ export default function SettingsView({
                 <span>Confirm Reset</span>
               </button>
             </div>
+          </div>
+        </div>,
+        document.body
+      )}
+
+      {/* Danger Zone Delete Account Modal */}
+      {deleteModalOpen && typeof document !== 'undefined' && createPortal(
+        <div className="fixed inset-0 z-[9999] bg-black/85 backdrop-blur-sm flex items-center justify-center p-4 animate-fadeIn">
+          <div className="bg-[#141824] border border-red-500/60 rounded-3xl max-w-md w-full p-6 shadow-2xl space-y-4 animate-scaleUp">
+            <div className="flex items-center justify-between">
+              <div className="w-12 h-12 rounded-2xl bg-red-500/10 border border-red-500/30 flex items-center justify-center text-red-400">
+                <Trash2 className="w-6 h-6" />
+              </div>
+              <button
+                type="button"
+                onClick={() => setDeleteModalOpen(false)}
+                className="p-1 text-slate-400 hover:text-white rounded-lg cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div>
+              <h3 className="text-lg font-black text-white">Permanently Delete Account?</h3>
+              <p className="text-xs text-slate-300 mt-1 leading-relaxed">
+                This will irreversibly purge your callsign <strong className="text-white font-mono">{user.username}</strong>, all Elo ratings, study streaks, question bookmarks, friendships, and tournament records.
+              </p>
+            </div>
+
+            <div className="bg-red-950/40 border border-red-500/30 rounded-xl p-3 text-[11px] text-red-300">
+              <strong>Warning:</strong> This action cannot be undone. Once deleted, your callsign will be released and your rank history cannot be recovered.
+            </div>
+
+            {deleteError && (
+              <div className="p-3 rounded-xl bg-red-500/10 border border-red-500/30 text-red-400 text-xs flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4 shrink-0" />
+                <span>{deleteError}</span>
+              </div>
+            )}
+
+            <form onSubmit={handleConfirmDeleteAccount} className="space-y-3 pt-1">
+              <div>
+                <label className="block text-[11px] font-bold text-slate-300 mb-1">
+                  Enter Your Security PIN
+                </label>
+                <input
+                  type="password"
+                  required
+                  value={deletePin}
+                  onChange={(e) => setDeletePin(e.target.value)}
+                  placeholder="Security PIN"
+                  className="w-full px-3.5 py-2.5 bg-black/40 border border-white/10 rounded-xl text-white placeholder-slate-500 text-xs focus:outline-none focus:border-red-500 transition font-mono"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-bold text-slate-300 mb-1">
+                  Type <span className="text-red-400 font-mono font-black">DELETE</span> to confirm
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={deleteConfirmation}
+                  onChange={(e) => setDeleteConfirmation(e.target.value)}
+                  placeholder="DELETE"
+                  className="w-full px-3.5 py-2.5 bg-black/40 border border-white/10 rounded-xl text-white placeholder-slate-500 text-xs focus:outline-none focus:border-red-500 transition font-mono"
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-3 pt-3">
+                <button
+                  type="button"
+                  onClick={() => setDeleteModalOpen(false)}
+                  className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold rounded-xl transition cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={deletingAccount || deleteConfirmation.trim().toUpperCase() !== 'DELETE'}
+                  className="px-5 py-2.5 bg-red-600 hover:bg-red-500 text-white text-xs font-black rounded-xl transition flex items-center gap-2 cursor-pointer shadow-lg shadow-red-950/60 disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  {deletingAccount ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
+                  <span>Confirm Account Purge</span>
+                </button>
+              </div>
+            </form>
           </div>
         </div>,
         document.body

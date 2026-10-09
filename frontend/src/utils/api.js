@@ -234,6 +234,11 @@ export const api = {
       request("/api/auth/reset-data", {
         method: "POST",
       }),
+    deleteAccount: (pin, confirmation = "DELETE") =>
+      request("/api/auth/delete-account", {
+        method: "POST",
+        body: JSON.stringify({ pin, confirmation }),
+      }),
   },
   questions: {
     getChapters: () => request("/api/questions/chapters"),
