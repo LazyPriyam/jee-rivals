@@ -105,6 +105,30 @@ def get_current_user(credentials: Optional[HTTPAuthorizationCredentials] = Depen
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="User account not found."
         )
+
+    # Heartbeat presence: update last_active timestamp if > 30s elapsed
+    try:
+        now_dt = datetime.datetime.now(datetime.timezone.utc)
+        last_str = user.get("last_active")
+        should_update = True
+        if last_str:
+            clean_str = str(last_str).replace("Z", "+00:00")
+            last_dt = datetime.datetime.fromisoformat(clean_str)
+            if last_dt.tzinfo is None:
+                last_dt = last_dt.replace(tzinfo=datetime.timezone.utc)
+            if (now_dt - last_dt).total_seconds() < 30:
+                should_update = False
+        if should_update:
+            now_iso = now_dt.isoformat()
+            conn = get_connection()
+            c = conn.cursor()
+            c.execute("UPDATE users SET last_active = ? WHERE id = ?", (now_iso, user["id"]))
+            conn.commit()
+            conn.close()
+            user["last_active"] = now_iso
+    except Exception:
+        pass
+
     return user
 
 def get_optional_user(credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)) -> Optional[dict]:

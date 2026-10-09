@@ -48,4 +48,26 @@ class RoomConnectionHub:
                 except Exception:
                     pass
 
+    def is_user_online(self, user_id: str, last_active_str: Optional[str] = None) -> bool:
+        """Determines if a candidate is currently active via active websocket or recent heartbeat."""
+        if not user_id:
+            return False
+        # 1. Check live WebSocket session
+        for room_users in self.active_rooms.values():
+            if user_id in room_users:
+                return True
+        # 2. Check recent last_active timestamp within 180 seconds (3 mins)
+        if last_active_str:
+            try:
+                import datetime
+                clean_str = str(last_active_str).replace("Z", "+00:00")
+                last_dt = datetime.datetime.fromisoformat(clean_str)
+                if last_dt.tzinfo is None:
+                    last_dt = last_dt.replace(tzinfo=datetime.timezone.utc)
+                now_dt = datetime.datetime.now(datetime.timezone.utc)
+                return (now_dt - last_dt).total_seconds() < 180
+            except Exception:
+                pass
+        return False
+
 room_hub = RoomConnectionHub()

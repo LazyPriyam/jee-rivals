@@ -167,12 +167,12 @@ export default function DivisionGuideModal({ isOpen, onClose }) {
           <div className="bg-[#121622] border border-white/10 rounded-2xl p-4 space-y-3">
             <h3 className="font-extrabold text-white text-sm flex items-center gap-2">
               <Flame className="w-4 h-4 text-orange-400" />
-              <span>Weekly Promotion & Relegation Zones (Resets Sunday 23:59 UTC)</span>
+              <span>Weekly Promotion & Relegation Zones (Resets Monday 05:29 AM IST)</span>
             </h3>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 text-xs">
               <div className="p-3 rounded-xl bg-emerald-950/40 border border-emerald-500/30 text-emerald-300">
                 <strong className="block font-black mb-1">🟢 Promotion Zone (Top 20%)</strong>
-                Finishing in the top 20% while satisfying the next tier's Elo gate promotes you to the next division at Sunday midnight.
+                Finishing in the top 20% while satisfying the next tier's Elo gate promotes you to the next division at weekly reset (Monday 05:29 AM IST).
               </div>
               <div className="p-3 rounded-xl bg-slate-800/40 border border-slate-600/30 text-slate-300">
                 <strong className="block font-black mb-1">⚪ Safe Zone (Middle 60%)</strong>

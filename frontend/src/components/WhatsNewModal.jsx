@@ -13,6 +13,7 @@ import {
   ArrowRight
 } from 'lucide-react';
 import { sound } from '../utils/sound';
+import { formatISTDate } from '../utils/dateUtils';
 
 const CATEGORY_META = {
   PLATFORM: {
@@ -56,13 +57,7 @@ export default function WhatsNewModal({ update, isOpen, onClose, onMarkRead }) {
     onClose();
   };
 
-  const formattedDate = update.created_at
-    ? new Date(update.created_at).toLocaleDateString('en-US', {
-        month: 'short',
-        day: 'numeric',
-        year: 'numeric',
-      })
-    : 'Recent';
+  const formattedDate = formatISTDate(update.created_at, 'Recent');
 
   const content = (
     <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm animate-in fade-in duration-200">

@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { api } from '../utils/api';
 import { sound } from '../utils/sound';
+import { formatISTTime, formatLastOnline } from '../utils/dateUtils';
 import {
   Swords,
   Send,
@@ -201,19 +202,15 @@ export default function FriendChatDrawer({
   };
 
   const formatMessageTime = (isoString) => {
-    if (!isoString) return '';
-    try {
-      const d = new Date(isoString);
-      return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    } catch (_) {
-      return '';
-    }
+    return formatISTTime(isoString, '');
   };
 
   if (!isOpen || !activeFriend) return null;
 
   const divStyle =
     DIVISION_COLORS[activeFriend.current_division] || DIVISION_COLORS.BRONZE;
+
+  const presence = formatLastOnline(activeFriend.last_active, activeFriend.is_online);
 
   return (
     <>
@@ -234,11 +231,11 @@ export default function FriendChatDrawer({
               </div>
               <span
                 className={`absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-[#242b3b] ${
-                  activeFriend.is_online
+                  presence.isOnline
                     ? 'bg-emerald-400 animate-pulse'
                     : 'bg-slate-500'
                 }`}
-                title={activeFriend.is_online ? 'Online' : 'Offline'}
+                title={presence.detail || presence.badgeText}
               />
             </div>
 
@@ -260,12 +257,14 @@ export default function FriendChatDrawer({
                 <span>•</span>
                 <span
                   className={
-                    activeFriend.is_online
+                    presence.isOnline
                       ? 'text-emerald-400 font-bold'
+                      : presence.statusColor === 'amber'
+                      ? 'text-amber-400 font-bold'
                       : 'text-slate-400'
                   }
                 >
-                  {activeFriend.is_online ? 'Online' : 'Offline'}
+                  {presence.badgeText}
                 </span>
               </p>
             </div>

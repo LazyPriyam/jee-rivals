@@ -10,6 +10,7 @@ from backend.app.routes.auth import format_user_profile
 from backend.app.tools.jee_syllabus import build_user_skill_tree
 from backend.app.tools.achievements_engine import evaluate_user_achievements
 from backend.app.tools.division_engine import evaluate_user_division, DIVISION_TIERS_CONFIG
+from backend.app.websockets.room_hub import room_hub
 
 router = APIRouter(prefix="/api/leaderboards", tags=["Leaderboards & Ranks"])
 
@@ -85,7 +86,8 @@ def get_weekly_leaderboard(limit: int = Query(50, ge=1, le=100)):
 
     c.execute("""
         SELECT id, username, avatar_id, title, weekly_rp, total_solved, total_correct, overall_elo,
-               physics_elo, chemistry_elo, math_elo, gold_medals, silver_medals, bronze_medals, current_streak
+               physics_elo, chemistry_elo, math_elo, gold_medals, silver_medals, bronze_medals, current_streak,
+               last_active
         FROM users
         ORDER BY weekly_rp DESC, overall_elo DESC
         LIMIT ?
@@ -138,7 +140,9 @@ def get_weekly_leaderboard(limit: int = Query(50, ge=1, le=100)):
                 "gold": u.get("gold_medals", 0),
                 "silver": u.get("silver_medals", 0),
                 "bronze": u.get("bronze_medals", 0)
-            }
+            },
+            "last_active": u.get("last_active"),
+            "is_online": room_hub.is_user_online(u["id"], u.get("last_active"))
         })
 
     return {
@@ -165,7 +169,7 @@ def get_elo_leaderboard(subject: str = Query("overall"), limit: int = Query(50, 
 
     c.execute(f"""
         SELECT id, username, avatar_id, title, {elo_col} as elo, overall_elo, physics_elo, chemistry_elo, math_elo,
-               total_solved, total_correct, gold_medals, silver_medals, bronze_medals
+               total_solved, total_correct, gold_medals, silver_medals, bronze_medals, last_active
         FROM users
         ORDER BY {elo_col} DESC
         LIMIT ?
@@ -192,7 +196,9 @@ def get_elo_leaderboard(subject: str = Query("overall"), limit: int = Query(50, 
                 "gold": u.get("gold_medals", 0),
                 "silver": u.get("silver_medals", 0),
                 "bronze": u.get("bronze_medals", 0)
-            }
+            },
+            "last_active": u.get("last_active"),
+            "is_online": room_hub.is_user_online(u["id"], u.get("last_active"))
         })
 
     return {

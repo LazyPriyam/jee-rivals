@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { api } from '../utils/api';
 import { sound } from '../utils/sound';
+import { formatLastOnline } from '../utils/dateUtils';
 import {
   Users,
   UserPlus,
@@ -546,6 +547,7 @@ export default function InviteFriendsView({
               {friends.map((friend) => {
                 const divStyle = DIVISION_COLORS[friend.current_division] || DIVISION_COLORS.BRONZE;
                 const isChallenging = challengingFriendId === friend.id;
+                const presence = formatLastOnline(friend.last_active, friend.is_online);
 
                 return (
                   <div
@@ -571,9 +573,9 @@ export default function InviteFriendsView({
                             {/* Online / Offline status indicator dot */}
                             <span
                               className={`absolute -bottom-1 -right-1 w-3.5 h-3.5 rounded-full border-2 border-[#262c3c] ${
-                                friend.is_online ? 'bg-emerald-400 animate-pulse' : 'bg-slate-500'
+                                presence.isOnline ? 'bg-emerald-400 animate-pulse' : 'bg-slate-500'
                               }`}
-                              title={friend.is_online ? 'Online now' : 'Offline'}
+                              title={presence.detail || presence.badgeText}
                             />
                           </div>
 
@@ -582,15 +584,15 @@ export default function InviteFriendsView({
                               <h4 className="font-black text-base text-white group-hover:text-orange-400 transition">
                                 {friend.username}
                               </h4>
-                              {friend.is_online ? (
-                                <span className="px-2 py-0.5 rounded-full text-[9px] font-bold bg-emerald-950/80 border border-emerald-500/40 text-emerald-400 font-mono">
-                                  ONLINE
-                                </span>
-                              ) : (
-                                <span className="px-2 py-0.5 rounded-full text-[9px] font-bold bg-slate-800 text-slate-400 font-mono">
-                                  OFFLINE
-                                </span>
-                              )}
+                              <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold font-mono ${
+                                presence.isOnline
+                                  ? 'bg-emerald-950/80 border border-emerald-500/40 text-emerald-400'
+                                  : presence.statusColor === 'amber'
+                                  ? 'bg-amber-950/80 border border-amber-500/40 text-amber-400'
+                                  : 'bg-slate-800 text-slate-400'
+                              }`}>
+                                {presence.badgeText}
+                              </span>
                             </div>
                             <span className={`inline-block px-2 py-0.5 rounded-md text-[10px] font-extrabold uppercase mt-1 border ${divStyle}`}>
                               {friend.current_division}
@@ -764,6 +766,7 @@ export default function InviteFriendsView({
                   {squadLeaderboard.map((member) => {
                     const isYou = member.is_you;
                     const divStyle = DIVISION_COLORS[member.current_division] || DIVISION_COLORS.BRONZE;
+                    const memberPresence = formatLastOnline(member.last_active, member.is_online);
 
                     return (
                       <tr
@@ -812,8 +815,9 @@ export default function InviteFriendsView({
                               </div>
                               <span
                                 className={`absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border border-[#262c3c] ${
-                                  member.is_online ? 'bg-emerald-400' : 'bg-slate-500'
+                                  memberPresence.isOnline ? 'bg-emerald-400 animate-pulse' : 'bg-slate-500'
                                 }`}
+                                title={memberPresence.detail || memberPresence.badgeText}
                               />
                             </div>
                             <div>
@@ -827,9 +831,19 @@ export default function InviteFriendsView({
                                   </span>
                                 )}
                               </div>
-                              <span className="text-[10px] text-slate-400">
-                                {member.title}
-                              </span>
+                              <div className="flex items-center gap-1.5 text-[10px]">
+                                <span className="text-slate-400">{member.title}</span>
+                                <span className="text-slate-600">•</span>
+                                <span className={`font-mono ${
+                                  memberPresence.isOnline
+                                    ? 'text-emerald-400 font-semibold'
+                                    : memberPresence.statusColor === 'amber'
+                                    ? 'text-amber-400'
+                                    : 'text-slate-500'
+                                }`}>
+                                  {memberPresence.badgeText}
+                                </span>
+                              </div>
                             </div>
                           </div>
                         </td>

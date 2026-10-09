@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { api } from '../utils/api';
 import SphereGridSkillTree from './SphereGridSkillTree';
+import { formatIST, formatISTDate, formatISTTime, formatLastOnline } from '../utils/dateUtils';
 import {
   User, Trophy, Shield, Activity, Target, Zap, Clock, CheckCircle2,
   XCircle, ArrowLeft, RefreshCw, Flame, Edit3, BookOpen, Award,
@@ -202,6 +203,7 @@ export default function ProfileView({
   const theme = BANNER_THEMES[p.banner_theme] || BANNER_THEMES.orange_cyber;
   const divStyle = DIVISION_COLORS[p.current_division] || DIVISION_COLORS.BRONZE;
   const ringStyle = DIVISION_RINGS[p.current_division] || DIVISION_RINGS.BRONZE;
+  const presence = formatLastOnline(p.last_active, p.is_online);
 
   // Next Milestone Logic
   const currentElo = Math.round(p.overall_elo || 1200);
@@ -396,6 +398,11 @@ export default function ProfileView({
               <div className={`w-24 h-24 rounded-3xl bg-[#121622] flex items-center justify-center text-5xl shadow-2xl transition-transform group-hover:scale-105 ${ringStyle}`}>
                 {AVATAR_MAP[p.avatar_id] || '🔥'}
               </div>
+              {/* Online/Offline presence dot */}
+              <span 
+                className={`absolute -top-1 -right-1 w-4 h-4 rounded-full border-2 border-[#121622] ${presence.isOnline ? 'bg-emerald-400 ring-2 ring-emerald-500/50 animate-pulse' : 'bg-slate-500'}`}
+                title={presence.detail}
+              />
               <div className={`absolute -bottom-2.5 left-1/2 -translate-x-1/2 text-[9px] font-black uppercase px-2 py-0.5 rounded-full border shadow-md whitespace-nowrap ${divStyle}`}>
                 {p.current_division}
               </div>
@@ -410,6 +417,20 @@ export default function ProfileView({
                 <span className="text-xs font-bold px-2.5 py-0.5 rounded-full bg-white/10 text-slate-200 border border-white/15">
                   {p.title || 'JEE Aspirant'}
                 </span>
+
+                {/* Real-time Presence & Last Online IST Badge */}
+                <div 
+                  className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full border text-[11px] font-mono font-bold ${
+                    presence.isOnline
+                      ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40 shadow-sm shadow-emerald-500/20'
+                      : 'bg-black/40 text-slate-300 border-white/15'
+                  }`}
+                  title={presence.detail}
+                >
+                  <span className={`w-2 h-2 rounded-full ${presence.isOnline ? 'bg-emerald-400 animate-pulse' : 'bg-slate-400'}`} />
+                  <span>{presence.badgeText}</span>
+                </div>
+
                 {isOwnProfile && (
                   <button
                     onClick={() => setEditModalOpen(true)}
@@ -683,7 +704,7 @@ export default function ProfileView({
                 <span className="text-xs font-semibold text-slate-400 font-mono">RP</span>
               </div>
               <span className="text-[11px] text-slate-400 mt-2 block">
-                Resets every Sunday 23:59 UTC
+                Resets every Monday 05:29 AM IST (Weekly Reset)
               </span>
             </div>
           </div>
@@ -807,7 +828,7 @@ export default function ProfileView({
                 <div className="mt-3 p-3 rounded-xl bg-[#161a24] border border-orange-500/40 flex items-center justify-between text-xs animate-fadeIn">
                   <div className="flex items-center gap-2">
                     <span className="w-2.5 h-2.5 rounded-full bg-orange-400 animate-ping" />
-                    <span className="text-slate-400">Date: <strong className="text-white">{hoveredPoint.created_at}</strong></span>
+                    <span className="text-slate-400">Date: <strong className="text-white">{formatIST(hoveredPoint.created_at)}</strong></span>
                   </div>
                   <div>
                     <span className="text-slate-400">Rating: </span>
@@ -1370,7 +1391,7 @@ export default function ProfileView({
               {(data.test_history || []).map((t, idx) => {
                 const marksPct = t.marks_percentage || 0;
                 const scoreColor = marksPct >= 60 ? 'text-emerald-400' : marksPct >= 35 ? 'text-amber-400' : 'text-orange-400';
-                const formattedDate = (t.completed_at || t.created_at || '').slice(0, 10);
+                const formattedDate = formatIST(t.completed_at || t.created_at);
 
                 return (
                   <div
@@ -1516,7 +1537,7 @@ export default function ProfileView({
                         <span className={`font-black ${isWin ? 'text-emerald-400' : isLoss ? 'text-red-400' : 'text-amber-400'}`}>
                           {m.elo_delta} Elo
                         </span>
-                        <span className="text-slate-400 block text-[10px]">{m.date}</span>
+                        <span className="text-slate-400 block text-[10px]">{formatIST(m.date || m.created_at)}</span>
                       </div>
                     </div>
 

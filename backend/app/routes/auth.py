@@ -11,6 +11,7 @@ from backend.app.models import (
 )
 from backend.app.database import get_connection, get_user_by_username, get_user_by_id
 from backend.app.auth import hash_pin, verify_pin, create_access_token, get_current_user
+from backend.app.websockets.room_hub import room_hub
 
 router = APIRouter(prefix="/api/auth", tags=["Authentication"])
 
@@ -167,7 +168,9 @@ def format_user_profile(user: dict, cursor=None) -> UserProfile:
         last_active_date=streak_meta["last_active_date"],
         streak_freezes=streak_meta["streak_freezes"],
         is_streak_active_today=streak_meta["is_active_today"],
-        streak_meta=streak_meta
+        streak_meta=streak_meta,
+        last_active=user.get("last_active"),
+        is_online=room_hub.is_user_online(user["id"], user.get("last_active"))
     )
 
 

@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { api } from '../utils/api';
 import { sound } from '../utils/sound';
+import { formatISTDateTimeShort } from '../utils/dateUtils';
 import {
   Bell,
   BellOff,
@@ -227,13 +228,7 @@ export default function NotificationPanel({
   };
 
   const formatMessageTime = (isoString) => {
-    if (!isoString) return '';
-    try {
-      const d = new Date(isoString);
-      return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    } catch (_) {
-      return '';
-    }
+    return formatISTDateTimeShort(isoString, '');
   };
 
   if (!isOpen) return null;
@@ -606,7 +601,7 @@ export default function NotificationPanel({
                                         <ArrowRight className="w-2.5 h-2.5" />
                                       </button>
                                       <span className="text-[9px] text-slate-500 font-mono">
-                                        {u.created_at ? new Date(u.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : 'Recent'}
+                                        {formatISTDateTimeShort(u.created_at, 'Recent')}
                                       </span>
                                     </div>
                                   </div>

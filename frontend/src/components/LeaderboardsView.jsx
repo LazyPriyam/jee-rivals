@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { api } from '../utils/api';
 import { Trophy, Shield, Clock, Flame, Crown, RefreshCw, Zap, Users, UserPlus, HelpCircle, Sparkles, ArrowUpRight } from 'lucide-react';
 import DivisionGuideModal from './DivisionGuideModal';
+import { formatLastOnline } from '../utils/dateUtils';
 
 export const getDivisionBaseTier = (div) => {
   if (!div) return 'BRONZE';
@@ -245,9 +246,17 @@ export default function LeaderboardsView({ user, onViewProfile, onNavigateTab })
                                   YOU
                                 </span>
                               )}
-                              {u.is_online && (
-                                <span className="w-2 h-2 rounded-full bg-emerald-400 inline-block" title="Online" />
-                              )}
+                              {(() => {
+                                const presence = formatLastOnline(u.last_active, u.is_online);
+                                return (
+                                  <span
+                                    className={`w-2 h-2 rounded-full inline-block ${
+                                      presence.isOnline ? 'bg-emerald-400 animate-pulse' : 'bg-slate-600'
+                                    }`}
+                                    title={presence.detail || presence.badgeText}
+                                  />
+                                );
+                              })()}
                             </div>
                           </td>
                           <td className="py-3.5">
@@ -290,7 +299,7 @@ export default function LeaderboardsView({ user, onViewProfile, onNavigateTab })
                   Current Division Season
                 </span>
                 <h4 className="text-sm font-extrabold text-white">
-                  Sunday 23:59 UTC Weekly Promotion & Reset
+                  Every Monday 05:29 AM IST (Weekly Promotion & Reset)
                 </h4>
               </div>
             </div>
@@ -468,6 +477,17 @@ export default function LeaderboardsView({ user, onViewProfile, onNavigateTab })
                                 YOU
                               </span>
                             )}
+                            {(() => {
+                              const presence = formatLastOnline(u.last_active, u.is_online);
+                              return (
+                                <span
+                                  className={`w-2 h-2 rounded-full inline-block ${
+                                    presence.isOnline ? 'bg-emerald-400 animate-pulse' : 'bg-slate-600'
+                                  }`}
+                                  title={presence.detail || presence.badgeText}
+                                />
+                              );
+                            })()}
                           </div>
                         </td>
                         <td className="py-3.5">
@@ -584,6 +604,17 @@ export default function LeaderboardsView({ user, onViewProfile, onNavigateTab })
                                 YOU
                               </span>
                             )}
+                            {(() => {
+                              const presence = formatLastOnline(u.last_active, u.is_online);
+                              return (
+                                <span
+                                  className={`w-2 h-2 rounded-full inline-block ${
+                                    presence.isOnline ? 'bg-emerald-400 animate-pulse' : 'bg-slate-600'
+                                  }`}
+                                  title={presence.detail || presence.badgeText}
+                                />
+                              );
+                            })()}
                           </div>
                         </td>
                         <td className="py-3.5 text-right font-mono font-black text-orange-400 text-base">

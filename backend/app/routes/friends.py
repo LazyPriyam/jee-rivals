@@ -10,6 +10,8 @@ from backend.app.auth import get_current_user
 from backend.app.routes.auth import format_user_profile
 from backend.app.routes.rooms import generate_room_code, get_room_state
 
+from backend.app.websockets.room_hub import room_hub
+
 router = APIRouter(prefix="/api/friends", tags=["Friends & Social Hub"])
 
 
@@ -42,9 +44,7 @@ class RespondChallengeModel(BaseModel):
     accept: bool
 
 
-def is_user_online(last_active_str: Optional[str], chat_settings_raw: Optional[str] = None) -> bool:
-    if not last_active_str:
-        return False
+def is_user_online(user_id: Optional[str], last_active_str: Optional[str], chat_settings_raw: Optional[str] = None) -> bool:
     if chat_settings_raw:
         try:
             cs = json.loads(chat_settings_raw) if isinstance(chat_settings_raw, str) else chat_settings_raw
@@ -52,12 +52,7 @@ def is_user_online(last_active_str: Optional[str], chat_settings_raw: Optional[s
                 return False
         except Exception:
             pass
-    try:
-        last_dt = datetime.datetime.fromisoformat(last_active_str)
-        diff = (datetime.datetime.utcnow() - last_dt).total_seconds()
-        return diff < 600  # active within 10 minutes
-    except Exception:
-        return False
+    return room_hub.is_user_online(user_id or "", last_active_str)
 
 
 @router.get("")
@@ -97,7 +92,7 @@ def get_friends(user: dict = Depends(get_current_user)):
             "total_correct": correct,
             "accuracy_percentage": acc,
             "gold_medals": r.get("gold_medals", 0),
-            "is_online": is_user_online(r.get("last_active"), r.get("chat_settings")),
+            "is_online": is_user_online(r["id"], r.get("last_active"), r.get("chat_settings")),
             "last_active": r.get("last_active"),
             "friendship_date": r.get("friendship_date")
         })
@@ -163,7 +158,8 @@ def get_friends_leaderboard(sort_by: str = "elo", user: dict = Depends(get_curre
             "total_correct": correct,
             "accuracy_percentage": acc,
             "gold_medals": r.get("gold_medals", 0),
-            "is_online": is_user_online(r.get("last_active"))
+            "is_online": is_user_online(r["id"], r.get("last_active")),
+            "last_active": r.get("last_active")
         })
 
     return leaderboard
@@ -502,7 +498,8 @@ def search_users(q: str, user: dict = Depends(get_current_user)):
             "is_friend": uid in accepted_friends,
             "request_sent": uid in requests_sent,
             "request_received": uid in requests_received,
-            "is_online": is_user_online(r.get("last_active"))
+            "is_online": is_user_online(uid, r.get("last_active")),
+            "last_active": r.get("last_active")
         })
 
     return results
@@ -757,7 +754,7 @@ def get_conversations(user: dict = Depends(get_current_user)):
             "friend_title": prof.get("title") or "JEE Aspirant",
             "friend_elo": round(prof.get("overall_elo", 1200.0), 1),
             "friend_division": prof.get("current_division") or "BRONZE",
-            "is_online": is_user_online(prof.get("last_active"), prof.get("chat_settings")),
+            "is_online": is_user_online(prof["id"], prof.get("last_active"), prof.get("chat_settings")),
             "last_active": prof.get("last_active"),
             "latest_message": latest_msg["message"] if latest_msg else "No messages yet. Say hello!",
             "latest_message_type": latest_msg["message_type"] if latest_msg else "TEXT",
@@ -843,7 +840,7 @@ def get_chat_history(friend_id: str, user: dict = Depends(get_current_user)):
             "title": target.get("title") or "JEE Aspirant",
             "overall_elo": round(target.get("overall_elo", 1200.0), 1),
             "current_division": target.get("current_division") or "BRONZE",
-            "is_online": is_user_online(target.get("last_active"), target.get("chat_settings")),
+            "is_online": is_user_online(target["id"], target.get("last_active"), target.get("chat_settings")),
             "last_active": target.get("last_active")
         },
         "messages": formatted_messages

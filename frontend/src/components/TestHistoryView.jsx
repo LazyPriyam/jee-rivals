@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { api } from '../utils/api';
 import { sound } from '../utils/sound';
+import { formatIST } from '../utils/dateUtils';
 import {
   Clock,
   BookOpen,
@@ -249,15 +250,7 @@ export default function TestHistoryView({ user, inspectUsername, onSelectTest, o
             const isGroup = item.is_group || (item.participant_count || 1) > 1;
             const isInProgress = item.status === 'IN_PROGRESS' && !item.is_finished;
             const dateStr = item.completed_at || item.created_at;
-            const formattedDate = dateStr
-              ? new Date(dateStr).toLocaleDateString('en-US', {
-                  month: 'short',
-                  day: 'numeric',
-                  year: 'numeric',
-                  hour: '2-digit',
-                  minute: '2-digit',
-                })
-              : 'Recent Session';
+            const formattedDate = formatIST(dateStr, { fallback: 'Recent Session' });
 
             const maxMarks = item.max_marks || (item.total_questions * 4);
             const marksVal = Number(item.marks || 0);
