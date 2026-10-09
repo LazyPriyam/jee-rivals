@@ -254,10 +254,21 @@ export const api = {
         method: "POST",
         body: JSON.stringify(data),
       }),
-    getReports: (status = null) => {
-      const q = status ? `?status=${encodeURIComponent(status)}` : "";
+    getReports: (params = {}) => {
+      let q = "";
+      if (typeof params === "string") {
+        q = params ? `?status=${encodeURIComponent(params)}` : "";
+      } else if (params && typeof params === "object") {
+        const queryParams = new URLSearchParams();
+        if (params.status) queryParams.set("status", params.status);
+        if (params.reporter_id) queryParams.set("reporter_id", params.reporter_id);
+        if (params.limit) queryParams.set("limit", params.limit);
+        const qs = queryParams.toString();
+        q = qs ? `?${qs}` : "";
+      }
       return request(`/api/questions/reports/all${q}`);
     },
+    getReportSummary: () => request("/api/questions/reports/summary"),
     getQuarantined: () => request("/api/questions/quarantined/all"),
     quarantine: (id) =>
       request(`/api/questions/${id}/quarantine`, {
@@ -271,7 +282,13 @@ export const api = {
       request(`/api/questions/${id}/restore`, {
         method: "POST",
       }),
+    fixKey: (id, data) =>
+      request(`/api/questions/${id}/fix-key`, {
+        method: "POST",
+        body: JSON.stringify(data),
+      }),
   },
+
   rooms: {
     getOpen: () => request("/api/rooms/public/open"),
     create: (data) =>

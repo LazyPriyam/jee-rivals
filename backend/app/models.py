@@ -130,6 +130,11 @@ class QuestionReportRequest(BaseModel):
     reason: str
     notes: Optional[str] = ""
 
+class FixQuestionKeyRequest(BaseModel):
+    correct_answer: str
+    solution_text: Optional[str] = None
+    question_text: Optional[str] = None
+
 class RoomCreateRequest(BaseModel):
     mode: str = "SPEED_DUEL"  # "SPEED_DUEL" or "MOCK_TEST"
     preset_name: Optional[str] = None

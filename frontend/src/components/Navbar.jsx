@@ -94,6 +94,7 @@ export default function Navbar({
     { id: 'skills', label: 'Skill Tree', icon: Compass },
     { id: 'mocks', label: 'NTA Mocks', icon: BookOpen },
     { id: 'history', label: 'Test History', icon: Clock },
+    { id: 'reports', label: 'Question Reports', icon: ShieldAlert },
     { id: 'generator', label: 'Custom Blueprint', icon: Sliders },
     { id: 'tournaments', label: 'Tournaments', icon: Award },
     { id: 'invite', label: 'Invite Friends', icon: UserPlus },
@@ -101,6 +102,7 @@ export default function Navbar({
     { id: 'profile', label: 'My Radar', icon: Activity },
     { id: 'settings', label: 'Settings', icon: Settings },
   ];
+
 
   const handleTabClick = (tabId) => {
     sound.click();

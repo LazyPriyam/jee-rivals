@@ -18,6 +18,7 @@ import SphereGridSkillTree from './components/SphereGridSkillTree';
 import TestHistoryView from './components/TestHistoryView';
 import TestAnalysisView from './components/TestAnalysisView';
 import SettingsView from './components/SettingsView';
+import QuestionReportsView from './components/QuestionReportsView';
 import AuthModal from './components/AuthModal';
 import RoomModal from './components/RoomModal';
 import FriendChatDrawer from './components/FriendChatDrawer';
@@ -523,6 +524,18 @@ export default function App() {
                 onOpenAuth={() => setAuthModalOpen(true)}
               />
             )}
+          </div>
+        )}
+
+        {/* Tab: Question Defect Reports & Moderation Hub */}
+        {visitedTabs.reports && (
+          <div className={activeTab === 'reports' ? 'block' : 'hidden'}>
+            <QuestionReportsView
+              user={user}
+              onOpenAuth={() => setAuthModalOpen(true)}
+              onNavigateTab={switchTab}
+              isActive={activeTab === 'reports'}
+            />
           </div>
         )}
 

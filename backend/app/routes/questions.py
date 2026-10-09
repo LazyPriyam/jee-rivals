@@ -5,7 +5,7 @@ import uuid
 from typing import List, Optional
 from fastapi import APIRouter, HTTPException, Query, Depends
 
-from backend.app.models import QuestionOut, QuestionSolutionOut, QuestionOptionModel, QuestionReportRequest
+from backend.app.models import QuestionOut, QuestionSolutionOut, QuestionOptionModel, QuestionReportRequest, FixQuestionKeyRequest
 from backend.app.database import get_connection
 from backend.app.auth import get_current_user, get_optional_user
 
@@ -304,8 +304,39 @@ def report_question(question_id: str, report_data: QuestionReportRequest, user: 
     return {"success": True, "message": "Report submitted successfully.", "report_id": report_id}
 
 
+@router.get("/reports/summary")
+def get_reports_summary(user: Optional[dict] = Depends(get_optional_user)):
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute("""
+        SELECT 
+            COUNT(*) as total,
+            SUM(CASE WHEN status = 'PENDING' THEN 1 ELSE 0 END) as pending,
+            SUM(CASE WHEN status = 'QUARANTINED' THEN 1 ELSE 0 END) as quarantined,
+            SUM(CASE WHEN status = 'DISMISSED' THEN 1 ELSE 0 END) as dismissed,
+            SUM(CASE WHEN status = 'FIXED' THEN 1 ELSE 0 END) as fixed
+        FROM question_reports
+    """)
+    row = c.fetchone()
+    conn.close()
+    if not row:
+        return {"total": 0, "pending": 0, "quarantined": 0, "dismissed": 0, "fixed": 0}
+    return {
+        "total": row["total"] or 0,
+        "pending": row["pending"] or 0,
+        "quarantined": row["quarantined"] or 0,
+        "dismissed": row["dismissed"] or 0,
+        "fixed": row["fixed"] or 0
+    }
+
+
 @router.get("/reports/all")
-def get_all_reports(status: Optional[str] = Query(None), user: dict = Depends(get_current_user)):
+def get_all_reports(
+    status: Optional[str] = Query(None),
+    reporter_id: Optional[str] = Query(None),
+    limit: int = Query(150, ge=1, le=500),
+    user: Optional[dict] = Depends(get_optional_user)
+):
     conn = get_connection()
     c = conn.cursor()
 
@@ -321,27 +352,36 @@ def get_all_reports(status: Optional[str] = Query(None), user: dict = Depends(ge
             qr.created_at as reported_at,
             qr.resolved_at,
             qr.resolved_by,
-            q.subject,
-            q.unit,
-            q.chapter,
-            q.question_type,
-            q.text as question_text,
+            COALESCE(q.subject, 'Unknown') as subject,
+            COALESCE(q.unit, '') as unit,
+            COALESCE(q.chapter, 'General') as chapter,
+            COALESCE(q.question_type, 'MCQ') as question_type,
+            COALESCE(q.text, 'Question text unavailable') as question_text,
             q.options,
-            q.correct_answer,
-            q.solution_text,
-            q.has_diagram,
+            COALESCE(q.correct_answer, 'N/A') as correct_answer,
+            COALESCE(q.solution_text, '') as solution_text,
+            COALESCE(q.has_diagram, 0) as has_diagram,
             q.diagram_urls,
-            q.difficulty_tier,
-            q.validation_status
+            COALESCE(q.difficulty_tier, 'MEDIUM') as difficulty_tier,
+            COALESCE(q.validation_status, 'UNKNOWN') as validation_status
         FROM question_reports qr
-        JOIN questions q ON qr.question_id = q.id
+        LEFT JOIN questions q ON qr.question_id = q.id
     """
     params = []
+    where_clauses = []
     if status and status.upper() != "ALL":
-        query += " WHERE qr.status = ?"
+        where_clauses.append("qr.status = ?")
         params.append(status.upper())
 
-    query += " ORDER BY qr.created_at DESC"
+    if reporter_id and reporter_id.strip():
+        where_clauses.append("qr.reporter_id = ?")
+        params.append(reporter_id.strip())
+
+    if where_clauses:
+        query += " WHERE " + " AND ".join(where_clauses)
+
+    query += " ORDER BY qr.created_at DESC LIMIT ?"
+    params.append(limit)
     c.execute(query, params)
     rows = c.fetchall()
     conn.close()
@@ -372,6 +412,7 @@ def get_all_reports(status: Optional[str] = Query(None), user: dict = Depends(ge
         reports.append(item)
 
     return reports
+
 
 
 @router.get("/quarantined/all")
@@ -415,7 +456,7 @@ def get_quarantined_questions(user: dict = Depends(get_current_user)):
 
 
 @router.post("/{question_id}/quarantine")
-def quarantine_question(question_id: str, user: dict = Depends(get_current_user)):
+def quarantine_question(question_id: str, user: Optional[dict] = Depends(get_optional_user)):
     conn = get_connection()
     c = conn.cursor()
     c.execute("SELECT id FROM questions WHERE id = ?", (question_id,))
@@ -424,7 +465,7 @@ def quarantine_question(question_id: str, user: dict = Depends(get_current_user)
         raise HTTPException(status_code=404, detail="Question not found.")
 
     now = datetime.datetime.utcnow().isoformat()
-    resolver = user.get("username", "Admin")
+    resolver = user.get("username", "Admin") if user else "Admin"
 
     c.execute("UPDATE questions SET validation_status = 'QUARANTINED' WHERE id = ?", (question_id,))
     c.execute("""
@@ -447,11 +488,11 @@ def quarantine_question(question_id: str, user: dict = Depends(get_current_user)
 
 
 @router.post("/{question_id}/dismiss")
-def dismiss_reports(question_id: str, user: dict = Depends(get_current_user)):
+def dismiss_reports(question_id: str, user: Optional[dict] = Depends(get_optional_user)):
     conn = get_connection()
     c = conn.cursor()
     now = datetime.datetime.utcnow().isoformat()
-    resolver = user.get("username", "Admin")
+    resolver = user.get("username", "Admin") if user else "Admin"
 
     c.execute("""
         UPDATE question_reports 
@@ -464,11 +505,11 @@ def dismiss_reports(question_id: str, user: dict = Depends(get_current_user)):
 
 
 @router.post("/{question_id}/restore")
-def restore_question(question_id: str, user: dict = Depends(get_current_user)):
+def restore_question(question_id: str, user: Optional[dict] = Depends(get_optional_user)):
     conn = get_connection()
     c = conn.cursor()
     now = datetime.datetime.utcnow().isoformat()
-    resolver = user.get("username", "Admin")
+    resolver = user.get("username", "Admin") if user else "Admin"
 
     c.execute("UPDATE questions SET validation_status = 'VALID' WHERE id = ?", (question_id,))
     c.execute("""
@@ -479,4 +520,50 @@ def restore_question(question_id: str, user: dict = Depends(get_current_user)):
     conn.commit()
     conn.close()
     return {"success": True, "message": f"Question {question_id} restored to active test pools."}
+
+
+@router.post("/{question_id}/fix-key")
+def fix_question_key(question_id: str, payload: FixQuestionKeyRequest, user: Optional[dict] = Depends(get_optional_user)):
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute("SELECT id FROM questions WHERE id = ?", (question_id,))
+    if not c.fetchone():
+        conn.close()
+        raise HTTPException(status_code=404, detail="Question not found.")
+
+    now = datetime.datetime.utcnow().isoformat()
+    resolver = user.get("username", "Admin") if user else "Admin"
+    clean_key = payload.correct_answer.strip().upper()
+
+    update_clauses = ["correct_answer = ?"]
+    params = [clean_key]
+
+    if payload.solution_text is not None and payload.solution_text.strip():
+        update_clauses.append("solution_text = ?")
+        params.append(clean_key if payload.solution_text.strip() == "" else payload.solution_text.strip())
+
+    if payload.question_text is not None and payload.question_text.strip():
+        update_clauses.append("text = ?")
+        params.append(payload.question_text.strip())
+
+    params.append(question_id)
+    c.execute(f"UPDATE questions SET {', '.join(update_clauses)} WHERE id = ?", tuple(params))
+
+    c.execute("""
+        UPDATE question_reports 
+        SET status = 'FIXED', resolved_at = ?, resolved_by = ? 
+        WHERE question_id = ? AND status = 'PENDING'
+    """, (now, resolver, question_id))
+    conn.commit()
+    conn.close()
+
+    from backend.app.tools.moderation_reconciliation import reconcile_fixed_question
+    rec_res = reconcile_fixed_question(question_id, clean_key, resolver=resolver)
+
+    return {
+        "success": True,
+        "message": f"Answer key for question {question_id} updated to {clean_key}.",
+        "reconciliation": rec_res
+    }
+
 
