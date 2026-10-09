@@ -13,15 +13,23 @@ import {
   Layers,
   Sparkles,
   Sliders,
-  Check
+  Check,
+  Users,
+  Globe,
+  Lock
 } from 'lucide-react';
 
-export default function MocksCenterView({ user, onRoomCreated, onOpenAuth }) {
+export default function MocksCenterView({ user, onRoomCreated, onJoinRoomCode, onOpenAuth }) {
+  const [mockMode, setMockMode] = useState('SOLO'); // 'SOLO' or 'GROUP'
   const [targetExam, setTargetExam] = useState('MAIN'); // 'MAIN' or 'ADVANCED'
   const [selectedSubjects, setSelectedSubjects] = useState(['Physics', 'Chemistry', 'Mathematics']);
   const [questionCount, setQuestionCount] = useState(25);
   const [durationMinutes, setDurationMinutes] = useState(60);
   const [questionTypeFilter, setQuestionTypeFilter] = useState('ALL');
+  const [isPublic, setIsPublic] = useState(true);
+  const [passcode, setPasscode] = useState('');
+  const [groupJoinCode, setGroupJoinCode] = useState('');
+  const [joiningGroup, setJoiningGroup] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
@@ -34,6 +42,28 @@ export default function MocksCenterView({ user, onRoomCreated, onOpenAuth }) {
       }
       return [...prev, subj];
     });
+  };
+
+  const handleDirectJoin = async (e) => {
+    e.preventDefault();
+    if (!user) {
+      onOpenAuth();
+      return;
+    }
+    const code = groupJoinCode.trim().toUpperCase();
+    if (!code) return;
+    sound.click();
+    setJoiningGroup(true);
+    setError('');
+    try {
+      if (onJoinRoomCode) {
+        await onJoinRoomCode(code);
+      }
+    } catch (err) {
+      setError(err.message || 'Failed to enter group mock arena.');
+    } finally {
+      setJoiningGroup(false);
+    }
   };
 
   const handleLaunchMock = async () => {
@@ -49,7 +79,9 @@ export default function MocksCenterView({ user, onRoomCreated, onOpenAuth }) {
     try {
       const examName = targetExam === 'MAIN' ? 'JEE (Main)' : 'JEE (Advanced)';
       const scopeLabel = selectedSubjects.length === 3 ? 'Full PCM' : selectedSubjects.join(' & ');
-      const title = `${examName} ${scopeLabel} Official Mock`;
+      const title = mockMode === 'GROUP'
+        ? `${examName} ${scopeLabel} Group Arena`
+        : `${examName} ${scopeLabel} Official Mock`;
 
       const room = await api.rooms.create({
         mode: 'MOCK_TEST',
@@ -63,15 +95,21 @@ export default function MocksCenterView({ user, onRoomCreated, onOpenAuth }) {
         time_per_question: 90,
         total_duration_minutes: durationMinutes,
         timing_type: 'SYNCHRONIZED',
-        is_public: false,
+        is_public: mockMode === 'GROUP' ? isPublic : false,
+        passcode: mockMode === 'GROUP' ? (passcode.trim() || null) : null,
         speed_bonus_enabled: false,
         negative_marking: -1.0,
         base_correct_score: 100.0,
       });
 
-      // Automatically launch exam and retrieve active started room
-      const startedRoom = await api.rooms.start(room.code);
-      onRoomCreated(startedRoom || { ...room, status: 'IN_PROGRESS' });
+      if (mockMode === 'GROUP') {
+        // Group mock: open lobby so peers can join with room code before host begins!
+        onRoomCreated(room);
+      } else {
+        // Solo simulation: automatically launch examination immediately
+        const startedRoom = await api.rooms.start(room.code);
+        onRoomCreated(startedRoom || { ...room, status: 'IN_PROGRESS' });
+      }
     } catch (err) {
       setError(err.message || 'Failed to initialize examination paper.');
     } finally {
@@ -122,6 +160,45 @@ export default function MocksCenterView({ user, onRoomCreated, onOpenAuth }) {
         </div>
       )}
 
+      {/* Quick Join Peer Group Mock Card */}
+      <div className="bg-[#1e2433] border border-orange-500/30 rounded-3xl p-5 sm:p-6 mb-8 shadow-xl flex flex-col md:flex-row items-center justify-between gap-5 glow-orange-subtle">
+        <div className="flex items-center gap-3.5">
+          <div className="w-12 h-12 rounded-2xl bg-orange-500/10 border border-orange-500/30 flex items-center justify-center text-orange-400 shrink-0">
+            <Users className="w-6 h-6" />
+          </div>
+          <div>
+            <h3 className="text-base font-bold text-white flex items-center gap-2">
+              <span>Join a Common Group Mock Arena</span>
+              <span className="text-[10px] px-2 py-0.5 rounded-full bg-orange-500/20 text-orange-300 font-mono font-bold">
+                SAME QUESTIONS
+              </span>
+            </h3>
+            <p className="text-xs text-slate-400 mt-0.5">
+              Have a 5-character Room Code from a friend or study squad? Enter it below to compete on the identical question paper.
+            </p>
+          </div>
+        </div>
+
+        <form onSubmit={handleDirectJoin} className="flex items-center gap-2 w-full md:w-auto shrink-0">
+          <input
+            type="text"
+            placeholder="CODE (e.g. AB12CD)"
+            value={groupJoinCode}
+            onChange={(e) => setGroupJoinCode(e.target.value.toUpperCase())}
+            maxLength={6}
+            className="px-4 py-2.5 rounded-xl bg-[#141824] border border-white/10 text-white font-mono uppercase text-sm tracking-widest placeholder-slate-500 focus:outline-none focus:border-orange-500 w-full md:w-44 transition font-bold"
+          />
+          <button
+            type="submit"
+            disabled={joiningGroup || !groupJoinCode.trim()}
+            className="px-5 py-2.5 rounded-xl bg-orange-500 hover:bg-orange-600 disabled:opacity-50 text-white font-bold text-xs shrink-0 transition cursor-pointer shadow-lg shadow-orange-950/40 flex items-center gap-1.5"
+          >
+            <span>{joiningGroup ? 'Entering...' : 'Join Arena'}</span>
+            <ArrowRight className="w-4 h-4" />
+          </button>
+        </form>
+      </div>
+
       {/* Dynamic NTA Mock Generator Card */}
       <div className="bg-[#262c3c] border border-white/10 rounded-3xl p-6 sm:p-8 shadow-xl mb-8">
         <div className="flex items-center justify-between mb-6 pb-4 border-b border-white/10">
@@ -137,6 +214,122 @@ export default function MocksCenterView({ user, onRoomCreated, onOpenAuth }) {
         </div>
 
         <div className="space-y-6">
+          {/* 0. Exam Mode: Solo vs Group Arena */}
+          <div>
+            <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider mb-2.5">
+              0. Session Format
+            </label>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <button
+                type="button"
+                onClick={() => {
+                  sound.click();
+                  setMockMode('SOLO');
+                }}
+                className={`p-4 rounded-2xl border text-left transition cursor-pointer flex items-center justify-between ${
+                  mockMode === 'SOLO'
+                    ? 'border-orange-500 bg-orange-950/30 text-white shadow-lg shadow-orange-950/40'
+                    : 'border-white/10 bg-[#1e2433] text-slate-400 hover:border-white/20'
+                }`}
+              >
+                <div>
+                  <div className="flex items-center gap-2">
+                    <BookOpen className="w-4 h-4 text-orange-400" />
+                    <h4 className="font-bold text-sm text-white">Solo CBT Simulation</h4>
+                  </div>
+                  <p className="text-xs text-slate-400 mt-1">
+                    Authentic exam hall atmosphere. Begins immediately upon launch.
+                  </p>
+                </div>
+                {mockMode === 'SOLO' && (
+                  <span className="w-6 h-6 rounded-full bg-orange-500 flex items-center justify-center text-white shrink-0 ml-2">
+                    <Check className="w-4 h-4 stroke-[3]" />
+                  </span>
+                )}
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  sound.click();
+                  setMockMode('GROUP');
+                }}
+                className={`p-4 rounded-2xl border text-left transition cursor-pointer flex items-center justify-between ${
+                  mockMode === 'GROUP'
+                    ? 'border-orange-500 bg-orange-950/30 text-white shadow-lg shadow-orange-950/40'
+                    : 'border-white/10 bg-[#1e2433] text-slate-400 hover:border-white/20'
+                }`}
+              >
+                <div>
+                  <div className="flex items-center gap-2">
+                    <Users className="w-4 h-4 text-amber-400" />
+                    <h4 className="font-bold text-sm text-white">Host Group Mock Arena</h4>
+                  </div>
+                  <p className="text-xs text-slate-400 mt-1">
+                    Multiplayer room lobby. Friends join via code; all get the <strong>same questions</strong>.
+                  </p>
+                </div>
+                {mockMode === 'GROUP' && (
+                  <span className="w-6 h-6 rounded-full bg-orange-500 flex items-center justify-center text-white shrink-0 ml-2">
+                    <Check className="w-4 h-4 stroke-[3]" />
+                  </span>
+                )}
+              </button>
+            </div>
+          </div>
+
+          {/* Group Options (Privacy & Passcode) if Group Mode */}
+          {mockMode === 'GROUP' && (
+            <div className="p-4 bg-[#1e2433] border border-orange-500/20 rounded-2xl space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-slate-200">Room Security & Visibility</span>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      sound.click();
+                      setIsPublic(true);
+                    }}
+                    className={`px-3 py-1 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
+                      isPublic ? 'bg-orange-500 text-white' : 'bg-[#151924] text-slate-400'
+                    }`}
+                  >
+                    <Globe className="w-3.5 h-3.5" />
+                    <span>Public Lobby</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      sound.click();
+                      setIsPublic(false);
+                    }}
+                    className={`px-3 py-1 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
+                      !isPublic ? 'bg-orange-500 text-white' : 'bg-[#151924] text-slate-400'
+                    }`}
+                  >
+                    <Lock className="w-3.5 h-3.5" />
+                    <span>Private Squad</span>
+                  </button>
+                </div>
+              </div>
+
+              {!isPublic && (
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-400 mb-1">
+                    Optional Passcode for Friends
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="Leave blank for open invite code"
+                    value={passcode}
+                    onChange={(e) => setPasscode(e.target.value)}
+                    className="w-full px-3.5 py-2 bg-[#141824] border border-white/10 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-orange-500 font-mono"
+                  />
+                </div>
+              )}
+            </div>
+          )}
+
           {/* 1. Target Exam Pattern */}
           <div>
             <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider mb-2.5">
@@ -289,10 +482,24 @@ export default function MocksCenterView({ user, onRoomCreated, onOpenAuth }) {
                 <span className="font-bold text-white">
                   {targetExam === 'MAIN' ? 'JEE Main' : 'JEE Advanced'} • {selectedSubjects.join(' + ')}
                 </span>
+                {mockMode === 'GROUP' && (
+                  <span className="ml-2 text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                    Group Arena Lobby
+                  </span>
+                )}
               </div>
               <div className="font-mono text-orange-400">
                 {questionCount} Questions across {durationMinutes} Minutes (+4 / -1 Marking)
               </div>
+              {mockMode === 'GROUP' ? (
+                <div className="text-[11px] text-slate-400">
+                  👥 Lobby will open so peers can join via Code. All candidates receive the <strong>exact same question paper</strong>.
+                </div>
+              ) : (
+                <div className="text-[11px] text-slate-400">
+                  👤 Solo examination begins immediately in full-screen Computer-Based Test mode.
+                </div>
+              )}
             </div>
 
             <button
@@ -302,6 +509,11 @@ export default function MocksCenterView({ user, onRoomCreated, onOpenAuth }) {
             >
               {loading ? (
                 <span className="animate-pulse">Synthesizing Examination Paper...</span>
+              ) : mockMode === 'GROUP' ? (
+                <>
+                  <Users className="w-5 h-5" />
+                  <span>HOST GROUP MOCK ARENA</span>
+                </>
               ) : (
                 <>
                   <span>START OFFICIAL NTA MOCK</span>

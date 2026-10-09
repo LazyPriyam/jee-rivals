@@ -191,16 +191,18 @@ export default function RoomLobbyView({ room, user, onStartMatch, onLeaveRoom })
           ) : (
             <>
               <BookOpen className="w-3.5 h-3.5" />
-              <span>Mock Showdown • Blind Scores</span>
+              <span>Common NTA Mock • Shared Question Paper</span>
             </>
           )}
         </div>
 
         <h1 className="text-3xl sm:text-4xl font-black text-white tracking-tight">
-          Battle Lobby Ready
+          {currentRoom.mode === 'MOCK_TEST' ? 'Common NTA Mock Arena' : 'Battle Lobby Ready'}
         </h1>
-        <p className="text-slate-400 text-sm mt-1">
-          Share room code or invite link with friends to duel together in real-time.
+        <p className="text-slate-400 text-sm mt-1 max-w-lg mx-auto">
+          {currentRoom.mode === 'MOCK_TEST'
+            ? 'All participants in this lobby will receive the exact same synchronized question paper and compete under official NTA CBT conditions.'
+            : 'Share room code or invite link with friends to duel together in real-time.'}
         </p>
 
         {/* Room Code Badge */}
@@ -380,7 +382,7 @@ export default function RoomLobbyView({ room, user, onStartMatch, onLeaveRoom })
             ) : (
               <>
                 <Play className="w-6 h-6 fill-current" />
-                <span>START BATTLE</span>
+                <span>{currentRoom.mode === 'MOCK_TEST' ? 'START GROUP MOCK TEST' : 'START BATTLE'}</span>
               </>
             )}
           </button>

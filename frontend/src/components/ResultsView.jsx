@@ -90,7 +90,7 @@ export default function ResultsView({ roomCode, user, onReturnArena, onRematch }
               {winner ? `${winner.username} Claims Victory!` : 'Match Concluded'}
             </h1>
             <p className="text-xs uppercase tracking-widest text-slate-400 mt-1 font-mono">
-              Room #{results.room_code} • {results.mode}
+              Room #{results.room_code} • {results.mode === 'MOCK_TEST' ? 'Common NTA Mock Examination (Identical Question Paper)' : results.mode}
             </p>
           </div>
 
@@ -104,12 +104,25 @@ export default function ResultsView({ roomCode, user, onReturnArena, onRematch }
                 <h3 className="text-base font-bold text-white truncate mt-1">
                   {participants[1].username}
                 </h3>
-                <div className="font-mono font-black text-xl text-slate-200 mt-2">
-                  {participants[1].score} pts
-                </div>
-                <span className="text-xs text-slate-400 block font-mono">
-                  {participants[1].marks} Marks
-                </span>
+                {results.mode === 'MOCK_TEST' ? (
+                  <>
+                    <div className="font-mono font-black text-xl text-orange-400 mt-2">
+                      {participants[1].marks >= 0 ? '+' : ''}{participants[1].marks} Marks
+                    </div>
+                    <span className="text-xs text-slate-400 block font-mono">
+                      {participants[1].accuracy !== undefined ? `${participants[1].accuracy}% Accuracy` : `${participants[1].score} pts`}
+                    </span>
+                  </>
+                ) : (
+                  <>
+                    <div className="font-mono font-black text-xl text-slate-200 mt-2">
+                      {participants[1].score} pts
+                    </div>
+                    <span className="text-xs text-slate-400 block font-mono">
+                      {participants[1].marks} Marks
+                    </span>
+                  </>
+                )}
               </div>
             ) : <div className="hidden md:block"></div>}
 
@@ -121,12 +134,25 @@ export default function ResultsView({ roomCode, user, onReturnArena, onRematch }
                 <h3 className="text-lg font-black text-white truncate mt-1">
                   {winner.username}
                 </h3>
-                <div className="font-mono font-black text-3xl text-orange-400 mt-2">
-                  {winner.score} pts
-                </div>
-                <span className="text-xs text-amber-200/80 block font-mono">
-                  {winner.marks} Marks
-                </span>
+                {results.mode === 'MOCK_TEST' ? (
+                  <>
+                    <div className="font-mono font-black text-3xl text-orange-400 mt-2">
+                      {winner.marks >= 0 ? '+' : ''}{winner.marks} Marks
+                    </div>
+                    <span className="text-xs text-amber-200/80 block font-mono">
+                      {winner.accuracy !== undefined ? `${winner.accuracy}% Accuracy` : `${winner.score} pts`}
+                    </span>
+                  </>
+                ) : (
+                  <>
+                    <div className="font-mono font-black text-3xl text-orange-400 mt-2">
+                      {winner.score} pts
+                    </div>
+                    <span className="text-xs text-amber-200/80 block font-mono">
+                      {winner.marks} Marks
+                    </span>
+                  </>
+                )}
               </div>
             )}
 
@@ -138,12 +164,25 @@ export default function ResultsView({ roomCode, user, onReturnArena, onRematch }
                 <h3 className="text-base font-bold text-white truncate mt-1">
                   {participants[2].username}
                 </h3>
-                <div className="font-mono font-black text-xl text-slate-200 mt-2">
-                  {participants[2].score} pts
-                </div>
-                <span className="text-xs text-slate-400 block font-mono">
-                  {participants[2].marks} Marks
-                </span>
+                {results.mode === 'MOCK_TEST' ? (
+                  <>
+                    <div className="font-mono font-black text-xl text-orange-400 mt-2">
+                      {participants[2].marks >= 0 ? '+' : ''}{participants[2].marks} Marks
+                    </div>
+                    <span className="text-xs text-slate-400 block font-mono">
+                      {participants[2].accuracy !== undefined ? `${participants[2].accuracy}% Accuracy` : `${participants[2].score} pts`}
+                    </span>
+                  </>
+                ) : (
+                  <>
+                    <div className="font-mono font-black text-xl text-slate-200 mt-2">
+                      {participants[2].score} pts
+                    </div>
+                    <span className="text-xs text-slate-400 block font-mono">
+                      {participants[2].marks} Marks
+                    </span>
+                  </>
+                )}
               </div>
             ) : <div className="hidden md:block"></div>}
           </div>
@@ -160,9 +199,19 @@ export default function ResultsView({ roomCode, user, onReturnArena, onRematch }
                 <thead>
                   <tr className="border-b border-white/10 text-xs text-slate-500 uppercase font-mono">
                     <th className="pb-3 pl-2">Rank</th>
-                    <th className="pb-3">Challenger</th>
-                    <th className="pb-3 text-right">Score</th>
-                    <th className="pb-3 text-right">Marks</th>
+                    <th className="pb-3">Candidate</th>
+                    {results.mode === 'MOCK_TEST' ? (
+                      <>
+                        <th className="pb-3 text-right">Marks (+4/-1)</th>
+                        <th className="pb-3 text-right">Accuracy</th>
+                        <th className="pb-3 text-right">Attempted</th>
+                      </>
+                    ) : (
+                      <>
+                        <th className="pb-3 text-right">Score</th>
+                        <th className="pb-3 text-right">Marks</th>
+                      </>
+                    )}
                     <th className="pb-3 text-center">Status</th>
                   </tr>
                 </thead>
@@ -187,14 +236,32 @@ export default function ResultsView({ roomCode, user, onReturnArena, onRematch }
                             )}
                           </div>
                         </td>
-                        <td className="py-3.5 text-right font-mono font-black text-orange-400">
-                          {p.score}
-                        </td>
-                        <td className="py-3.5 text-right font-mono text-slate-300">
-                          {p.marks}
-                        </td>
+                        {results.mode === 'MOCK_TEST' ? (
+                          <>
+                            <td className="py-3.5 text-right font-mono font-black text-orange-400">
+                              {p.marks !== undefined ? `${p.marks >= 0 ? '+' : ''}${p.marks}` : `${p.score} pts`}
+                            </td>
+                            <td className="py-3.5 text-right font-mono text-emerald-400 font-bold">
+                              {p.accuracy !== undefined ? `${p.accuracy}%` : '-'}
+                            </td>
+                            <td className="py-3.5 text-right font-mono text-slate-300">
+                              {p.total_attempted !== undefined ? `${p.total_attempted} / ${results.total_questions}` : '-'}
+                            </td>
+                          </>
+                        ) : (
+                          <>
+                            <td className="py-3.5 text-right font-mono font-black text-orange-400">
+                              {p.score}
+                            </td>
+                            <td className="py-3.5 text-right font-mono text-slate-300">
+                              {p.marks}
+                            </td>
+                          </>
+                        )}
                         <td className="py-3.5 text-center">
-                          <span className="text-xs text-emerald-400 font-mono">Finished</span>
+                          <span className="text-xs text-emerald-400 font-mono">
+                            {p.is_finished ? 'Finished' : 'Writing'}
+                          </span>
                         </td>
                       </tr>
                     );

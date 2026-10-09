@@ -208,11 +208,13 @@ def get_user_test_history(user: dict = Depends(get_current_user)):
         SELECT r.id, r.code, r.mode, r.preset_name, r.subject, r.subjects,
                r.chapter, r.chapters, r.target_exam, r.total_questions,
                r.total_duration_minutes, r.status, r.created_at, r.completed_at,
-               p.score, p.marks, p.answers, p.is_finished, p.finished_at
+               p.score, p.marks, p.answers, p.is_finished, p.finished_at,
+               (SELECT COUNT(*) FROM room_participants WHERE room_id = r.id) as participant_count
         FROM rooms r
         JOIN room_participants p ON r.id = p.room_id
         WHERE p.user_id = ?
-        ORDER BY COALESCE(r.completed_at, r.created_at) DESC
+          AND (r.status IN ('IN_PROGRESS', 'COMPLETED') OR p.is_finished = 1)
+        ORDER BY COALESCE(r.completed_at, p.finished_at, r.created_at) DESC
         LIMIT 60
     """, (user["id"],))
     rows = [dict(r) for r in c.fetchall()]
@@ -226,9 +228,37 @@ def get_user_test_history(user: dict = Depends(get_current_user)):
         except Exception:
             ans_map = {}
 
-        total_ans = len(ans_map)
-        correct_count = sum(1 for v in ans_map.values() if isinstance(v, dict) and v.get("correct"))
-        accuracy = round((correct_count / total_ans) * 100, 1) if total_ans > 0 else 0.0
+        # Accurate attempt filtering:
+        # A question is attempted if user selected an option other than NONE/SKIPPED/empty
+        attempted_items = []
+        for v in ans_map.values():
+            if isinstance(v, dict):
+                sel = v.get("selected")
+                if sel not in ("NONE", "SKIPPED", "", None) and v.get("attempted") is not False:
+                    attempted_items.append(v)
+            elif isinstance(v, str):
+                if v not in ("NONE", "SKIPPED", ""):
+                    attempted_items.append({"selected": v, "correct": False})
+
+        total_attempted = len(attempted_items)
+        correct_count = sum(1 for v in attempted_items if v.get("correct"))
+        incorrect_count = total_attempted - correct_count
+        total_questions = max(1, r.get("total_questions") or len(ans_map) or 1)
+        unattempted_count = max(0, total_questions - total_attempted)
+        accuracy = round((correct_count / total_attempted) * 100, 1) if total_attempted > 0 else 0.0
+
+        # Calculate accurate marks: for MOCK_TEST, (+4/-1 JEE standard)
+        max_marks = float(total_questions * 4)
+        if r["mode"] == "MOCK_TEST":
+            calculated_marks = float(correct_count * 4.0 - incorrect_count * 1.0)
+            final_marks = float(r["marks"]) if (r.get("marks") is not None and r["marks"] != 0.0) else calculated_marks
+        else:
+            final_marks = float(r.get("marks") or (correct_count * 4.0 - incorrect_count * 1.0))
+
+        marks_percentage = round((final_marks / max_marks) * 100, 1) if max_marks > 0 else 0.0
+
+        participant_count = r.get("participant_count") or 1
+        is_group = participant_count > 1
 
         history.append({
             "room_id": r["id"],
@@ -237,17 +267,23 @@ def get_user_test_history(user: dict = Depends(get_current_user)):
             "preset_name": r["preset_name"] or f"Test #{r['code']}",
             "subject": r["subject"],
             "target_exam": r.get("target_exam", "MIXED"),
-            "total_questions": r["total_questions"],
+            "total_questions": total_questions,
             "duration_minutes": r["total_duration_minutes"],
             "status": r["status"],
             "created_at": r["created_at"],
             "completed_at": r["completed_at"] or r.get("finished_at"),
             "score": r["score"],
-            "marks": r["marks"],
-            "total_attempted": total_ans,
+            "marks": final_marks,
+            "max_marks": max_marks,
+            "marks_percentage": marks_percentage,
+            "total_attempted": total_attempted,
             "correct_count": correct_count,
+            "incorrect_count": incorrect_count,
+            "unattempted_count": unattempted_count,
             "accuracy": accuracy,
-            "is_finished": bool(r["is_finished"])
+            "is_finished": bool(r["is_finished"]),
+            "participant_count": participant_count,
+            "is_group": is_group
         })
 
     return history
@@ -1571,12 +1607,13 @@ def get_room_results(code: str, user: dict = Depends(get_current_user)):
     room = dict(room_row)
     room_id = room["id"]
 
-    c.execute("""
+    order_clause = "p.marks DESC, p.score DESC" if room.get("mode") == "MOCK_TEST" else "p.score DESC, p.marks DESC"
+    c.execute(f"""
         SELECT p.*, u.username, u.avatar_id, u.title, u.overall_elo
         FROM room_participants p
         JOIN users u ON p.user_id = u.id
         WHERE p.room_id = ?
-        ORDER BY p.score DESC, p.marks DESC
+        ORDER BY {order_clause}
     """, (room_id,))
     part_rows = [dict(r) for r in c.fetchall()]
 
@@ -1608,6 +1645,7 @@ def get_room_results(code: str, user: dict = Depends(get_current_user)):
 
     conn.close()
 
+    total_q = room.get("total_questions") or len(q_ids) or 1
     participants_summary = []
     for idx, p in enumerate(part_rows, start=1):
         raw_ans = p.get("answers") or "{}"
@@ -1615,6 +1653,14 @@ def get_room_results(code: str, user: dict = Depends(get_current_user)):
             answers_dict = json.loads(raw_ans) if isinstance(raw_ans, str) else raw_ans
         except Exception:
             answers_dict = {}
+
+        attempted_items = [
+            v for v in answers_dict.values()
+            if isinstance(v, dict) and v.get("selected") not in ("NONE", "SKIPPED", "", None) and v.get("attempted") is not False
+        ]
+        attempted_cnt = len(attempted_items)
+        corr_cnt = sum(1 for v in attempted_items if v.get("correct"))
+        acc = round((corr_cnt / attempted_cnt) * 100, 1) if attempted_cnt > 0 else 0.0
 
         participants_summary.append({
             "rank": idx,
@@ -1625,6 +1671,9 @@ def get_room_results(code: str, user: dict = Depends(get_current_user)):
             "score": p["score"],
             "marks": p["marks"],
             "answers": answers_dict,
+            "total_attempted": attempted_cnt,
+            "correct_count": corr_cnt,
+            "accuracy": acc,
             "is_finished": bool(p["is_finished"])
         })
 
@@ -1632,7 +1681,8 @@ def get_room_results(code: str, user: dict = Depends(get_current_user)):
         "room_code": code,
         "mode": room["mode"],
         "status": room["status"],
-        "total_questions": room["total_questions"],
+        "total_questions": total_q,
+        "max_marks": float(total_q * 4),
         "participants": participants_summary,
         "questions": questions_data
     }

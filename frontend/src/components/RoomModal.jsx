@@ -347,7 +347,9 @@ export default function RoomModal({ isOpen, onClose, onRoomCreated }) {
                 <option value={10}>10 Items (Drill)</option>
                 <option value={15}>15 Items (Intense)</option>
                 <option value={20}>20 Items (Mock)</option>
-                <option value={25}>25 Items (Full NTA)</option>
+                <option value={25}>25 Items (25-Q Single Subj)</option>
+                <option value={30}>30 Items (30-Q Arena)</option>
+                <option value={75}>75 Items (Official Full PCM Mock)</option>
               </select>
             </div>
 

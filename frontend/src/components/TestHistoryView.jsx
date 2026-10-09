@@ -19,11 +19,11 @@ import {
   ChevronRight
 } from 'lucide-react';
 
-export default function TestHistoryView({ user, onSelectTest, onNavigateTab, onOpenAuth }) {
+export default function TestHistoryView({ user, onSelectTest, onResumeTest, onNavigateTab, onOpenAuth }) {
   const [history, setHistory] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [selectedMode, setSelectedMode] = useState('ALL'); // 'ALL', 'MOCK_TEST', 'SPEED_DUEL'
+  const [selectedMode, setSelectedMode] = useState('ALL'); // 'ALL', 'MOCK_TEST', 'SPEED_DUEL', 'GROUP'
   const [searchQuery, setSearchQuery] = useState('');
 
   const fetchHistory = () => {
@@ -68,20 +68,24 @@ export default function TestHistoryView({ user, onSelectTest, onNavigateTab, onO
     );
   }
 
-  // Aggregate Metrics
-  const totalTests = history.length;
-  const bestMarks = history.length > 0 ? Math.max(...history.map((h) => h.marks || 0)) : 0;
+  // Aggregate Metrics (Accurate computations based on real attempts)
+  const completedTests = history.filter((h) => h.status === 'COMPLETED' || h.is_finished);
+  const totalTests = completedTests.length;
+  const bestMarks = completedTests.length > 0 ? Math.max(...completedTests.map((h) => Number(h.marks) || 0)) : 0;
   const totalAttempted = history.reduce((acc, h) => acc + (h.total_attempted || 0), 0);
+  const testsWithAttempts = history.filter((h) => (h.total_attempted || 0) > 0);
   const avgAccuracy =
-    history.length > 0
+    testsWithAttempts.length > 0
       ? Math.round(
-          history.reduce((acc, h) => acc + (h.accuracy || 0), 0) / history.length
+          testsWithAttempts.reduce((acc, h) => acc + (h.accuracy || 0), 0) / testsWithAttempts.length
         )
       : 0;
 
   // Filter history items
   const filteredHistory = history.filter((item) => {
-    if (selectedMode !== 'ALL' && item.mode !== selectedMode) return false;
+    if (selectedMode === 'MOCK_TEST' && item.mode !== 'MOCK_TEST') return false;
+    if (selectedMode === 'SPEED_DUEL' && item.mode !== 'SPEED_DUEL') return false;
+    if (selectedMode === 'GROUP' && !item.is_group && (item.participant_count || 1) <= 1) return false;
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
       const matchTitle = (item.preset_name || '').toLowerCase().includes(q);
@@ -137,12 +141,12 @@ export default function TestHistoryView({ user, onSelectTest, onNavigateTab, onO
           <div className="bg-[#10141f] border border-white/10 rounded-2xl p-4">
             <span className="text-xs text-slate-400 block mb-1">Peak Marks Record</span>
             <span className="text-2xl font-black text-orange-400">
-              +{bestMarks.toFixed(1)}
+              {bestMarks >= 0 ? '+' : ''}{bestMarks.toFixed(1)}
             </span>
           </div>
           <div className="bg-[#10141f] border border-white/10 rounded-2xl p-4">
-            <span className="text-xs text-slate-400 block mb-1">Total Questions</span>
-            <span className="text-2xl font-black text-sky-400">{totalAttempted}</span>
+            <span className="text-xs text-slate-400 block mb-1">Total Attempted</span>
+            <span className="text-2xl font-black text-sky-400">{totalAttempted} Qs</span>
           </div>
           <div className="bg-[#10141f] border border-white/10 rounded-2xl p-4">
             <span className="text-xs text-slate-400 block mb-1">Mean Accuracy</span>
@@ -159,6 +163,7 @@ export default function TestHistoryView({ user, onSelectTest, onNavigateTab, onO
             { id: 'ALL', label: 'All Examinations' },
             { id: 'MOCK_TEST', label: 'NTA CBT Mocks' },
             { id: 'SPEED_DUEL', label: 'Speed Duels' },
+            { id: 'GROUP', label: 'Group Battles & Mocks' },
           ].map((m) => (
             <button
               key={m.id}
@@ -218,6 +223,8 @@ export default function TestHistoryView({ user, onSelectTest, onNavigateTab, onO
         <div className="space-y-4">
           {filteredHistory.map((item) => {
             const isMock = item.mode === 'MOCK_TEST';
+            const isGroup = item.is_group || (item.participant_count || 1) > 1;
+            const isInProgress = item.status === 'IN_PROGRESS' && !item.is_finished;
             const dateStr = item.completed_at || item.created_at;
             const formattedDate = dateStr
               ? new Date(dateStr).toLocaleDateString('en-US', {
@@ -228,6 +235,9 @@ export default function TestHistoryView({ user, onSelectTest, onNavigateTab, onO
                   minute: '2-digit',
                 })
               : 'Recent Session';
+
+            const maxMarks = item.max_marks || (item.total_questions * 4);
+            const marksVal = Number(item.marks || 0);
 
             return (
               <div
@@ -246,6 +256,23 @@ export default function TestHistoryView({ user, onSelectTest, onNavigateTab, onO
                     >
                       {isMock ? 'NTA Mock Examination' : 'Speed Duel Combat'}
                     </span>
+
+                    {isGroup && (
+                      <span className="text-[10px] font-bold px-2.5 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                        👥 Group Battle ({item.participant_count} Aspirants)
+                      </span>
+                    )}
+
+                    {isInProgress ? (
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-950/80 text-amber-400 border border-amber-500/40">
+                        ⏳ In Progress
+                      </span>
+                    ) : (
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-950/80 text-emerald-400 border border-emerald-500/40">
+                        ✓ Completed
+                      </span>
+                    )}
+
                     <span className="text-xs text-slate-400">• {formattedDate}</span>
                     <span className="text-xs text-slate-400">• Room #{item.code}</span>
                   </div>
@@ -254,12 +281,20 @@ export default function TestHistoryView({ user, onSelectTest, onNavigateTab, onO
                     {item.preset_name}
                   </h3>
 
+                  {/* Accurate breakdown indicators */}
                   <div className="flex flex-wrap items-center gap-4 text-xs font-mono text-slate-400">
                     <span>
-                      Questions:{' '}
+                      Attempted:{' '}
                       <strong className="text-slate-200">
                         {item.total_attempted} / {item.total_questions}
                       </strong>
+                    </span>
+                    <span className="flex items-center gap-1.5">
+                      <span className="text-emerald-400 font-bold">✓ {item.correct_count}</span>
+                      <span>•</span>
+                      <span className="text-rose-400 font-bold">✗ {item.incorrect_count !== undefined ? item.incorrect_count : Math.max(0, item.total_attempted - item.correct_count)}</span>
+                      <span>•</span>
+                      <span className="text-slate-500">⊘ {item.unattempted_count !== undefined ? item.unattempted_count : Math.max(0, item.total_questions - item.total_attempted)} Skipped</span>
                     </span>
                     <span>
                       Duration:{' '}
@@ -277,27 +312,64 @@ export default function TestHistoryView({ user, onSelectTest, onNavigateTab, onO
                 {/* Right: Scores & Action Button */}
                 <div className="flex items-center justify-between md:justify-end gap-6 pt-3 md:pt-0 border-t md:border-t-0 border-white/5">
                   <div className="text-left md:text-right font-mono">
-                    <div className="text-2xl font-black text-orange-400">
-                      {item.marks !== undefined ? `+${Number(item.marks).toFixed(1)}` : `${item.score} pts`}
-                    </div>
-                    <div className="text-xs text-slate-400">
+                    {isMock ? (
+                      <>
+                        <div className="text-2xl font-black text-orange-400">
+                          {marksVal >= 0 ? '+' : ''}{marksVal.toFixed(1)} / {maxMarks}
+                        </div>
+                        <div className="text-[11px] text-slate-400">
+                          Score:{' '}
+                          <span className="text-slate-200 font-bold">
+                            {item.marks_percentage !== undefined ? `${item.marks_percentage}%` : `${Math.round((marksVal / maxMarks) * 100)}%`}
+                          </span>
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <div className="text-2xl font-black text-orange-400">
+                          {item.score} pts
+                        </div>
+                        <div className="text-[11px] text-slate-400">
+                          Marks:{' '}
+                          <span className="text-slate-200 font-bold">
+                            {marksVal >= 0 ? '+' : ''}{marksVal.toFixed(1)}
+                          </span>
+                        </div>
+                      </>
+                    )}
+
+                    <div className="text-xs text-slate-400 mt-0.5">
                       Accuracy:{' '}
-                      <span className="font-bold text-emerald-400">
+                      <span className={`font-bold ${item.accuracy >= 75 ? 'text-emerald-400' : item.accuracy >= 50 ? 'text-amber-400' : 'text-rose-400'}`}>
                         {item.accuracy || 0}%
                       </span>
                     </div>
                   </div>
 
-                  <button
-                    onClick={() => {
-                      sound.click();
-                      onSelectTest(item.code);
-                    }}
-                    className="px-4 py-2.5 rounded-xl bg-orange-500 hover:bg-orange-600 text-white font-bold text-xs transition shadow-lg shadow-orange-950/40 cursor-pointer flex items-center gap-1.5 shrink-0"
-                  >
-                    <span>Full Analysis</span>
-                    <ChevronRight className="w-4 h-4" />
-                  </button>
+                  {isInProgress ? (
+                    <button
+                      onClick={() => {
+                        sound.click();
+                        if (onResumeTest) onResumeTest(item.code);
+                        else onSelectTest(item.code);
+                      }}
+                      className="px-4 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-white font-bold text-xs transition shadow-lg shadow-amber-950/40 cursor-pointer flex items-center gap-1.5 shrink-0"
+                    >
+                      <span>Resume Exam</span>
+                      <ChevronRight className="w-4 h-4" />
+                    </button>
+                  ) : (
+                    <button
+                      onClick={() => {
+                        sound.click();
+                        onSelectTest(item.code);
+                      }}
+                      className="px-4 py-2.5 rounded-xl bg-orange-500 hover:bg-orange-600 text-white font-bold text-xs transition shadow-lg shadow-orange-950/40 cursor-pointer flex items-center gap-1.5 shrink-0"
+                    >
+                      <span>Full Analysis</span>
+                      <ChevronRight className="w-4 h-4" />
+                    </button>
+                  )}
                 </div>
               </div>
             );

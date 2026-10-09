@@ -197,11 +197,16 @@ export default function App() {
   const handleJoinRoomCode = async (roomOrCode) => {
     let room = roomOrCode;
     if (typeof roomOrCode === 'string') {
+      const cleanCode = roomOrCode.trim().toUpperCase();
       try {
-        room = await api.rooms.get(roomOrCode);
-      } catch (err) {
-        alert(err.message || 'Failed to locate arena room.');
-        return;
+        room = await api.rooms.join(cleanCode);
+      } catch (joinErr) {
+        try {
+          room = await api.rooms.get(cleanCode);
+        } catch (err) {
+          alert(joinErr.message || err.message || 'Failed to locate arena room.');
+          return;
+        }
       }
     } else if (roomOrCode && roomOrCode.room) {
       room = roomOrCode.room;
@@ -351,8 +356,19 @@ export default function App() {
               <MockTestView
                 room={currentRoom}
                 user={user}
-                onMatchComplete={() => {
-                  setRoomViewMode('results');
+                onMatchComplete={async () => {
+                  try {
+                    const latest = await api.rooms.get(currentRoom.code);
+                    const isSolo = !latest.participants || latest.participants.length <= 1;
+                    const allFinished = latest.status === 'COMPLETED' || (latest.participants && latest.participants.every((p) => p.is_finished));
+                    if (isSolo || allFinished) {
+                      setRoomViewMode('results');
+                    } else {
+                      setRoomViewMode('waiting');
+                    }
+                  } catch (_) {
+                    setRoomViewMode('results');
+                  }
                   refreshUser();
                 }}
                 onExitToDashboard={() => {
@@ -482,6 +498,7 @@ export default function App() {
             <MocksCenterView
               user={user}
               onRoomCreated={handleRoomCreated}
+              onJoinRoomCode={handleJoinRoomCode}
               onOpenAuth={() => setAuthModalOpen(true)}
               isActive={activeTab === 'mocks'}
             />
@@ -501,6 +518,7 @@ export default function App() {
               <TestHistoryView
                 user={user}
                 onSelectTest={(code) => setInspectTestCode(code)}
+                onResumeTest={handleJoinRoomCode}
                 onNavigateTab={switchTab}
                 onOpenAuth={() => setAuthModalOpen(true)}
               />

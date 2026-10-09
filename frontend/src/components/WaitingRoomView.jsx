@@ -98,17 +98,21 @@ export default function WaitingRoomView({ room, user, onMatchCompleted, onEarlyR
           <CheckCircle2 className="w-8 h-8 text-emerald-400" />
         </div>
 
-        <h1 className="text-3xl font-black text-white">Questions Completed!</h1>
+        <h1 className="text-3xl font-black text-white">
+          {room.mode === 'MOCK_TEST' ? 'NTA Examination Paper Submitted!' : 'Questions Completed!'}
+        </h1>
         <p className="text-slate-400 text-sm mt-2 max-w-md mx-auto">
-          You have finished all questions. Watching live race lanes as challengers lock in their final answers...
+          {room.mode === 'MOCK_TEST'
+            ? 'Your answers have been securely recorded. Waiting for peer aspirants to finish their examination papers...'
+            : 'You have finished all questions. Watching live race lanes as challengers lock in their final answers...'}
         </p>
 
-        {/* Live Race Lanes (Dots in Separate Lanes) */}
+        {/* Live Race Lanes / Candidate Progress */}
         <div className="my-8 bg-[#101524] border border-white/10 rounded-2xl p-4 sm:p-5 text-left shadow-inner">
           <div className="flex items-center justify-between mb-3 text-xs">
             <span className="font-bold text-slate-300 flex items-center gap-1.5 uppercase tracking-wider">
               <Flame className="w-4 h-4 text-orange-400 fill-orange-400" />
-              <span>Live Race Track Lanes</span>
+              <span>{room.mode === 'MOCK_TEST' ? 'Live Candidate Progression' : 'Live Race Track Lanes'}</span>
             </span>
             <span className="font-mono text-orange-400 font-bold text-[11px]">
               {finishedCount} / {totalCount} Finished 🏁
@@ -140,7 +144,9 @@ export default function WaitingRoomView({ room, user, onMatchCompleted, onEarlyR
                         {isMe ? 'You' : p.username}
                       </span>
                       <span className="text-[10px] text-slate-400 font-mono">
-                        {p.score} pts {p.is_finished ? '• 🏁 Done' : '• ⏳ Solving'}
+                        {room.mode === 'MOCK_TEST'
+                          ? (p.is_finished ? 'Submitted • 🏁' : 'Solving... ⏳')
+                          : `${p.score} pts ${p.is_finished ? '• 🏁 Done' : '• ⏳ Solving'}`}
                       </span>
                     </div>
                   </div>
