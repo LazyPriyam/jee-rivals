@@ -326,46 +326,90 @@ def create_room(req: RoomCreateRequest, user: dict = Depends(get_current_user)):
         q_query += f" AND LOWER(chapter) IN ({placeholders})"
         params.extend([ch.lower() for ch in filter_chapters])
 
+    te = (req.target_exam or "").upper().strip()
+    is_jee_main = te in ("MAIN", "JEE_MAIN") or (req.mode == "MOCK_TEST" and te not in ("ADVANCED", "JEE_ADVANCED", "OLYMPIAD"))
+    is_jee_advanced = te in ("ADVANCED", "JEE_ADVANCED")
+
+    if is_jee_main:
+        q_query += " AND (target_exam IN ('JEE_MAIN', 'MAIN') OR target_exam IS NULL)"
+    elif is_jee_advanced:
+        q_query += " AND target_exam IN ('JEE_ADVANCED', 'ADVANCED')"
+    elif te == "OLYMPIAD":
+        q_query += " AND target_exam = 'OLYMPIAD'"
+
     if req.difficulty_tier and req.difficulty_tier.upper() not in ("ALL", "MIXED"):
         q_query += " AND UPPER(difficulty_tier) = UPPER(?)"
         params.append(req.difficulty_tier)
 
-    if req.question_types and len(req.question_types) > 0 and "ALL" not in [qt.upper() for qt in req.question_types]:
-        type_clauses = []
-        for qt in req.question_types:
-            qtu = qt.upper()
-            if qtu in ("MCQ", "SINGLE_CHOICE"):
-                type_clauses.extend(["MCQ", "SINGLE_CHOICE"])
-            elif qtu in ("NUMERICAL", "INTEGER", "NVQ", "SUBJECTIVE"):
-                type_clauses.extend(["NUMERICAL", "INTEGER", "SUBJECTIVE"])
-            elif qtu in ("MULTIPLE_CHOICE", "MULTI_CORRECT", "MULTIPLE"):
-                type_clauses.extend(["MULTIPLE_CHOICE", "MULTI_CORRECT"])
-            elif qtu in ("MATRIX_MATCH", "MATCHING", "MATRIX"):
-                type_clauses.append("MATRIX_MATCH")
-            elif qtu in ("COMPREHENSION", "PARAGRAPH", "PASSAGE"):
-                type_clauses.append("COMPREHENSION")
+    # Proper format of JEE NTA paper:
+    # In JEE Main (NTA Paper Format), ONLY Single Choice (MCQ) and Numericals are allowed!
+    # Multi-correct, Matrix Match, Comprehension, Subjective are ONLY for JEE Advanced.
+    ALLOWED_NTA_TYPES = {"MCQ", "SINGLE_CHOICE", "NUMERICAL", "INTEGER", "NVQ"}
+
+    if is_jee_main:
+        if req.question_types and len(req.question_types) > 0 and "ALL" not in [qt.upper() for qt in req.question_types]:
+            nta_types = [qt for qt in req.question_types if qt.upper() in ALLOWED_NTA_TYPES]
+            if not nta_types:
+                nta_types = ["SINGLE_CHOICE", "NUMERICAL"]
+            type_clauses = []
+            for qt in nta_types:
+                qtu = qt.upper()
+                if qtu in ("MCQ", "SINGLE_CHOICE"):
+                    type_clauses.extend(["MCQ", "SINGLE_CHOICE"])
+                elif qtu in ("NUMERICAL", "INTEGER", "NVQ"):
+                    type_clauses.extend(["NUMERICAL", "INTEGER"])
+            placeholders = ",".join("?" for _ in set(type_clauses))
+            q_query += f" AND UPPER(COALESCE(question_type, 'SINGLE_CHOICE')) IN ({placeholders})"
+            params.extend(list(set(type_clauses)))
+        elif req.question_type_filter and req.question_type_filter.upper() not in ("ALL", "MIXED"):
+            qtf = req.question_type_filter.upper()
+            if qtf in ("MCQ", "SINGLE_CHOICE"):
+                q_query += " AND UPPER(COALESCE(question_type, 'SINGLE_CHOICE')) IN ('MCQ', 'SINGLE_CHOICE')"
+            elif qtf in ("NUMERICAL", "INTEGER", "NVQ"):
+                q_query += " AND UPPER(COALESCE(question_type, 'SINGLE_CHOICE')) IN ('NUMERICAL', 'INTEGER')"
             else:
-                type_clauses.append(qtu)
-        if type_clauses:
-            uniq_types = list(set(type_clauses))
-            placeholders = ",".join("?" for _ in uniq_types)
-            q_query += f" AND UPPER(question_type) IN ({placeholders})"
-            params.extend(uniq_types)
-    elif req.question_type_filter and req.question_type_filter.upper() not in ("ALL", "MIXED"):
-        qtype_filter = req.question_type_filter.upper()
-        if qtype_filter in ("MCQ", "SINGLE_CHOICE"):
-            q_query += " AND UPPER(question_type) IN ('MCQ', 'SINGLE_CHOICE')"
-        elif qtype_filter in ("NUMERICAL", "INTEGER", "NVQ", "SUBJECTIVE"):
-            q_query += " AND UPPER(question_type) IN ('NUMERICAL', 'INTEGER', 'SUBJECTIVE')"
-        elif qtype_filter in ("MULTIPLE_CHOICE", "MULTI_CORRECT", "MULTIPLE"):
-            q_query += " AND UPPER(question_type) IN ('MULTIPLE_CHOICE', 'MULTI_CORRECT')"
-        elif qtype_filter in ("MATRIX_MATCH", "MATCHING", "MATRIX"):
-            q_query += " AND UPPER(question_type) = 'MATRIX_MATCH'"
-        elif qtype_filter in ("COMPREHENSION", "PARAGRAPH", "PASSAGE"):
-            q_query += " AND UPPER(question_type) = 'COMPREHENSION'"
+                q_query += " AND UPPER(COALESCE(question_type, 'SINGLE_CHOICE')) IN ('MCQ', 'SINGLE_CHOICE', 'NUMERICAL', 'INTEGER')"
         else:
-            q_query += " AND UPPER(question_type) = UPPER(?)"
-            params.append(req.question_type_filter)
+            # Default NTA format: Strictly Single Choice and Numericals only!
+            q_query += " AND UPPER(COALESCE(question_type, 'SINGLE_CHOICE')) IN ('MCQ', 'SINGLE_CHOICE', 'NUMERICAL', 'INTEGER')"
+    else:
+        # JEE Advanced / Mixed: Allow all authentic Advanced types including MULTIPLE_CHOICE, MATRIX_MATCH, COMPREHENSION
+        if req.question_types and len(req.question_types) > 0 and "ALL" not in [qt.upper() for qt in req.question_types]:
+            type_clauses = []
+            for qt in req.question_types:
+                qtu = qt.upper()
+                if qtu in ("MCQ", "SINGLE_CHOICE"):
+                    type_clauses.extend(["MCQ", "SINGLE_CHOICE"])
+                elif qtu in ("NUMERICAL", "INTEGER", "NVQ", "SUBJECTIVE"):
+                    type_clauses.extend(["NUMERICAL", "INTEGER", "SUBJECTIVE"])
+                elif qtu in ("MULTIPLE_CHOICE", "MULTI_CORRECT", "MULTIPLE"):
+                    type_clauses.extend(["MULTIPLE_CHOICE", "MULTI_CORRECT"])
+                elif qtu in ("MATRIX_MATCH", "MATCHING", "MATRIX"):
+                    type_clauses.append("MATRIX_MATCH")
+                elif qtu in ("COMPREHENSION", "PARAGRAPH", "PASSAGE"):
+                    type_clauses.append("COMPREHENSION")
+                else:
+                    type_clauses.append(qtu)
+            if type_clauses:
+                uniq_types = list(set(type_clauses))
+                placeholders = ",".join("?" for _ in uniq_types)
+                q_query += f" AND UPPER(question_type) IN ({placeholders})"
+                params.extend(uniq_types)
+        elif req.question_type_filter and req.question_type_filter.upper() not in ("ALL", "MIXED"):
+            qtype_filter = req.question_type_filter.upper()
+            if qtype_filter in ("MCQ", "SINGLE_CHOICE"):
+                q_query += " AND UPPER(question_type) IN ('MCQ', 'SINGLE_CHOICE')"
+            elif qtype_filter in ("NUMERICAL", "INTEGER", "NVQ", "SUBJECTIVE"):
+                q_query += " AND UPPER(question_type) IN ('NUMERICAL', 'INTEGER', 'SUBJECTIVE')"
+            elif qtype_filter in ("MULTIPLE_CHOICE", "MULTI_CORRECT", "MULTIPLE"):
+                q_query += " AND UPPER(question_type) IN ('MULTIPLE_CHOICE', 'MULTI_CORRECT')"
+            elif qtype_filter in ("MATRIX_MATCH", "MATCHING", "MATRIX"):
+                q_query += " AND UPPER(question_type) = 'MATRIX_MATCH'"
+            elif qtype_filter in ("COMPREHENSION", "PARAGRAPH", "PASSAGE"):
+                q_query += " AND UPPER(question_type) = 'COMPREHENSION'"
+            else:
+                q_query += " AND UPPER(question_type) = UPPER(?)"
+                params.append(req.question_type_filter)
 
     if req.question_ids and len(req.question_ids) > 0:
         verified_rows = selected_rows

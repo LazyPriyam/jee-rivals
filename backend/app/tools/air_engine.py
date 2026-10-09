@@ -7,7 +7,7 @@ Features:
 3. Multi-Factor Rank Evaluation:
    - Skill Elo (Physics, Chemistry, Math)
    - Subject Balance & Symmetry Index (standard deviation penalty across PCM)
-   - Syllabus Breadth Index (coverage of official 59 canonical chapters)
+   - Syllabus Breadth Index (coverage of official 92 canonical chapters)
    - Negative Marking & Accuracy Penalty Curve (+4 / -1 JEE format)
 4. Continuous AIR Rank & Probabilistic Confidence Bands (e.g. AIR 3,850 - 4,620).
 5. Projected JEE Main Marks out of 300.
@@ -18,8 +18,10 @@ Features:
 import math
 from typing import Dict, Any, List, Optional, Tuple
 
+from backend.app.tools.jee_syllabus import ALL_CANONICAL_CHAPTERS
+
 TOTAL_CANDIDATES = 1_400_000
-TOTAL_CANONICAL_CHAPTERS = 59
+TOTAL_CANONICAL_CHAPTERS = len(ALL_CANONICAL_CHAPTERS)
 
 
 def _calc_subject_balance(p_elo: float, c_elo: float, m_elo: float) -> Tuple[float, float, str]:
@@ -363,9 +365,9 @@ def calculate_advanced_air(
     if active_chapters_count < 3:
         air_gate = "Solve questions across at least 3 distinct chapters to calibrate All India Rank."
         bottlenecks.append("Only exploratory attempts recorded. Needs initial chapter sample.")
-    elif active_chapters_count < 15:
-        air_gate = f"Expand syllabus to 15+ chapters ({round(15/59*100)}%) across PCM to qualify for JEE Main Cutoff."
-        bottlenecks.append(f"Low syllabus coverage ({active_chapters_count}/59 chapters) limiting score ceiling.")
+    elif active_chapters_count < 20:
+        air_gate = f"Expand syllabus to 20+ chapters ({round(20/TOTAL_CANONICAL_CHAPTERS*100)}%) across PCM to qualify for JEE Main Cutoff."
+        bottlenecks.append(f"Low syllabus coverage ({active_chapters_count}/{TOTAL_CANONICAL_CHAPTERS} chapters) limiting score ceiling.")
 
     if pcm_std_dev >= 200:
         min_subj = "Physics" if p_elo <= min(c_elo, m_elo) else ("Chemistry" if c_elo <= m_elo else "Mathematics")

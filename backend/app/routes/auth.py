@@ -32,10 +32,12 @@ def format_user_profile(user: dict, cursor=None) -> UserProfile:
         active_count = cov["active_count"]
         coverage_pct = cov["coverage_percent"]
         active_subjs_count = cov["active_subjects_count"]
+        total_chaps = cov.get("total_chapters", 92)
     except Exception:
         active_count = 0
         coverage_pct = 0.0
         active_subjs_count = 0
+        total_chaps = 92
     finally:
         if close_conn and conn:
             conn.close()
@@ -154,7 +156,7 @@ def format_user_profile(user: dict, cursor=None) -> UserProfile:
         pinned_badges=pinned,
         syllabus_coverage_percent=coverage_pct,
         active_chapters_count=active_count,
-        total_syllabus_chapters=59,
+        total_syllabus_chapters=total_chaps,
         air_gate_reason=air_gate,
         learnt_chapters=learnt,
         target_exam=target_exam,

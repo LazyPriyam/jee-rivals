@@ -91,7 +91,7 @@ class ReDuelRequest(BaseModel):
 @router.get("/chapters")
 def get_chapters_mastery(user: dict = Depends(get_current_user)):
     """
-    Returns the comprehensive 59-chapter mastery matrix with independent Elo,
+    Returns the comprehensive 92-chapter mastery matrix with independent Elo,
     attempt counts, accuracy, weightage, and mastery tier.
     """
     conn = get_connection()

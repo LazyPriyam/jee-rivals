@@ -430,7 +430,7 @@ export default function ProfileView({
                     <span>Syllabus Breadth:</span>
                   </span>
                   <span className="font-bold text-white">
-                    {p.active_chapters_count || 0}/59 Chapters ({p.syllabus_coverage_percent || 0}%)
+                    {p.active_chapters_count || 0}/{p.total_syllabus_chapters || 92} Chapters ({p.syllabus_coverage_percent || 0}%)
                   </span>
                 </div>
                 <div className="w-full h-1.5 rounded-full bg-slate-800 overflow-hidden">
@@ -744,7 +744,7 @@ export default function ProfileView({
                   </span>
                 </h3>
                 <p className="text-xs text-slate-400 mt-1">
-                  Empirical percentile transfer curve calibrated with negative marking penalties (+4 / -1), syllabus breadth across 59 chapters, and PCM balance.
+                  Empirical percentile transfer curve calibrated with negative marking penalties (+4 / -1), syllabus breadth across {p.total_syllabus_chapters || 92} chapters, and PCM balance.
                 </p>
               </div>
 
@@ -1031,7 +1031,7 @@ export default function ProfileView({
                   <span>Two-Factor JEE All India Rank (AIR) Readiness Matrix</span>
                 </h3>
                 <p className="text-xs text-slate-400 mt-1">
-                  True JEE All India Rank projection evaluates both your problem-solving accuracy (Combat Elo) and your syllabus breadth across all 59 chapters.
+                  True JEE All India Rank projection evaluates both your problem-solving accuracy (Combat Elo) and your syllabus breadth across all {p.total_syllabus_chapters || 92} chapters.
                 </p>
               </div>
 
@@ -1067,11 +1067,11 @@ export default function ProfileView({
                     {p.syllabus_coverage_percent || 0}%
                   </span>
                   <span className="text-xs font-bold text-slate-400 font-mono">
-                    ({p.active_chapters_count || 0}/59 ch)
+                    ({p.active_chapters_count || 0}/{p.total_syllabus_chapters || 92} ch)
                   </span>
                 </div>
                 <p className="text-xs text-slate-300 leading-relaxed">
-                  JEE evaluates all 59 chapters across Physics, Chemistry, and Math. Mastering a single chapter cannot bypass total syllabus requirements.
+                  JEE evaluates all {p.total_syllabus_chapters || 92} chapters across Physics, Chemistry, and Math. Mastering a single chapter cannot bypass total syllabus requirements.
                 </p>
               </div>
 

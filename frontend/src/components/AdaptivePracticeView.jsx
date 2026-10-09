@@ -28,7 +28,10 @@ import {
   X,
   Swords,
   Award,
-  Flag
+  Flag,
+  Search,
+  Layers,
+  Filter
 } from 'lucide-react';
 import ReportQuestionModal from './ReportQuestionModal';
 
@@ -68,7 +71,8 @@ export default function AdaptivePracticeView({ user, onOpenAuth, onNavigateTab, 
   const [mode, setMode] = useState('TARGET_SPRINT'); // TARGET_SPRINT or ENDLESS
   const [targetQuestions, setTargetQuestions] = useState(15);
   const [subject, setSubject] = useState('Full Syllabus');
-  const [selectedChapter, setSelectedChapter] = useState('');
+  const [selectedChapters, setSelectedChapters] = useState([]);
+  const [chapterSearch, setChapterSearch] = useState('');
   const [targetExam, setTargetExam] = useState('MIXED');
 
   // Learnt Chapters Scope
@@ -292,14 +296,15 @@ export default function AdaptivePracticeView({ user, onOpenAuth, onNavigateTab, 
     setLoading(true);
     setActionError('');
     try {
-      const isLearntOnly = syllabusScope === 'LEARNT_ONLY' && learntChapters.length > 0 && !selectedChapter;
+      const isLearntOnly = syllabusScope === 'LEARNT_ONLY' && learntChapters.length > 0 && selectedChapters.length === 0;
       const resp = await api.adaptive.start({
         mode,
         target_questions: mode === 'TARGET_SPRINT' ? parseInt(targetQuestions, 10) : null,
         subject,
-        chapter: selectedChapter || null,
+        chapter: selectedChapters.length === 1 ? selectedChapters[0] : null,
+        chapters: selectedChapters.length > 0 ? selectedChapters : null,
         target_exam: targetExam,
-        allowed_chapters: isLearntOnly ? learntChapters : null,
+        allowed_chapters: selectedChapters.length > 0 ? selectedChapters : (isLearntOnly ? learntChapters : null),
         only_learnt: isLearntOnly,
       });
 
@@ -463,6 +468,30 @@ export default function AdaptivePracticeView({ user, onOpenAuth, onNavigateTab, 
   const currentChapterList = subject === 'Full Syllabus'
     ? Object.values(chaptersGrouped).flat()
     : chaptersGrouped[subject] || [];
+
+  const filteredChapterList = currentChapterList.filter((c) =>
+    (c.chapter || '').toLowerCase().includes(chapterSearch.toLowerCase().trim())
+  );
+
+  const toggleChapter = (chapterName) => {
+    sound.click();
+    setSelectedChapters((prev) =>
+      prev.includes(chapterName)
+        ? prev.filter((c) => c !== chapterName)
+        : [...prev, chapterName]
+    );
+  };
+
+  const handleSelectAllFiltered = () => {
+    sound.click();
+    const names = filteredChapterList.map((c) => c.chapter);
+    setSelectedChapters((prev) => Array.from(new Set([...prev, ...names])));
+  };
+
+  const handleClearSelectedChapters = () => {
+    sound.click();
+    setSelectedChapters([]);
+  };
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 py-8 page-transition space-y-8">
@@ -699,7 +728,7 @@ export default function AdaptivePracticeView({ user, onOpenAuth, onNavigateTab, 
                       <span>Complete JEE Syllabus</span>
                     </span>
                     <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-orange-500/20 text-orange-300 font-bold">
-                      All 59 Chapters
+                      All 92 Chapters
                     </span>
                   </div>
                   <p className="text-xs text-slate-400 leading-relaxed">
@@ -721,7 +750,7 @@ export default function AdaptivePracticeView({ user, onOpenAuth, onNavigateTab, 
                     type="button"
                     onClick={() => {
                       setSubject(s);
-                      setSelectedChapter('');
+                      setSelectedChapters([]);
                     }}
                     className={`py-2.5 rounded-xl text-xs font-bold transition cursor-pointer border ${
                       subject === s
@@ -735,47 +764,165 @@ export default function AdaptivePracticeView({ user, onOpenAuth, onNavigateTab, 
               </div>
             </div>
 
-            {/* Optional Specific Chapter Drill */}
-            <div>
-              <label className="text-xs font-bold text-slate-300 block mb-1.5 font-mono uppercase">
-                4. Optional Specific Chapter Drill (Overrides scope)
-              </label>
-              <select
-                value={selectedChapter}
-                onChange={(e) => setSelectedChapter(e.target.value)}
-                className="w-full px-4 py-3 bg-[#1e2433] border border-white/10 rounded-xl text-xs text-white focus:outline-none focus:border-orange-500 font-mono"
-              >
-                <option value="">⚡ All Chapters (AI Auto-Prioritizes Weak Topics)</option>
-                {currentChapterList.map((c) => (
-                  <option key={c.chapter} value={c.chapter}>
-                    {c.chapter} ({c.count} Qs)
-                  </option>
-                ))}
-              </select>
+            {/* Multi-Chapter Selection Panel */}
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-bold text-slate-300 font-mono uppercase flex items-center gap-1.5">
+                  <Layers className="w-3.5 h-3.5 text-orange-400" />
+                  <span>4. Chapter Selection ({selectedChapters.length > 0 ? `${selectedChapters.length} Selected` : 'All Chapters'})</span>
+                </label>
+                <div className="flex items-center gap-2">
+                  {selectedChapters.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={handleClearSelectedChapters}
+                      className="text-[11px] font-mono text-red-400 hover:text-red-300 transition cursor-pointer font-bold"
+                    >
+                      Clear Selection
+                    </button>
+                  )}
+                  {filteredChapterList.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={handleSelectAllFiltered}
+                      className="text-[11px] font-mono text-orange-400 hover:text-orange-300 transition cursor-pointer font-bold"
+                    >
+                      Select All Shown ({filteredChapterList.length})
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* Search filter input */}
+              <div className="relative">
+                <Search className="w-4 h-4 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                <input
+                  type="text"
+                  value={chapterSearch}
+                  onChange={(e) => setChapterSearch(e.target.value)}
+                  placeholder="Filter chapters by name (e.g. Thermodynamics, Calculus, Rotational)..."
+                  className="w-full pl-9 pr-8 py-2 bg-[#1e2433] border border-white/10 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-orange-500 font-mono"
+                />
+                {chapterSearch && (
+                  <button
+                    type="button"
+                    onClick={() => setChapterSearch('')}
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white p-1"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </div>
+
+              {/* Selected Chapter Chips */}
+              {selectedChapters.length > 0 && (
+                <div className="flex flex-wrap gap-1.5 p-2 bg-[#191e2b] border border-orange-500/30 rounded-xl max-h-24 overflow-y-auto">
+                  {selectedChapters.map((ch) => (
+                    <span
+                      key={ch}
+                      className="inline-flex items-center gap-1.5 px-2 py-0.5 bg-orange-500/20 border border-orange-500/40 text-orange-300 rounded-lg text-[11px] font-mono font-medium"
+                    >
+                      <span className="truncate max-w-[200px]">{ch}</span>
+                      <button
+                        type="button"
+                        onClick={() => toggleChapter(ch)}
+                        className="hover:text-white transition cursor-pointer ml-0.5"
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              )}
+
+              {/* Scrollable Checkbox Grid */}
+              <div className="max-h-52 overflow-y-auto pr-1 rounded-xl border border-white/10 bg-[#191e2b] p-2 space-y-1">
+                {filteredChapterList.length === 0 ? (
+                  <div className="text-center py-6 text-xs text-slate-500 font-mono">
+                    No chapters match "{chapterSearch}"
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                    {filteredChapterList.map((c) => {
+                      const isChecked = selectedChapters.includes(c.chapter);
+                      return (
+                        <button
+                          key={c.chapter}
+                          type="button"
+                          onClick={() => toggleChapter(c.chapter)}
+                          className={`flex items-center justify-between px-3 py-2 rounded-lg text-left text-xs transition cursor-pointer border ${
+                            isChecked
+                              ? 'bg-orange-500/20 border-orange-500/60 text-white font-medium shadow-sm'
+                              : 'bg-[#1e2433]/70 border-white/5 text-slate-400 hover:bg-[#1e2433] hover:text-slate-200'
+                          }`}
+                        >
+                          <div className="flex items-center gap-2 min-w-0 mr-2">
+                            <div
+                              className={`w-4 h-4 rounded flex items-center justify-center shrink-0 border transition ${
+                                isChecked
+                                  ? 'bg-orange-500 border-orange-500 text-white'
+                                  : 'border-slate-600 bg-black/20'
+                              }`}
+                            >
+                              {isChecked && <Check className="w-3 h-3 stroke-[3]" />}
+                            </div>
+                            <span className="truncate">{c.chapter}</span>
+                          </div>
+                          <span className="text-[10px] font-mono text-slate-500 shrink-0">
+                            {c.count} Qs
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+              <p className="text-[11px] text-slate-400 font-mono">
+                {selectedChapters.length === 0
+                  ? '⚡ Leaving unselected activates full syllabus rotation with AI dynamic weak-topic prioritization.'
+                  : `🎯 Practice will rotate across the ${selectedChapters.length} selected chapters.`}
+              </p>
             </div>
 
             {/* Target Exam Tier */}
             <div>
               <label className="text-xs font-bold text-slate-300 block mb-2 font-mono uppercase">
-                4. Target Exam Standard
+                5. Target Exam Standard
               </label>
-              <div className="grid grid-cols-3 gap-2">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                 {[
-                  { id: 'MIXED', label: 'Main & Advanced (Adaptive Scaling)' },
-                  { id: 'MAIN', label: 'JEE Main Benchmark' },
-                  { id: 'ADVANCED', label: 'JEE Advanced High-Tier' }
+                  {
+                    id: 'MIXED',
+                    title: 'Adaptive Mix',
+                    badge: 'Main & Advanced',
+                    desc: 'Dynamically scales across all question formats and difficulty tiers.'
+                  },
+                  {
+                    id: 'MAIN',
+                    title: 'JEE Main (NTA Format)',
+                    badge: 'Single Choice & Numericals',
+                    desc: 'Strict NTA paper format. Excludes multi-correct, matrix, or comprehension.'
+                  },
+                  {
+                    id: 'ADVANCED',
+                    title: 'JEE Advanced High-Tier',
+                    badge: 'Multi-Correct & Matrix',
+                    desc: 'Reserved for multi-correct, matrix match, comprehension & advanced NVQs.'
+                  }
                 ].map((tier) => (
                   <button
                     key={tier.id}
                     type="button"
                     onClick={() => setTargetExam(tier.id)}
-                    className={`py-2 rounded-xl text-xs font-bold transition cursor-pointer border truncate px-2 ${
+                    className={`p-3 rounded-xl text-left transition cursor-pointer border ${
                       targetExam === tier.id
-                        ? 'bg-amber-500 text-black font-black border-amber-500'
+                        ? 'bg-amber-500/20 text-white border-amber-500 shadow-md ring-1 ring-amber-500'
                         : 'bg-[#1e2433] text-slate-400 border-white/10 hover:text-white'
                     }`}
                   >
-                    {tier.label}
+                    <div className="font-bold text-xs text-white mb-0.5">{tier.title}</div>
+                    <div className="text-[10px] text-amber-400 font-mono font-bold mb-1">{tier.badge}</div>
+                    <div className="text-[10px] text-slate-400 leading-snug">{tier.desc}</div>
                   </button>
                 ))}
               </div>

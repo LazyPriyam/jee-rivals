@@ -172,6 +172,8 @@ def select_next_adaptive_question(
         te_upper = str(target_exam).upper()
         if "MAIN" in te_upper:
             base_query += " AND (target_exam IN ('JEE_MAIN', 'MAIN') OR target_exam IS NULL)"
+            # Proper format of JEE NTA: Strictly Single Choice and Numericals only!
+            base_query += " AND UPPER(COALESCE(question_type, 'SINGLE_CHOICE')) IN ('SINGLE_CHOICE', 'MCQ', 'NUMERICAL', 'INTEGER')"
         elif "ADVANCED" in te_upper:
             base_query += " AND (target_exam IN ('JEE_ADVANCED', 'ADVANCED'))"
         elif "OLYMPIAD" in te_upper:

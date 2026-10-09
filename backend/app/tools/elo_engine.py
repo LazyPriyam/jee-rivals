@@ -260,31 +260,83 @@ def reseed_questions_gradient(cursor: sqlite3.Cursor) -> int:
 
 def get_user_syllabus_coverage(cursor: sqlite3.Cursor, user_id: str) -> dict:
     """
-    Computes exact syllabus exploration and breadth metrics across the official 59 canonical chapters.
+    Computes exact syllabus exploration and breadth metrics across the official 92 canonical chapters.
+    Aggregates chapter exploration from:
+    1. activity_log (match and practice question attempts)
+    2. user_chapter_elo (chapter ratings where attempts > 0)
+    3. users.chapter_stats (user chapter analytics)
+    4. users.learnt_chapters (self-reported learnt skill tree nodes)
     """
-    from backend.app.tools.jee_syllabus import normalize_chapter_name
+    import json
+    from backend.app.tools.jee_syllabus import normalize_chapter_name, ALL_CANONICAL_CHAPTERS, JEE_SYLLABUS
 
-    cursor.execute("""
-        SELECT DISTINCT chapter, subject FROM activity_log WHERE user_id = ?
-    """, (user_id,))
-    rows = cursor.fetchall()
-
+    total_canonical = len(ALL_CANONICAL_CHAPTERS)
     active_chaps: Set[str] = set()
     active_subjs: Set[str] = set()
 
-    for r in rows:
-        norm = normalize_chapter_name(r["chapter"])
+    def record_chap(ch_name: Optional[str], s_name: Optional[str] = None):
+        if not ch_name:
+            return
+        norm = normalize_chapter_name(str(ch_name).strip())
         if norm:
             active_chaps.add(norm)
-            subj = (r["subject"] or "").strip()
-            if "phys" in subj.lower():
-                active_subjs.add("Physics")
-            elif "chem" in subj.lower():
-                active_subjs.add("Chemistry")
-            elif "math" in subj.lower():
-                active_subjs.add("Mathematics")
+            subj = (s_name or "").strip()
+            if not subj:
+                for s_key, units in JEE_SYLLABUS.items():
+                    for u in units:
+                        if norm in u["chapters"]:
+                            subj = s_key
+                            break
+                    if subj:
+                        break
+            if subj:
+                s_low = subj.lower()
+                if "phys" in s_low:
+                    active_subjs.add("Physics")
+                elif "chem" in s_low:
+                    active_subjs.add("Chemistry")
+                elif "math" in s_low:
+                    active_subjs.add("Mathematics")
 
-    total_canonical = 59
+    # 1. activity_log
+    try:
+        cursor.execute("SELECT DISTINCT chapter, subject FROM activity_log WHERE user_id = ?", (user_id,))
+        for r in cursor.fetchall():
+            record_chap(r["chapter"], r["subject"])
+    except Exception:
+        pass
+
+    # 2. user_chapter_elo
+    try:
+        cursor.execute("SELECT DISTINCT chapter, subject FROM user_chapter_elo WHERE user_id = ? AND attempts > 0", (user_id,))
+        for r in cursor.fetchall():
+            record_chap(r["chapter"], r["subject"])
+    except Exception:
+        pass
+
+    # 3. users table (chapter_stats & learnt_chapters)
+    try:
+        cursor.execute("SELECT chapter_stats, learnt_chapters FROM users WHERE id = ?", (user_id,))
+        u_row = cursor.fetchone()
+        if u_row:
+            raw_cstats = u_row["chapter_stats"]
+            if raw_cstats:
+                cstats = json.loads(raw_cstats) if isinstance(raw_cstats, str) else raw_cstats
+                if isinstance(cstats, dict):
+                    for ch_k, ch_v in cstats.items():
+                        if isinstance(ch_v, dict) and ch_v.get("attempts", 0) > 0:
+                            record_chap(ch_k, ch_v.get("subject"))
+                        elif isinstance(ch_v, (int, float)) and ch_v > 0:
+                            record_chap(ch_k)
+            raw_learnt = u_row["learnt_chapters"]
+            if raw_learnt:
+                learnt = json.loads(raw_learnt) if isinstance(raw_learnt, str) else raw_learnt
+                if isinstance(learnt, list):
+                    for ch_name in learnt:
+                        record_chap(ch_name)
+    except Exception:
+        pass
+
     active_count = len(active_chaps)
     cov_ratio = (active_count / total_canonical) if total_canonical > 0 else 0.0
 
@@ -442,7 +494,7 @@ def compute_two_factor_air_bracket(
     overall_elo: float,
     active_chapters_count: int,
     active_subjects_count: int,
-    total_chapters: int = 59,
+    total_chapters: int = 92,
     physics_elo: float = 1200.0,
     chemistry_elo: float = 1200.0,
     math_elo: float = 1200.0,
@@ -595,7 +647,7 @@ def record_chapter_attempt(
     elo_delta: Optional[float] = None
 ) -> float:
     """
-    Updates the 59-chapter independent Elo rating, attempts count, and accuracy
+    Updates the 92-chapter independent Elo rating, attempts count, and accuracy
     in the `user_chapter_elo` table for the specified user and chapter.
     """
     from backend.app.tools.jee_syllabus import normalize_chapter_name

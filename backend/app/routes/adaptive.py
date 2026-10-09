@@ -70,6 +70,7 @@ class AdaptiveStartRequest(BaseModel):
     target_questions: Optional[int] = 20  # 10, 20, 30 for TARGET_SPRINT, None for ENDLESS
     subject: str = "Full Syllabus"  # "Full Syllabus", "Physics", "Chemistry", "Mathematics"
     chapter: Optional[str] = None
+    chapters: Optional[List[str]] = None  # Multi-chapter selection
     target_exam: str = "MIXED"  # "MAIN", "ADVANCED", "MIXED"
     allowed_chapters: Optional[List[str]] = None
     only_learnt: bool = False
@@ -98,7 +99,7 @@ def start_adaptive_session(req: AdaptiveStartRequest, user: dict = Depends(get_c
     Initializes a new personalized adaptive session:
     - Seeds starting Elo from the user's live profile rating for the requested subject.
     - Probes question bank and selects optimal starting question.
-    - If restricted to learnt chapters, only plucks questions from chapters marked as learnt by the user.
+    - If restricted to learnt chapters or multiple specified chapters, only plucks questions from those chapters.
     """
     conn = get_connection()
     c = conn.cursor()
@@ -110,10 +111,14 @@ def start_adaptive_session(req: AdaptiveStartRequest, user: dict = Depends(get_c
     # Seed initial Elo from user's actual rating
     initial_elo = get_user_subject_elo(user, req.subject)
 
-    # Determine allowed chapters if restricted to learnt
+    # Determine allowed chapters if restricted to multiple chapters or learnt
     effective_allowed = None
-    if req.allowed_chapters:
-        effective_allowed = req.allowed_chapters
+    if req.chapters and len(req.chapters) > 0:
+        effective_allowed = [str(ch).strip() for ch in req.chapters if ch and str(ch).strip()]
+    elif req.allowed_chapters and len(req.allowed_chapters) > 0:
+        effective_allowed = [str(ch).strip() for ch in req.allowed_chapters if ch and str(ch).strip()]
+    elif req.chapter and str(req.chapter).strip():
+        effective_allowed = [str(req.chapter).strip()]
     elif req.only_learnt:
         raw_learnt = user.get("learnt_chapters") or "[]"
         try:
@@ -125,12 +130,16 @@ def start_adaptive_session(req: AdaptiveStartRequest, user: dict = Depends(get_c
         from backend.app.tools.jee_syllabus import expand_allowed_chapters
         effective_allowed = expand_allowed_chapters(effective_allowed)
 
+    target_ch = req.chapter if (not effective_allowed or len(effective_allowed) <= 1) else None
+    if req.chapters and len(req.chapters) > 1:
+        target_ch = None
+
     # Select first question
     first_q, meta = select_next_adaptive_question(
         cursor=c,
         user_id=user_id,
         subject=req.subject,
-        chapter=req.chapter,
+        chapter=target_ch,
         target_exam=req.target_exam,
         current_session_elo=initial_elo,
         is_last_correct=None,
@@ -152,6 +161,10 @@ def start_adaptive_session(req: AdaptiveStartRequest, user: dict = Depends(get_c
     # Auto-abandon any previously running in-progress session for this user to enforce 1 active session per user
     c.execute("UPDATE adaptive_sessions SET status = 'ABANDONED' WHERE user_id = ? AND status = 'IN_PROGRESS'", (user_id,))
 
+    stored_ch = req.chapter
+    if req.chapters and len(req.chapters) > 1:
+        stored_ch = ", ".join(req.chapters[:2]) + (f" (+{len(req.chapters)-2} more)" if len(req.chapters) > 2 else "")
+
     c.execute("""
         INSERT INTO adaptive_sessions (
             id, user_id, mode, target_questions, subject, chapter,
@@ -161,7 +174,7 @@ def start_adaptive_session(req: AdaptiveStartRequest, user: dict = Depends(get_c
         ) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, 0, 0, 0, 0, ?, '[]', 'IN_PROGRESS', ?, ?)
     """, (
         session_id, user_id, req.mode, req.target_questions if req.mode == "TARGET_SPRINT" else None,
-        req.subject, req.chapter, req.target_exam, initial_elo, initial_elo,
+        req.subject, stored_ch, req.target_exam, initial_elo, initial_elo,
         first_q["id"], now, allowed_json
     ))
 
@@ -349,12 +362,14 @@ def skip_adaptive_question(session_id: str, user: dict = Depends(get_current_use
     current_session_elo = float(sess["current_elo"])
     curr_streak = int(sess["current_streak"])
 
+    target_ch = sess.get("chapter") if (not session_allowed or len(session_allowed) <= 1) else None
+
     # Draw replacement question at matching session Elo
     next_q, meta = select_next_adaptive_question(
         cursor=c,
         user_id=user["id"],
         subject=sess["subject"],
-        chapter=sess.get("chapter"),
+        chapter=target_ch,
         target_exam=sess.get("target_exam", "MIXED"),
         current_session_elo=current_session_elo,
         is_last_correct=None,
@@ -501,11 +516,13 @@ def submit_adaptive_answer(
             except Exception:
                 session_allowed = None
 
+        target_ch = sess.get("chapter") if (not session_allowed or len(session_allowed) <= 1) else None
+
         next_q, meta = select_next_adaptive_question(
             cursor=c,
             user_id=user["id"],
             subject=sess["subject"],
-            chapter=sess.get("chapter"),
+            chapter=target_ch,
             target_exam=sess.get("target_exam", "MIXED"),
             current_session_elo=new_session_elo,
             is_last_correct=is_correct,
