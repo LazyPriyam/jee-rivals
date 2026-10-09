@@ -43,6 +43,27 @@ export default function MockTestView({ room, user, onMatchComplete, onExitToDash
   const [exitWarningModalOpen, setExitWarningModalOpen] = useState(false);
   const [questionPaperModalOpen, setQuestionPaperModalOpen] = useState(false);
   const [reportModalOpen, setReportModalOpen] = useState(false);
+  const reportedStorageKey = `jee_reported_in_test_${user?.id || 'guest'}_${room.code}`;
+  const [reportedQuestions, setReportedQuestions] = useState(() => {
+    try {
+      const raw = localStorage.getItem(`jee_reported_in_test_${user?.id || 'guest'}_${room.code}`);
+      return raw ? new Set(JSON.parse(raw)) : new Set();
+    } catch (_) {
+      return new Set();
+    }
+  });
+
+  const handleReportSuccess = ({ questionId }) => {
+    if (!questionId) return;
+    setReportedQuestions((prev) => {
+      const next = new Set(prev);
+      next.add(questionId);
+      try {
+        localStorage.setItem(reportedStorageKey, JSON.stringify(Array.from(next)));
+      } catch (_) {}
+      return next;
+    });
+  };
   const [selectedSubject, setSelectedSubject] = useState(() => {
     const sorted = sortQuestionsBySubject(room.all_questions || []);
     return sorted[savedProgress?.currentIndex || 0]?.subject || sorted[0]?.subject || 'Physics';
@@ -501,11 +522,15 @@ export default function MockTestView({ room, user, onMatchComplete, onExitToDash
                     sound.click();
                     setReportModalOpen(true);
                   }}
-                  className="text-slate-500 hover:text-amber-700 font-sans font-bold flex items-center gap-1 px-2 py-0.5 rounded bg-amber-50/80 hover:bg-amber-100 border border-amber-200/80 transition cursor-pointer"
-                  title="Report Defective Question"
+                  className={`font-sans font-bold flex items-center gap-1 px-2 py-0.5 rounded transition cursor-pointer ${
+                    reportedQuestions.has(currentQ?.id)
+                      ? 'bg-amber-100 text-amber-900 border border-amber-300 shadow-xs'
+                      : 'text-slate-500 hover:text-amber-700 bg-amber-50/80 hover:bg-amber-100 border border-amber-200/80'
+                  }`}
+                  title={reportedQuestions.has(currentQ?.id) ? 'Question reported (flagged for review)' : 'Report Defective Question'}
                 >
-                  <Flag className="w-3 h-3 text-amber-600" />
-                  <span>Report</span>
+                  <Flag className={`w-3 h-3 ${reportedQuestions.has(currentQ?.id) ? 'text-amber-700 fill-amber-500' : 'text-amber-600'}`} />
+                  <span>{reportedQuestions.has(currentQ?.id) ? 'Reported 🚩' : 'Report'}</span>
                 </button>
               </div>
             </div>
@@ -706,6 +731,18 @@ export default function MockTestView({ room, user, onMatchComplete, onExitToDash
                   Ans & Marked Review (will be evaluated)
                 </span>
               </div>
+
+              {reportedQuestions.size > 0 && (
+                <div className="col-span-2 flex items-center justify-between mt-1 pt-1 border-t border-slate-200 bg-amber-50/80 -mx-1 px-2 py-1 rounded text-[10px] text-amber-900 font-bold">
+                  <span className="flex items-center gap-1">
+                    <span>🚩</span>
+                    <span>Reported / Flagged</span>
+                  </span>
+                  <span className="font-mono bg-amber-200/80 text-amber-900 px-1.5 py-0.2 rounded text-[10px]">
+                    {reportedQuestions.size}
+                  </span>
+                </div>
+              )}
             </div>
 
             {/* Questions Number Grid */}
@@ -723,21 +760,27 @@ export default function MockTestView({ room, user, onMatchComplete, onExitToDash
                   else if (ntaState === 'REVIEW') shapeClass = 'nta-shape-review';
                   else if (ntaState === 'ANS_AND_REVIEW') shapeClass = 'nta-shape-ans-review';
 
-                  return (
-                    <button
-                      key={q.id}
-                      onClick={() => goToQuestion(idx)}
-                      title={groupInfo?.isPassage ? `${groupInfo.groupLabel} (Sub-question ${groupInfo.subIndex})` : `Question ${idx + 1}`}
-                      className={`h-9 w-9 text-xs font-mono font-bold flex flex-col items-center justify-center cursor-pointer transition relative ${shapeClass} ${
-                        isCurrent ? 'ring-2 ring-blue-600 ring-offset-2 scale-105' : 'hover:opacity-90'
-                      }`}
-                    >
-                      <span>{idx + 1}</span>
-                      {groupInfo?.isPassage && (
-                        <span className="text-[7px] leading-none opacity-85 font-sans font-black tracking-tighter text-blue-200">¶</span>
-                      )}
-                    </button>
-                  );
+                    return (
+                      <button
+                        key={q.id}
+                        onClick={() => goToQuestion(idx)}
+                        title={
+                          (groupInfo?.isPassage ? `${groupInfo.groupLabel} (Sub-question ${groupInfo.subIndex})` : `Question ${idx + 1}`) +
+                          (reportedQuestions.has(q.id) ? ' [Reported 🚩]' : '')
+                        }
+                        className={`h-9 w-9 text-xs font-mono font-bold flex flex-col items-center justify-center cursor-pointer transition relative ${shapeClass} ${
+                          isCurrent ? 'ring-2 ring-blue-600 ring-offset-2 scale-105' : 'hover:opacity-90'
+                        }`}
+                      >
+                        <span>{idx + 1}</span>
+                        {groupInfo?.isPassage && (
+                          <span className="text-[7px] leading-none opacity-85 font-sans font-black tracking-tighter text-blue-200">¶</span>
+                        )}
+                        {reportedQuestions.has(q.id) && (
+                          <span className="absolute -top-1.5 -right-1.5 text-[10px] leading-none filter drop-shadow pointer-events-none">🚩</span>
+                        )}
+                      </button>
+                    );
                 })}
               </div>
             </div>
@@ -776,6 +819,11 @@ export default function MockTestView({ room, user, onMatchComplete, onExitToDash
                     <span>Q{idx + 1}</span>
                     <span>• {q.subject}</span>
                     <span className="text-slate-500">• {q.chapter}</span>
+                    {reportedQuestions.has(q.id) && (
+                      <span className="text-[10px] font-mono px-1.5 py-0.5 bg-amber-100 text-amber-900 border border-amber-200 rounded font-bold flex items-center gap-1">
+                        🚩 Reported
+                      </span>
+                    )}
                     {q.passage_text && (
                       <span className="text-[10px] font-mono px-1.5 py-0.2 bg-blue-100 text-blue-800 rounded">
                         Sub-Q {q.subquestion_index || 1}
@@ -959,6 +1007,9 @@ export default function MockTestView({ room, user, onMatchComplete, onExitToDash
         onClose={() => setReportModalOpen(false)}
         questionId={currentQ?.id}
         questionText={currentQ?.text}
+        mode="mock_test"
+        canSkip={false}
+        onReportSuccess={handleReportSuccess}
       />
     </div>
   );

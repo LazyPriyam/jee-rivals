@@ -400,6 +400,26 @@ export default function AdaptivePracticeView({ user, onOpenAuth, onNavigateTab, 
     setLoading(false);
   };
 
+  const handleSkipQuestion = async () => {
+    if (!session?.session_id) return;
+    setLoading(true);
+    setActionError('');
+    try {
+      const res = await api.adaptive.skip(session.session_id);
+      if (res?.next_question) {
+        setQuestion(res.next_question);
+        setSubmitted(false);
+        setResult(null);
+        setSelectedAnswer('');
+        setTimeSpentSeconds(0);
+      }
+    } catch (err) {
+      handleSessionError(err, 'Failed to replace question.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleNextQuestion = () => {
     sound.click();
     if (result?.is_session_finished) {
@@ -1385,6 +1405,9 @@ export default function AdaptivePracticeView({ user, onOpenAuth, onNavigateTab, 
         onClose={() => setReportModalOpen(false)}
         questionId={question?.id}
         questionText={question?.text}
+        mode="adaptive"
+        canSkip={true}
+        onSkip={handleSkipQuestion}
       />
     </div>
   );

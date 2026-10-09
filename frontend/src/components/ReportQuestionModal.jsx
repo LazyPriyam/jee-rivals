@@ -12,11 +12,22 @@ const REPORT_REASONS = [
   { id: 'OTHER', label: 'Other Issue', desc: 'Any other problem not listed above.' }
 ];
 
-export default function ReportQuestionModal({ isOpen, onClose, questionId, questionText }) {
+export default function ReportQuestionModal({
+  isOpen,
+  onClose,
+  questionId,
+  questionText,
+  mode = 'general', // 'adaptive' | 'mock_test' | 'arena' | 'general'
+  canSkip = false,
+  onSkip = null,
+  onReportSuccess = null
+}) {
   const [selectedReason, setSelectedReason] = useState('WRONG_ANSWER');
   const [notes, setNotes] = useState('');
+  const [skipQuestion, setSkipQuestion] = useState(canSkip);
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
+  const [wasSkipped, setWasSkipped] = useState(false);
   const [error, setError] = useState('');
 
   if (!isOpen) return null;
@@ -34,9 +45,31 @@ export default function ReportQuestionModal({ isOpen, onClose, questionId, quest
         reason: selectedReason,
         notes: notes.trim()
       });
+
+      let skipped = false;
+      if (canSkip && skipQuestion && onSkip) {
+        try {
+          await onSkip();
+          skipped = true;
+          setWasSkipped(true);
+        } catch (skipErr) {
+          console.warn('Error replacing question:', skipErr);
+        }
+      }
+
+      if (onReportSuccess) {
+        onReportSuccess({
+          questionId,
+          reason: selectedReason,
+          notes: notes.trim(),
+          skipped
+        });
+      }
+
       setSubmitted(true);
       setTimeout(() => {
         setSubmitted(false);
+        setWasSkipped(false);
         setNotes('');
         setSelectedReason('WRONG_ANSWER');
         onClose();
@@ -76,9 +109,13 @@ export default function ReportQuestionModal({ isOpen, onClose, questionId, quest
             <div className="w-14 h-14 rounded-2xl bg-emerald-500/20 border border-emerald-500/40 text-emerald-400 flex items-center justify-center animate-bounce">
               <CheckCircle className="w-8 h-8" />
             </div>
-            <h3 className="text-xl font-black text-white">Report Logged</h3>
+            <h3 className="text-xl font-black text-white">
+              {wasSkipped ? 'Reported & Replaced!' : 'Report Logged'}
+            </h3>
             <p className="text-sm text-slate-400 max-w-xs leading-relaxed">
-              Thank you for keeping the question bank accurate! Your report has been dispatched to the human moderation hub.
+              {wasSkipped
+                ? 'Your report was dispatched to the moderation hub. This question was skipped with zero Elo penalty, and a fresh question has been drawn.'
+                : 'Thank you for keeping the question bank accurate! Your report has been dispatched to the human moderation hub.'}
             </p>
           </div>
         ) : (
@@ -168,6 +205,40 @@ export default function ReportQuestionModal({ isOpen, onClose, questionId, quest
                 className="w-full px-3.5 py-2.5 bg-[#141824] border border-white/10 rounded-2xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-amber-500 transition resize-none"
               />
             </div>
+
+            {/* Adaptive Practice Mode Option: Skip & Replace Question */}
+            {canSkip && (
+              <div className="p-3.5 bg-orange-500/10 border border-orange-500/30 rounded-2xl">
+                <label className="flex items-start gap-3 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={skipQuestion}
+                    onChange={(e) => setSkipQuestion(e.target.checked)}
+                    className="mt-0.5 w-4 h-4 text-orange-500 rounded bg-[#141824] border-white/20 focus:ring-orange-500 cursor-pointer"
+                  />
+                  <div>
+                    <div className="text-xs font-bold text-orange-300 flex items-center gap-1.5">
+                      <span>⚡ Skip & Replace Question Immediately</span>
+                      <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-orange-500/20 text-orange-400 font-bold">Zero Elo Penalty</span>
+                    </div>
+                    <div className="text-[11px] text-slate-400 mt-0.5 leading-relaxed">
+                      Discards this defective problem from your practice circuit. Preserves your current streak and session Elo, and draws a fresh calibrated problem right away.
+                    </div>
+                  </div>
+                </label>
+              </div>
+            )}
+
+            {/* NTA Mock Test Mode Guidance Banner */}
+            {mode === 'mock_test' && (
+              <div className="p-3.5 bg-blue-500/10 border border-blue-500/30 rounded-2xl text-xs text-blue-200 flex items-start gap-2.5">
+                <span className="text-base leading-none">🏛️</span>
+                <div className="leading-relaxed text-[11px]">
+                  <strong className="text-white block font-bold mb-0.5">Authentic NTA Exam Simulation:</strong>
+                  Questions are never removed mid-exam to preserve fixed numbering and section rules. This question will be marked with a <span className="font-bold text-amber-400">🚩 flag</span> on your palette. You may attempt or leave it; verified defects are automatically credited during post-exam moderation reconciliation.
+                </div>
+              </div>
+            )}
 
             {/* Action Buttons */}
             <div className="flex items-center justify-end gap-3 pt-2">

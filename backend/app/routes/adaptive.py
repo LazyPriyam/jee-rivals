@@ -281,6 +281,105 @@ def cancel_specific_session(session_id: str, user: dict = Depends(get_current_us
     return {"success": True, "message": f"Session {session_id} abandoned."}
 
 
+@router.post("/{session_id}/skip")
+def skip_adaptive_question(session_id: str, user: dict = Depends(get_current_user)):
+    """
+    Skips the current question (e.g. reported defective by student) and replaces it with a fresh calibrated question.
+    Preserves streak, applies 0 Elo penalty, and logs the skip.
+    """
+    conn = get_connection()
+    c = conn.cursor()
+
+    c.execute("SELECT * FROM adaptive_sessions WHERE id = ? AND user_id = ?", (session_id, user["id"]))
+    s_row = c.fetchone()
+    if not s_row:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Adaptive session not found.")
+
+    sess = dict(s_row)
+    if sess["status"] != "IN_PROGRESS":
+        conn.close()
+        raise HTTPException(status_code=400, detail="Adaptive session is already completed.")
+
+    current_q_id = sess.get("current_question_id")
+    raw_hist = sess.get("history") or "[]"
+    try:
+        history = json.loads(raw_hist) if isinstance(raw_hist, str) else raw_hist
+    except Exception:
+        history = []
+
+    # Record skip in session history without penalizing accuracy or Elo
+    if current_q_id:
+        c.execute("SELECT * FROM questions WHERE id = ?", (current_q_id,))
+        q_row = c.fetchone()
+        q = dict(q_row) if q_row else {}
+        history.append({
+            "question_id": current_q_id,
+            "subject": q.get("subject"),
+            "chapter": q.get("chapter"),
+            "is_skipped": True,
+            "reason": "REPORTED_DEFECT",
+            "time_spent_seconds": 0
+        })
+
+    seen_ids = {h["question_id"] for h in history if h.get("question_id")}
+    raw_allowed = sess.get("allowed_chapters")
+    session_allowed = None
+    if raw_allowed:
+        try:
+            session_allowed = json.loads(raw_allowed) if isinstance(raw_allowed, str) else raw_allowed
+        except Exception:
+            session_allowed = None
+
+    current_session_elo = float(sess["current_elo"])
+    curr_streak = int(sess["current_streak"])
+
+    # Draw replacement question at matching session Elo
+    next_q, meta = select_next_adaptive_question(
+        cursor=c,
+        user_id=user["id"],
+        subject=sess["subject"],
+        chapter=sess.get("chapter"),
+        target_exam=sess.get("target_exam", "MIXED"),
+        current_session_elo=current_session_elo,
+        is_last_correct=None,
+        streak=curr_streak,
+        seen_question_ids=seen_ids,
+        remediation_chapter=None,
+        allowed_chapters=session_allowed
+    )
+
+    if not next_q:
+        conn.close()
+        raise HTTPException(status_code=404, detail="No replacement question available for this session.")
+
+    nq_out = row_to_question_out(next_q)
+    next_q_data = {
+        **nq_out.dict(),
+        "target_elo": meta.get("target_elo"),
+        "tier_label": meta.get("tier_label"),
+        "is_revenge": meta.get("is_revenge", False),
+        "is_remediation": meta.get("is_remediation", False)
+    }
+
+    c.execute("""
+        UPDATE adaptive_sessions
+        SET current_question_id = ?, history = ?
+        WHERE id = ?
+    """, (next_q["id"], json.dumps(history), session_id))
+
+    conn.commit()
+    conn.close()
+
+    return {
+        "status": "ok",
+        "skipped_question_id": current_q_id,
+        "next_question": next_q_data,
+        "current_streak": curr_streak,
+        "current_elo": round(current_session_elo, 1)
+    }
+
+
 @router.post("/{session_id}/submit")
 def submit_adaptive_answer(
     session_id: str,

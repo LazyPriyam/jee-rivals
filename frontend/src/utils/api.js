@@ -63,6 +63,7 @@ export function purgeUserSessionArtifacts() {
         k &&
         (k.startsWith("jee_active_") ||
          k.startsWith("jee_mock_test_progress_") ||
+         k.startsWith("jee_reported_in_test_") ||
          k.startsWith("jee_user_learnt_chapters") ||
          k.startsWith("jee_seen_toast_ids") ||
          k === "jee_rivals_token" ||
@@ -481,6 +482,10 @@ export const api = {
     getSession: (sessionId) => request(`/api/adaptive/${sessionId}`),
     cancel: (sessionId) =>
       request(`/api/adaptive/${sessionId}/cancel`, {
+        method: 'POST',
+      }),
+    skip: (sessionId) =>
+      request(`/api/adaptive/${sessionId}/skip`, {
         method: 'POST',
       }),
     cancelActive: () =>
