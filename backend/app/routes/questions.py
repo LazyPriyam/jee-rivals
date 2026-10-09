@@ -3,11 +3,20 @@ import datetime
 import random
 import uuid
 from typing import List, Optional
-from fastapi import APIRouter, HTTPException, Query, Depends
+from fastapi import APIRouter, HTTPException, Query, Depends, Header, status
 
 from backend.app.models import QuestionOut, QuestionSolutionOut, QuestionOptionModel, QuestionReportRequest, FixQuestionKeyRequest
 from backend.app.database import get_connection
 from backend.app.auth import get_current_user, get_optional_user
+from backend.app.config import ADMIN_SYNC_TOKEN
+
+def verify_admin_sync(x_sync_token: Optional[str] = Header(None, alias="X-Sync-Token")):
+    if not x_sync_token or x_sync_token != ADMIN_SYNC_TOKEN:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Forbidden. Admin privileges required. Manage reports and moderation via 'jee gui'."
+        )
+    return True
 
 import re
 
@@ -305,7 +314,7 @@ def report_question(question_id: str, report_data: QuestionReportRequest, user: 
 
 
 @router.get("/reports/summary")
-def get_reports_summary(user: Optional[dict] = Depends(get_optional_user)):
+def get_reports_summary(admin: bool = Depends(verify_admin_sync)):
     conn = get_connection()
     c = conn.cursor()
     c.execute("""
@@ -335,8 +344,9 @@ def get_all_reports(
     status: Optional[str] = Query(None),
     reporter_id: Optional[str] = Query(None),
     limit: int = Query(150, ge=1, le=500),
-    user: Optional[dict] = Depends(get_optional_user)
+    admin: bool = Depends(verify_admin_sync)
 ):
+
     conn = get_connection()
     c = conn.cursor()
 
@@ -416,7 +426,7 @@ def get_all_reports(
 
 
 @router.get("/quarantined/all")
-def get_quarantined_questions(user: dict = Depends(get_current_user)):
+def get_quarantined_questions(admin: bool = Depends(verify_admin_sync)):
     conn = get_connection()
     c = conn.cursor()
     c.execute("""
@@ -456,7 +466,7 @@ def get_quarantined_questions(user: dict = Depends(get_current_user)):
 
 
 @router.post("/{question_id}/quarantine")
-def quarantine_question(question_id: str, user: Optional[dict] = Depends(get_optional_user)):
+def quarantine_question(question_id: str, admin: bool = Depends(verify_admin_sync)):
     conn = get_connection()
     c = conn.cursor()
     c.execute("SELECT id FROM questions WHERE id = ?", (question_id,))
@@ -465,7 +475,7 @@ def quarantine_question(question_id: str, user: Optional[dict] = Depends(get_opt
         raise HTTPException(status_code=404, detail="Question not found.")
 
     now = datetime.datetime.utcnow().isoformat()
-    resolver = user.get("username", "Admin") if user else "Admin"
+    resolver = "Admin (GUI)"
 
     c.execute("UPDATE questions SET validation_status = 'QUARANTINED' WHERE id = ?", (question_id,))
     c.execute("""
@@ -488,11 +498,11 @@ def quarantine_question(question_id: str, user: Optional[dict] = Depends(get_opt
 
 
 @router.post("/{question_id}/dismiss")
-def dismiss_reports(question_id: str, user: Optional[dict] = Depends(get_optional_user)):
+def dismiss_reports(question_id: str, admin: bool = Depends(verify_admin_sync)):
     conn = get_connection()
     c = conn.cursor()
     now = datetime.datetime.utcnow().isoformat()
-    resolver = user.get("username", "Admin") if user else "Admin"
+    resolver = "Admin (GUI)"
 
     c.execute("""
         UPDATE question_reports 
@@ -505,11 +515,11 @@ def dismiss_reports(question_id: str, user: Optional[dict] = Depends(get_optiona
 
 
 @router.post("/{question_id}/restore")
-def restore_question(question_id: str, user: Optional[dict] = Depends(get_optional_user)):
+def restore_question(question_id: str, admin: bool = Depends(verify_admin_sync)):
     conn = get_connection()
     c = conn.cursor()
     now = datetime.datetime.utcnow().isoformat()
-    resolver = user.get("username", "Admin") if user else "Admin"
+    resolver = "Admin (GUI)"
 
     c.execute("UPDATE questions SET validation_status = 'VALID' WHERE id = ?", (question_id,))
     c.execute("""
@@ -523,7 +533,7 @@ def restore_question(question_id: str, user: Optional[dict] = Depends(get_option
 
 
 @router.post("/{question_id}/fix-key")
-def fix_question_key(question_id: str, payload: FixQuestionKeyRequest, user: Optional[dict] = Depends(get_optional_user)):
+def fix_question_key(question_id: str, payload: FixQuestionKeyRequest, admin: bool = Depends(verify_admin_sync)):
     conn = get_connection()
     c = conn.cursor()
     c.execute("SELECT id FROM questions WHERE id = ?", (question_id,))
@@ -532,7 +542,7 @@ def fix_question_key(question_id: str, payload: FixQuestionKeyRequest, user: Opt
         raise HTTPException(status_code=404, detail="Question not found.")
 
     now = datetime.datetime.utcnow().isoformat()
-    resolver = user.get("username", "Admin") if user else "Admin"
+    resolver = "Admin (GUI)"
     clean_key = payload.correct_answer.strip().upper()
 
     update_clauses = ["correct_answer = ?"]
@@ -565,5 +575,6 @@ def fix_question_key(question_id: str, payload: FixQuestionKeyRequest, user: Opt
         "message": f"Answer key for question {question_id} updated to {clean_key}.",
         "reconciliation": rec_res
     }
+
 
 
