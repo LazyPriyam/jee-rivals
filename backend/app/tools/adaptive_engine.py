@@ -348,9 +348,32 @@ def apply_adaptive_result_to_profile(
     elif "math" in subj.lower():
         subj_col = "math_elo"
 
-    from backend.app.tools.elo_engine import calculate_chapter_diminishing_factor, get_user_syllabus_coverage, compute_two_factor_air_bracket
-    factor, _ = calculate_chapter_diminishing_factor(cursor, user_id, [chap], [subj])
-    overall_delta = round(elo_delta * factor, 1)
+    from backend.app.tools.elo_engine import (
+        calculate_chapter_diminishing_factor,
+        calculate_subject_asymmetry_factor,
+        get_user_syllabus_coverage,
+        compute_two_factor_air_bracket
+    )
+
+    cursor.execute("SELECT overall_elo, physics_elo, chemistry_elo, math_elo FROM users WHERE id = ?", (user_id,))
+    u_row = cursor.fetchone()
+    cur_overall = float(u_row["overall_elo"] or 1200.0) if u_row else 1200.0
+    p_elo = float(u_row["physics_elo"] or 1200.0) if u_row else 1200.0
+    c_elo = float(u_row["chemistry_elo"] or 1200.0) if u_row else 1200.0
+    m_elo = float(u_row["math_elo"] or 1200.0) if u_row else 1200.0
+
+    chap_factor, _ = calculate_chapter_diminishing_factor(cursor, user_id, [chap], [subj])
+    asym_factor, _ = calculate_subject_asymmetry_factor(p_elo, c_elo, m_elo, [subj], elo_delta)
+
+    if elo_delta > 0:
+        combined_factor = round(chap_factor * asym_factor, 2)
+        overall_delta = round(elo_delta * combined_factor, 1)
+        min_subj_elo = min(p_elo, c_elo, m_elo)
+        max_allowed_overall = min_subj_elo + 350.0
+        if (cur_overall + overall_delta) > max_allowed_overall:
+            overall_delta = max(0.0, round(max_allowed_overall - cur_overall, 1))
+    else:
+        overall_delta = round(elo_delta * chap_factor, 1)
 
     # 1. Update user Elos and totals
     rp_gain = 15 if is_correct else 5
@@ -411,12 +434,17 @@ def apply_adaptive_result_to_profile(
         pass
 
     # 5. Log progression to user_rank_history
-    cursor.execute("SELECT overall_elo FROM users WHERE id = ?", (user_id,))
+    cursor.execute("SELECT overall_elo, physics_elo, chemistry_elo, math_elo FROM users WHERE id = ?", (user_id,))
     u_row = cursor.fetchone()
     if u_row:
         new_ov = float(u_row["overall_elo"] or 1200.0)
         cov = get_user_syllabus_coverage(cursor, user_id)
-        air_b, _, _ = compute_two_factor_air_bracket(new_ov, cov["active_count"], cov["active_subjects_count"])
+        air_b, _, _ = compute_two_factor_air_bracket(
+            new_ov, cov["active_count"], cov["active_subjects_count"],
+            physics_elo=float(u_row["physics_elo"] or 1200.0),
+            chemistry_elo=float(u_row["chemistry_elo"] or 1200.0),
+            math_elo=float(u_row["math_elo"] or 1200.0)
+        )
         cursor.execute("""
             INSERT INTO user_rank_history (user_id, overall_elo, predicted_air_bracket, created_at)
             VALUES (?, ?, ?, ?)

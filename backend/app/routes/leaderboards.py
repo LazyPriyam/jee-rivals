@@ -63,7 +63,10 @@ def get_my_division_details(current_user: dict = Depends(get_current_user)):
         total_solved=solved,
         total_correct=correct,
         rank=my_rank,
-        total_users=total_users
+        total_users=total_users,
+        physics_elo=current_user.get("physics_elo", 1200.0),
+        chemistry_elo=current_user.get("chemistry_elo", 1200.0),
+        math_elo=current_user.get("math_elo", 1200.0)
     )
 
     return {
@@ -82,7 +85,7 @@ def get_weekly_leaderboard(limit: int = Query(50, ge=1, le=100)):
 
     c.execute("""
         SELECT id, username, avatar_id, title, weekly_rp, total_solved, total_correct, overall_elo,
-               gold_medals, silver_medals, bronze_medals, current_streak
+               physics_elo, chemistry_elo, math_elo, gold_medals, silver_medals, bronze_medals, current_streak
         FROM users
         ORDER BY weekly_rp DESC, overall_elo DESC
         LIMIT ?
@@ -105,7 +108,10 @@ def get_weekly_leaderboard(limit: int = Query(50, ge=1, le=100)):
             total_solved=solved,
             total_correct=correct,
             rank=rank,
-            total_users=total_users
+            total_users=total_users,
+            physics_elo=u.get("physics_elo", 1200.0),
+            chemistry_elo=u.get("chemistry_elo", 1200.0),
+            math_elo=u.get("math_elo", 1200.0)
         )
 
         leaderboard.append({

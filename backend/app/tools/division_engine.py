@@ -144,34 +144,59 @@ def evaluate_user_division(
     total_solved: int = 0,
     total_correct: int = 0,
     rank: int = 1,
-    total_users: int = 1
+    total_users: int = 1,
+    physics_elo: float = 1200.0,
+    chemistry_elo: float = 1200.0,
+    math_elo: float = 1200.0
 ) -> Dict[str, Any]:
     """
-    Evaluates user division using the Dual-Gate Academic mechanism.
-    Guarantees that a low-Elo / low-RP user cannot mistakenly be labeled Grandmaster.
+    Evaluates user division using the Dual-Gate Academic mechanism with JEE PCM Parity.
+    Guarantees that an aspirant cannot reach high divisions (Platinum, Diamond, Master, Grandmaster)
+    by farming a single subject while leaving other subjects unstudied.
     """
     accuracy = round((total_correct / total_solved * 100), 1) if total_solved > 0 else 0.0
     elo = round(overall_elo, 1)
 
-    # 1. Determine maximum tier the user qualifies for by Elo and Accuracy
-    # (Merit Gate: must have knowledge and skill)
+    p_e = float(physics_elo or 1200.0)
+    c_e = float(chemistry_elo or 1200.0)
+    m_e = float(math_elo or 1200.0)
+    min_pcm = min(p_e, c_e, m_e)
+    if min_pcm == p_e:
+        min_subj_name = "Physics"
+    elif min_pcm == c_e:
+        min_subj_name = "Chemistry"
+    else:
+        min_subj_name = "Mathematics"
+
+    TIER_MIN_PCM = {
+        "GRANDMASTER": 1600.0,
+        "MASTER": 1450.0,
+        "DIAMOND": 1350.0,
+        "PLATINUM": 1250.0
+    }
+
+    # 1. Determine maximum tier the user qualifies for by Elo, Accuracy, and Subject Parity
+    # (Merit Gate: must have knowledge and skill across PCM)
     qualified_tier_cfg = DIVISION_TIERS_CONFIG[0]
     for cfg in DIVISION_TIERS_CONFIG:
+        req_pcm = TIER_MIN_PCM.get(cfg["id"], 0.0)
+        pcm_qualified = min_pcm >= req_pcm
+
         # Grandmaster additionally requires Top 3 on the leaderboard and at least 3 solved questions
         if cfg["id"] == "GRANDMASTER":
-            if elo >= cfg["min_elo"] and accuracy >= cfg["min_acc"] and weekly_rp >= 2000 and rank <= 3 and total_solved >= 3:
+            if elo >= cfg["min_elo"] and accuracy >= cfg["min_acc"] and weekly_rp >= 2000 and rank <= 3 and total_solved >= 3 and pcm_qualified:
                 qualified_tier_cfg = cfg
             break
         elif cfg["id"] == "MASTER":
-            if elo >= cfg["min_elo"] and accuracy >= cfg["min_acc"] and weekly_rp >= 1500:
+            if elo >= cfg["min_elo"] and accuracy >= cfg["min_acc"] and weekly_rp >= 1500 and pcm_qualified:
                 qualified_tier_cfg = cfg
             else:
                 break
         else:
-            if elo >= cfg["min_elo"] and accuracy >= cfg["min_acc"] and weekly_rp >= cfg["subdivisions"][0]["min_rp"]:
+            if elo >= cfg["min_elo"] and accuracy >= cfg["min_acc"] and weekly_rp >= cfg["subdivisions"][0]["min_rp"] and pcm_qualified:
                 qualified_tier_cfg = cfg
             else:
-                # If they fail Elo or RP gate of this tier, they cannot ascend higher
+                # If they fail Elo, RP, or PCM gate of this tier, they cannot ascend higher
                 break
 
     # 2. Determine Sub-Tier within qualified_tier_cfg
@@ -223,6 +248,8 @@ def evaluate_user_division(
     if qualified_tier_cfg["next_tier_id"]:
         next_cfg = next((c for c in DIVISION_TIERS_CONFIG if c["id"] == qualified_tier_cfg["next_tier_id"]), None)
         if next_cfg:
+            target_pcm = TIER_MIN_PCM.get(next_cfg["id"], 0.0)
+            pcm_gap = max(0.0, round(target_pcm - min_pcm, 1))
             next_tier_req = {
                 "tier_id": next_cfg["id"],
                 "tier_name": next_cfg["name"],
@@ -231,8 +258,18 @@ def evaluate_user_division(
                 "acc_needed": max(0.0, round(next_cfg["min_acc"] - accuracy, 1)),
                 "target_rp": next_cfg["subdivisions"][0]["min_rp"],
                 "target_elo": next_cfg["min_elo"],
-                "target_acc": next_cfg["min_acc"]
+                "target_acc": next_cfg["min_acc"],
+                "target_min_pcm": target_pcm,
+                "lagging_subject": min_subj_name if pcm_gap > 0 else None,
+                "pcm_gap_needed": pcm_gap
             }
+
+    can_trial = (
+        progress_percent >= 100
+        and next_tier_req is not None
+        and next_tier_req["elo_needed"] == 0
+        and next_tier_req.get("pcm_gap_needed", 0.0) == 0.0
+    )
 
     return {
         "tier_id": qualified_tier_cfg["id"],
@@ -254,5 +291,5 @@ def evaluate_user_division(
         "elo": elo,
         "accuracy": accuracy,
         "next_tier": next_tier_req,
-        "can_attempt_trial": progress_percent >= 100 and next_tier_req is not None and next_tier_req["elo_needed"] == 0
+        "can_attempt_trial": can_trial
     }

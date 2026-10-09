@@ -346,6 +346,98 @@ def calculate_chapter_diminishing_factor(
     return factor, reason
 
 
+def calculate_subject_asymmetry_factor(
+    physics_elo: float,
+    chemistry_elo: float,
+    math_elo: float,
+    subjects: Optional[List[str]] = None,
+    raw_delta: float = 0.0
+) -> Tuple[float, str]:
+    """
+    Computes the JEE Lagging Subject Gate multiplier (0.0 to 1.0) for Overall Elo:
+    In JEE (Main & Advanced), Physics, Chemistry, and Mathematics have equal weightage
+    and mandatory individual subject performance expectations.
+
+    If an aspirant is gaining Elo (raw_delta > 0) in only 1 or 2 subjects while
+    neglecting lagging subject(s):
+    - Let E_active = highest Elo among practiced subjects.
+    - Let E_min = min(physics_elo, chemistry_elo, math_elo).
+    - Subject gap: Delta_gap = E_active - E_min.
+
+    1. Delta_gap <= 150:
+       - 1.0 (100% full Overall Elo gains). Natural subject variance is normal.
+    2. 150 < Delta_gap <= 350:
+       - Linear decay: max(0.0, 1.0 - (Delta_gap - 150.0) / 200.0).
+       - Diminishes Overall Elo gains as the gap widens to prevent single-subject runaway.
+    3. Delta_gap > 350:
+       - Factor is strictly 0.0! Overall Elo gains are completely LOCKED.
+       - The aspirant CANNOT farm Overall Elo or Grandmaster on a single subject.
+
+    Crucial invariants:
+    - Single-subject Elo (physics_elo, etc.) is NEVER capped, allowing pure domain
+      mastery and subject leaderboards to remain completely authentic.
+    - If raw_delta <= 0 (mistakes/losses), factor is 1.0 (losses are not shielded).
+    - If the match tests all 3 subjects (tri-subject / full syllabus test), factor is 1.0.
+    """
+    if raw_delta <= 0:
+        return 1.0, "Downward adjustment preserved"
+
+    # Identify practiced subjects
+    subjs = [s.strip().lower() for s in (subjects or []) if s and s.strip() and s.strip().lower() not in ("mixed", "full syllabus")]
+
+    p = float(physics_elo or 1200.0)
+    c = float(chemistry_elo or 1200.0)
+    m = float(math_elo or 1200.0)
+
+    p_active = any("phys" in s for s in subjs) if subjs else True
+    c_active = any("chem" in s for s in subjs) if subjs else True
+    m_active = any("math" in s for s in subjs) if subjs else True
+
+    # If all 3 subjects are practiced in this evaluation (e.g. Full Syllabus Mock), full credit
+    if p_active and c_active and m_active:
+        return 1.0, "Tri-subject / Full Syllabus evaluation (100% Elo gain)"
+
+    # Identify active subject ratings
+    active_ratings = []
+    active_names = []
+    if p_active:
+        active_ratings.append(p)
+        active_names.append("Physics")
+    if c_active:
+        active_ratings.append(c)
+        active_names.append("Chemistry")
+    if m_active:
+        active_ratings.append(m)
+        active_names.append("Mathematics")
+
+    if not active_ratings:
+        active_ratings = [max(p, c, m)]
+        active_names = ["Active Subject"]
+
+    max_active_elo = max(active_ratings)
+    active_str = "/".join(active_names)
+
+    # Find minimum rating and lagging subject name
+    min_elo = min(p, c, m)
+    if min_elo == p:
+        lagging_name = "Physics"
+    elif min_elo == c:
+        lagging_name = "Chemistry"
+    else:
+        lagging_name = "Mathematics"
+
+    gap = max(0.0, round(max_active_elo - min_elo, 1))
+
+    if gap <= 150.0:
+        return 1.0, f"Balanced PCM standing (Gap: {gap:.0f} pts <= 150)"
+    elif gap <= 350.0:
+        asym_factor = round(max(0.0, 1.0 - (gap - 150.0) / 200.0), 2)
+        pct = int(asym_factor * 100)
+        return asym_factor, f"Overall Elo damped ({pct}%): {active_str} is {gap:.0f} pts ahead of {lagging_name}. Practice {lagging_name} to restore 100% gains."
+    else:
+        return 0.0, f"Overall Elo locked (+0.0): {active_str} ({round(max_active_elo):.0f}) is >350 pts ahead of {lagging_name} ({round(min_elo):.0f}). Practice {lagging_name} to unlock Overall Elo."
+
+
 def compute_two_factor_air_bracket(
     overall_elo: float,
     active_chapters_count: int,
@@ -394,8 +486,9 @@ def apply_match_elo_to_user(
 ) -> Tuple[float, float, str]:
     """
     Applies Elo change from a match to user profile:
-    - Subject Elo(s) get raw_delta (or split among subjects if multiple).
-    - Overall Elo gets raw_delta * diminishing_factor to prevent single-chapter farming.
+    - Subject Elo(s) get raw_delta (or split among subjects if multiple). Domain mastery is unrestricted!
+    - Overall Elo gets raw_delta * diminishing_factor * subject_asymmetry_factor.
+      Gains are damped or locked (+0.0) if a single subject is farmed while lagging subjects are neglected.
     - Updates user_rank_history with the new trajectory point.
 
     Returns: (applied_overall_delta, raw_delta, reason)
@@ -409,12 +502,38 @@ def apply_match_elo_to_user(
         return 0.0, 0.0, "User not found"
 
     cur_overall = float(u_row["overall_elo"] or 1200.0)
+    p_elo = float(u_row["physics_elo"] or 1200.0)
+    c_elo = float(u_row["chemistry_elo"] or 1200.0)
+    m_elo = float(u_row["math_elo"] or 1200.0)
 
-    # Calculate diminishing factor
-    factor, reason = calculate_chapter_diminishing_factor(cursor, user_id, chapters, subjects)
-    overall_delta = round(raw_delta * factor, 1)
+    # 1. Calculate chapter diminishing factor
+    chap_factor, chap_reason = calculate_chapter_diminishing_factor(cursor, user_id, chapters, subjects)
 
-    # Determine subject delta
+    # 2. Calculate JEE lagging subject asymmetry factor
+    asym_factor, asym_reason = calculate_subject_asymmetry_factor(p_elo, c_elo, m_elo, subjects, raw_delta)
+
+    if raw_delta > 0:
+        combined_factor = round(chap_factor * asym_factor, 2)
+        overall_delta = round(raw_delta * combined_factor, 1)
+        if asym_factor == 0.0:
+            reason = asym_reason
+        elif asym_factor < 1.0:
+            reason = f"{chap_reason} | {asym_reason}"
+        else:
+            reason = chap_reason
+
+        # Hard ceiling on overall_elo based on lagging subject:
+        min_subj_elo = min(p_elo, c_elo, m_elo)
+        max_allowed_overall = min_subj_elo + 350.0
+        if (cur_overall + overall_delta) > max_allowed_overall:
+            overall_delta = max(0.0, round(max_allowed_overall - cur_overall, 1))
+            if overall_delta == 0.0:
+                reason = f"Overall Elo locked: Lagging subject is at {round(min_subj_elo):.0f}. Practice your lagging subject to unlock Overall Elo."
+    else:
+        overall_delta = round(raw_delta * chap_factor, 1)
+        reason = chap_reason
+
+    # Determine subject delta (unrestricted domain mastery)
     subjs = [s.strip() for s in (subjects or []) if s and s.strip() and s.strip().lower() not in ("mixed", "full syllabus")]
     subj_updates = []
     now_iso = datetime.datetime.utcnow().isoformat()
@@ -453,7 +572,10 @@ def apply_match_elo_to_user(
     new_overall = max(100.0, cur_overall + overall_delta)
     cov = get_user_syllabus_coverage(cursor, user_id)
     air_bracket, gate, _ = compute_two_factor_air_bracket(
-        new_overall, cov["active_count"], cov["active_subjects_count"], cov["total_chapters"]
+        new_overall, cov["active_count"], cov["active_subjects_count"], cov["total_chapters"],
+        physics_elo=p_elo + (raw_delta if any("phys" in s.lower() for s in (subjs or [])) else 0),
+        chemistry_elo=c_elo + (raw_delta if any("chem" in s.lower() for s in (subjs or [])) else 0),
+        math_elo=m_elo + (raw_delta if any("math" in s.lower() for s in (subjs or [])) else 0)
     )
 
     cursor.execute("""

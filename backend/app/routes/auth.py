@@ -101,7 +101,10 @@ def format_user_profile(user: dict, cursor=None) -> UserProfile:
         weekly_rp=user.get("weekly_rp", 0),
         overall_elo=user.get("overall_elo", 1200.0),
         total_solved=solved,
-        total_correct=correct
+        total_correct=correct,
+        physics_elo=user.get("physics_elo", 1200.0),
+        chemistry_elo=user.get("chemistry_elo", 1200.0),
+        math_elo=user.get("math_elo", 1200.0)
     )
     evaluated_division = div_eval["full_name"]
     if cursor:
