@@ -1,4 +1,5 @@
 import React from 'react';
+import { createPortal } from 'react-dom';
 import { X, Trophy, Shield, Zap, Target, Flame, ArrowUpRight, Award, CheckCircle2, AlertTriangle, Sparkles } from 'lucide-react';
 
 const TIERS_DATA = [
@@ -98,8 +99,8 @@ const TIERS_DATA = [
 export default function DivisionGuideModal({ isOpen, onClose }) {
   if (!isOpen) return null;
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
+  const content = (
+    <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
       <div className="bg-[#181d2c] border border-orange-500/40 rounded-3xl max-w-4xl w-full max-h-[90vh] flex flex-col shadow-2xl overflow-hidden text-slate-100">
         {/* Header */}
         <div className="bg-gradient-to-r from-[#242b3d] to-[#1a202e] border-b border-white/10 p-5 sm:p-6 flex items-center justify-between">
@@ -246,4 +247,6 @@ export default function DivisionGuideModal({ isOpen, onClose }) {
       </div>
     </div>
   );
+
+  return typeof document !== 'undefined' ? createPortal(content, document.body) : content;
 }

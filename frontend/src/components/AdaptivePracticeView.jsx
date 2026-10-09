@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { api } from '../utils/api';
 import { sound } from '../utils/sound';
 import MathRenderer from './MathRenderer';
@@ -263,7 +264,7 @@ export default function AdaptivePracticeView({ user, onOpenAuth, onNavigateTab, 
       if (resp.is_correct) {
         sound.correct();
       } else {
-        sound.incorrect();
+        sound.wrong();
       }
 
       // Update session ratings in state
@@ -812,46 +813,90 @@ export default function AdaptivePracticeView({ user, onOpenAuth, onNavigateTab, 
               <div className="pt-4 border-t border-white/10 space-y-4">
                 {/* Single Choice or Multi Choice */}
                 {question.options && question.options.length > 0 ? (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    {question.options.map((opt) => {
-                      const isSel = selectedAnswer === opt.key;
+                  <div>
+                    {(() => {
+                      const isMulti = ['MULTIPLE_CHOICE', 'MULTI_CORRECT', 'MULTIPLE'].includes((question.question_type || '').toUpperCase());
+                      const selectedKeys = selectedAnswer
+                        ? selectedAnswer.split(',').map((s) => s.trim().toUpperCase()).filter(Boolean)
+                        : [];
+
+                      const handleOptionClick = (key) => {
+                        sound.click();
+                        if (isMulti) {
+                          const kUpper = key.toUpperCase();
+                          let updated;
+                          if (selectedKeys.includes(kUpper)) {
+                            updated = selectedKeys.filter((k) => k !== kUpper);
+                          } else {
+                            updated = [...selectedKeys, kUpper].sort();
+                          }
+                          setSelectedAnswer(updated.join(', '));
+                        } else {
+                          setSelectedAnswer(key);
+                        }
+                      };
+
                       return (
-                        <button
-                          key={opt.key}
-                          type="button"
-                          onClick={() => {
-                            sound.click();
-                            setSelectedAnswer(opt.key);
-                          }}
-                          className={`p-4 rounded-2xl border text-left transition flex items-start gap-3 cursor-pointer ${
-                            isSel
-                              ? 'bg-orange-500/20 border-orange-500 text-white shadow-lg glow-orange-subtle'
-                              : 'bg-[#1e2433] border-white/10 text-slate-300 hover:bg-[#252c3c] hover:text-white'
-                          }`}
-                        >
-                          <div
-                            className={`w-7 h-7 rounded-xl flex items-center justify-center font-black text-xs shrink-0 ${
-                              isSel ? 'bg-orange-500 text-white' : 'bg-white/10 text-slate-400'
-                            }`}
-                          >
-                            {opt.key}
+                        <>
+                          {isMulti && (
+                            <div className="mb-3 px-3.5 py-2 rounded-xl bg-purple-950/50 border border-purple-500/40 text-xs text-purple-200 font-bold flex items-center justify-between">
+                              <span>Multiple Correct Options: Tap each correct option to toggle.</span>
+                              <span className="font-mono text-amber-300">Selected: {selectedAnswer || 'None'}</span>
+                            </div>
+                          )}
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                            {question.options.map((opt) => {
+                              const isSel = isMulti
+                                ? selectedKeys.includes(opt.key.toUpperCase())
+                                : selectedAnswer.toUpperCase() === opt.key.toUpperCase();
+                              return (
+                                <button
+                                  key={opt.key}
+                                  type="button"
+                                  onClick={() => handleOptionClick(opt.key)}
+                                  className={`p-4 rounded-2xl border text-left transition flex items-start gap-3 cursor-pointer ${
+                                    isSel
+                                      ? 'bg-orange-500/20 border-orange-500 text-white shadow-lg glow-orange-subtle'
+                                      : 'bg-[#1e2433] border-white/10 text-slate-300 hover:bg-[#252c3c] hover:text-white'
+                                  }`}
+                                >
+                                  <div
+                                    className={`w-7 h-7 rounded-xl flex items-center justify-center font-black text-xs shrink-0 ${
+                                      isSel ? 'bg-orange-500 text-white' : 'bg-white/10 text-slate-400'
+                                    }`}
+                                  >
+                                    {opt.key}
+                                  </div>
+                                  <div className="text-xs sm:text-sm font-medium leading-relaxed pt-0.5">
+                                    <MathRenderer content={opt.text} />
+                                  </div>
+                                </button>
+                              );
+                            })}
                           </div>
-                          <div className="text-xs sm:text-sm font-medium leading-relaxed pt-0.5">
-                            <MathRenderer content={opt.text} />
-                          </div>
-                        </button>
+                        </>
                       );
-                    })}
+                    })()}
                   </div>
                 ) : (
-                  /* Numerical Input */
-                  <div className="max-w-xs space-y-2">
+                  /* Numerical or Text Answer Input */
+                  <div className="max-w-md space-y-2">
                     <label className="text-xs font-bold text-slate-300 block font-mono">
-                      Enter Numerical Value (Integer or Decimal):
+                      {question.question_type === 'MATRIX_MATCH'
+                        ? 'Enter Matrix Match Answer (e.g. A-P, B-Q or option key):'
+                        : ['NUMERICAL', 'INTEGER'].includes((question.question_type || '').toUpperCase())
+                        ? 'Enter Numerical Value (Integer or Decimal):'
+                        : 'Enter Your Answer:'}
                     </label>
                     <input
                       type="text"
-                      placeholder="e.g. 4.5 or 12"
+                      placeholder={
+                        question.question_type === 'MATRIX_MATCH'
+                          ? 'e.g. A-p, B-q or option letter'
+                          : ['NUMERICAL', 'INTEGER'].includes((question.question_type || '').toUpperCase())
+                          ? 'e.g. 4.5 or 12'
+                          : 'Enter your answer...'
+                      }
                       value={selectedAnswer}
                       onChange={(e) => setSelectedAnswer(e.target.value)}
                       className="w-full px-4 py-3 bg-[#1e2433] border border-white/20 rounded-xl text-white font-mono text-sm focus:outline-none focus:border-orange-500"
@@ -942,9 +987,23 @@ export default function AdaptivePracticeView({ user, onOpenAuth, onNavigateTab, 
 
                 {/* Complete Step-by-Step Solution */}
                 <div className="p-5 rounded-2xl bg-[#1e2433] border border-white/10 space-y-2">
-                  <span className="text-xs font-black text-white uppercase font-mono tracking-wider block">
-                    Step-by-Step Derivation & Solution
-                  </span>
+                  <div className="flex items-center justify-between pb-1">
+                    <span className="text-xs font-black text-white uppercase font-mono tracking-wider block">
+                      Step-by-Step Derivation & Solution
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        sound.click();
+                        setReportModalOpen(true);
+                      }}
+                      className="text-[11px] text-amber-400 hover:text-amber-300 font-bold flex items-center gap-1.5 px-2 py-0.5 rounded-lg bg-amber-950/40 border border-amber-500/40 transition cursor-pointer"
+                      title="Flag or Report Answer Key Discrepancy"
+                    >
+                      <Flag className="w-3 h-3 text-amber-400" />
+                      <span>Flag / Report Key</span>
+                    </button>
+                  </div>
                   <div className="text-xs sm:text-sm text-slate-200 leading-relaxed pt-1">
                     <MathRenderer content={result?.solution_text} />
                   </div>
@@ -1134,8 +1193,8 @@ export default function AdaptivePracticeView({ user, onOpenAuth, onNavigateTab, 
       )}
 
       {/* Exit Confirmation Modal */}
-      {exitModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fadeIn">
+      {exitModalOpen && typeof document !== 'undefined' && createPortal(
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fadeIn">
           <div className="bg-[#1b202e] rounded-2xl shadow-2xl max-w-md w-full border border-white/10 overflow-hidden text-slate-200">
             <div className="bg-[#161a26] text-white p-4 border-b border-white/10 flex items-center justify-between">
               <div className="flex items-center gap-2">
@@ -1179,7 +1238,8 @@ export default function AdaptivePracticeView({ user, onOpenAuth, onNavigateTab, 
               </div>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
       {/* Report Question Modal */}

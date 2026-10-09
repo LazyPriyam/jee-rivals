@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Flag, X, AlertTriangle, CheckCircle, Send, Loader2 } from 'lucide-react';
 import { api } from '../utils/api';
 import sound from '../utils/sound';
@@ -47,8 +48,16 @@ export default function ReportQuestionModal({ isOpen, onClose, questionId, quest
     }
   };
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
+  return createPortal(
+    <div
+      className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) {
+          sound.click();
+          onClose();
+        }
+      }}
+    >
       <div className="relative w-full max-w-lg bg-[#1c2230] border border-amber-500/30 rounded-3xl p-6 sm:p-7 shadow-2xl glow-orange-subtle max-h-[92vh] overflow-y-auto">
         {/* Close Button */}
         <button
@@ -193,6 +202,7 @@ export default function ReportQuestionModal({ isOpen, onClose, questionId, quest
           </form>
         )}
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }

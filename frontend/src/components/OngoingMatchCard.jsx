@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { Play, Swords, BookOpen, Clock, AlertTriangle, X, ShieldAlert, Users, Trophy, Flame, ArrowRight } from 'lucide-react';
 import { sound } from '../utils/sound';
 
@@ -17,15 +18,17 @@ export default function OngoingMatchCard({
     if (!match) return Date.now();
     const isMock = match.mode === 'MOCK_TEST';
     if (isMock) {
+      if (match.time_remaining_seconds != null && Number.isFinite(match.time_remaining_seconds)) {
+        return Date.now() + Math.max(0, match.time_remaining_seconds) * 1000;
+      }
       if (match.started_at) {
         try {
-          const startedEpoch = new Date(match.started_at.replace('Z', '+00:00')).getTime();
+          const raw = String(match.started_at);
+          const utcStr = raw.endsWith('Z') || raw.includes('+') ? raw : `${raw}Z`;
+          const startedEpoch = new Date(utcStr).getTime();
           const totalSec = (match.total_duration_minutes || 60) * 60;
           return startedEpoch + totalSec * 1000;
         } catch (_) {}
-      }
-      if (match.time_remaining_seconds != null) {
-        return Date.now() + match.time_remaining_seconds * 1000;
       }
       return Date.now() + (match.total_duration_minutes || 60) * 60 * 1000;
     } else {
@@ -268,8 +271,8 @@ export default function OngoingMatchCard({
       </div>
 
       {/* Forfeit Confirmation Modal */}
-      {forfeitModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-150">
+      {forfeitModalOpen && typeof document !== 'undefined' && createPortal(
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-150">
           <div className="bg-[#1b2232] border border-rose-500/40 rounded-3xl max-w-md w-full p-6 text-slate-100 shadow-2xl space-y-4">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2.5 text-rose-400 font-black text-base">
@@ -311,7 +314,8 @@ export default function OngoingMatchCard({
               </button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </>
   );

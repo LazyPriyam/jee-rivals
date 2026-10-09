@@ -64,8 +64,26 @@ class SoundSynthesizer {
     this.playTone(140, 0.35, 'sawtooth', 0.1);
   }
 
+  incorrect() {
+    this.wrong();
+  }
+
   tick() {
     this.playTone(900, 0.03, 'sine');
+  }
+
+  countdown() {
+    this.tick();
+  }
+
+  duel() {
+    this.playTone(440, 0.12, 'sawtooth', 0);
+    this.playTone(554.37, 0.18, 'sawtooth', 0.1);
+  }
+
+  start() {
+    this.playTone(440, 0.1, 'sine', 0);
+    this.playTone(880, 0.15, 'sine', 0.1);
   }
 
   victory() {

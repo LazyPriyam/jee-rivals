@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { api } from '../utils/api';
 import { sound } from '../utils/sound';
 import { Swords, Clock, BookOpen, AlertCircle, Sparkles, X, Shield, Lock, Globe, Check, Search } from 'lucide-react';
@@ -140,8 +141,8 @@ export default function RoomModal({ isOpen, onClose, onRoomCreated }) {
     }
   };
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/85 backdrop-blur-md overflow-y-auto">
+  const content = (
+    <div className="fixed inset-0 z-[9999] flex items-center justify-center p-3 sm:p-4 bg-black/85 backdrop-blur-md overflow-y-auto">
       <div className="relative w-full max-w-2xl bg-[#242a3a] border border-orange-500/30 rounded-3xl p-6 sm:p-8 shadow-2xl glow-orange-subtle animate-in fade-in duration-200 my-8 max-h-[90vh] overflow-y-auto">
         <button
           onClick={onClose}
@@ -547,4 +548,6 @@ export default function RoomModal({ isOpen, onClose, onRoomCreated }) {
       </div>
     </div>
   );
+
+  return typeof document !== 'undefined' ? createPortal(content, document.body) : content;
 }

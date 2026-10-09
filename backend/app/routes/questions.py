@@ -7,7 +7,7 @@ from fastapi import APIRouter, HTTPException, Query, Depends
 
 from backend.app.models import QuestionOut, QuestionSolutionOut, QuestionOptionModel, QuestionReportRequest
 from backend.app.database import get_connection
-from backend.app.auth import get_current_user
+from backend.app.auth import get_current_user, get_optional_user
 
 import re
 
@@ -282,7 +282,7 @@ def get_question_solution(question_id: str, user: dict = Depends(get_current_use
 
 
 @router.post("/{question_id}/report")
-def report_question(question_id: str, report_data: QuestionReportRequest, user: dict = Depends(get_current_user)):
+def report_question(question_id: str, report_data: QuestionReportRequest, user: Optional[dict] = Depends(get_optional_user)):
     conn = get_connection()
     c = conn.cursor()
     c.execute("SELECT id FROM questions WHERE id = ?", (question_id,))
@@ -292,10 +292,13 @@ def report_question(question_id: str, report_data: QuestionReportRequest, user: 
 
     report_id = f"rep_{uuid.uuid4().hex[:12]}"
     now = datetime.datetime.utcnow().isoformat()
+    reporter_id = user["id"] if user else "guest"
+    reporter_name = user.get("username", "Guest Aspirant") if user else "Guest Aspirant"
+
     c.execute("""
         INSERT INTO question_reports (id, question_id, reporter_id, reporter_username, reason, notes, status, created_at)
         VALUES (?, ?, ?, ?, ?, ?, 'PENDING', ?)
-    """, (report_id, question_id, user["id"], user.get("username", "Anonymous"), report_data.reason, report_data.notes or "", now))
+    """, (report_id, question_id, reporter_id, reporter_name, report_data.reason, report_data.notes or "", now))
     conn.commit()
     conn.close()
     return {"success": True, "message": "Report submitted successfully.", "report_id": report_id}

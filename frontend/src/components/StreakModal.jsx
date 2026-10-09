@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { X, Flame, Shield, Zap, Trophy, Sparkles, CheckCircle2, AlertCircle, RefreshCw, Plus } from 'lucide-react';
 import { api } from '../utils/api';
 import { sound } from '../utils/sound';
@@ -66,8 +67,8 @@ export default function StreakModal({ isOpen, onClose, user, onUpdateUser }) {
   const calendar = streakData?.weekly_calendar || [];
   const milestones = streakData?.all_milestones || [];
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
+  const content = (
+    <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
       <div className="bg-[#181d2c] border border-orange-500/40 rounded-3xl max-w-xl w-full max-h-[90vh] flex flex-col shadow-2xl overflow-hidden text-slate-100">
         {/* Header */}
         <div className="bg-gradient-to-r from-[#281e18] via-[#221c2a] to-[#1a202e] border-b border-orange-500/30 p-5 sm:p-6 flex items-center justify-between">
@@ -286,4 +287,6 @@ export default function StreakModal({ isOpen, onClose, user, onUpdateUser }) {
       </div>
     </div>
   );
+
+  return typeof document !== 'undefined' ? createPortal(content, document.body) : content;
 }

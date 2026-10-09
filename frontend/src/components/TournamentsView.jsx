@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { api } from '../utils/api';
 import { sound } from '../utils/sound';
 import {
@@ -1186,8 +1187,8 @@ export default function TournamentsView({ user, onJoinRoomCode, onOpenAuth, onVi
       )}
 
       {/* ORGANIZE TOURNAMENT MODAL */}
-      {createModalOpen && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
+      {createModalOpen && typeof document !== 'undefined' && createPortal(
+        <div className="fixed inset-0 z-[9999] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
           <div className="bg-[#262c3c] border border-orange-500/40 rounded-3xl p-6 sm:p-8 max-w-2xl w-full shadow-2xl glow-orange-subtle my-8 max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between pb-4 border-b border-white/10 mb-6">
               <div>
@@ -1472,12 +1473,13 @@ export default function TournamentsView({ user, onJoinRoomCode, onOpenAuth, onVi
               </div>
             </form>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
       {/* Passcode Prompt Modal */}
-      {passcodeModalOpen && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+      {passcodeModalOpen && typeof document !== 'undefined' && createPortal(
+        <div className="fixed inset-0 z-[9999] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-[#262c3c] border border-orange-500/40 rounded-3xl p-6 max-w-sm w-full shadow-2xl">
             <h3 className="text-base font-black text-white mb-2 flex items-center gap-2">
               <Lock className="w-4 h-4 text-orange-400" />
@@ -1510,7 +1512,8 @@ export default function TournamentsView({ user, onJoinRoomCode, onOpenAuth, onVi
               </button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );

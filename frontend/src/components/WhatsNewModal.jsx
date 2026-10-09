@@ -1,4 +1,5 @@
 import React from 'react';
+import { createPortal } from 'react-dom';
 import {
   X,
   Sparkles,
@@ -63,8 +64,8 @@ export default function WhatsNewModal({ update, isOpen, onClose, onMarkRead }) {
       })
     : 'Recent';
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm animate-in fade-in duration-200">
+  const content = (
+    <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm animate-in fade-in duration-200">
       <div className="relative w-full max-w-lg bg-[#181d28] border border-orange-500/40 rounded-3xl shadow-2xl overflow-hidden glow-orange-subtle flex flex-col max-h-[90vh]">
         {/* Modal Top Header */}
         <div className="relative p-6 bg-gradient-to-b from-[#222938] to-[#181d28] border-b border-white/10">
@@ -156,4 +157,6 @@ export default function WhatsNewModal({ update, isOpen, onClose, onMarkRead }) {
       </div>
     </div>
   );
+
+  return typeof document !== 'undefined' ? createPortal(content, document.body) : content;
 }

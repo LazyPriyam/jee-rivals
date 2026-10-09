@@ -433,7 +433,7 @@ export default function LeaderboardsView({ user, onViewProfile, onNavigateTab })
                 </thead>
                 <tbody className="divide-y divide-white/5">
                   {weeklyData?.leaderboard?.map((u) => {
-                    const isMe = user && u.user_id === user.id;
+                    const isMe = user && (String(u.user_id) === String(user.id) || u.username === user.username);
                     const baseTier = getDivisionBaseTier(u.division_id || u.division);
                     const divStyle = DIVISION_COLORS[baseTier] || DIVISION_COLORS.BRONZE;
 
@@ -503,10 +503,10 @@ export default function LeaderboardsView({ user, onViewProfile, onNavigateTab })
                         </td>
                         <td className="py-3.5 text-center">
                           <div className="flex items-center justify-center gap-1.5 text-xs font-mono">
-                            {u.medals.gold > 0 && <span title="Gold Medals">🥇{u.medals.gold}</span>}
-                            {u.medals.silver > 0 && <span title="Silver Medals">🥈{u.medals.silver}</span>}
-                            {u.medals.bronze > 0 && <span title="Bronze Medals">🥉{u.medals.bronze}</span>}
-                            {u.medals.gold === 0 && u.medals.silver === 0 && u.medals.bronze === 0 && (
+                            {u.medals?.gold > 0 && <span title="Gold Medals">🥇{u.medals.gold}</span>}
+                            {u.medals?.silver > 0 && <span title="Silver Medals">🥈{u.medals.silver}</span>}
+                            {u.medals?.bronze > 0 && <span title="Bronze Medals">🥉{u.medals.bronze}</span>}
+                            {(!u.medals || (u.medals.gold === 0 && u.medals.silver === 0 && u.medals.bronze === 0)) && (
                               <span className="text-slate-600">-</span>
                             )}
                           </div>
@@ -560,7 +560,7 @@ export default function LeaderboardsView({ user, onViewProfile, onNavigateTab })
                 </thead>
                 <tbody className="divide-y divide-white/5">
                   {eloData?.ladder?.map((u) => {
-                    const isMe = user && u.user_id === user.id;
+                    const isMe = user && (String(u.user_id) === String(user.id) || u.username === user.username);
 
                     return (
                       <tr
@@ -587,16 +587,16 @@ export default function LeaderboardsView({ user, onViewProfile, onNavigateTab })
                           </div>
                         </td>
                         <td className="py-3.5 text-right font-mono font-black text-orange-400 text-base">
-                          {Math.round(u.rating)}
+                          {Math.round(u.rating ?? 1200)}
                         </td>
                         <td className="py-3.5 text-right font-mono text-slate-300">
-                          {Math.round(u.ratings.physics)}
+                          {Math.round(u.ratings?.physics ?? 1200)}
                         </td>
                         <td className="py-3.5 text-right font-mono text-slate-300">
-                          {Math.round(u.ratings.chemistry)}
+                          {Math.round(u.ratings?.chemistry ?? 1200)}
                         </td>
                         <td className="py-3.5 text-right font-mono text-slate-300">
-                          {Math.round(u.ratings.math)}
+                          {Math.round(u.ratings?.math ?? 1200)}
                         </td>
                       </tr>
                     );

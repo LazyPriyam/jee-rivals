@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { api, getToken } from '../utils/api';
 import MathRenderer from './MathRenderer';
 import { sound } from '../utils/sound';
@@ -147,7 +148,7 @@ export default function SpeedDuelView({
           setSelectedOption('');
         } else if (data.status === 'COMPLETED') {
           onMatchComplete();
-        } else if (data.participants?.find((p) => p.user_id === user.id)?.is_finished) {
+        } else if (data.participants?.find((p) => String(p.user_id) === String(user?.id) || p.username === user?.username)?.is_finished) {
           onPlayerFinished();
         }
       }).catch(() => {});
@@ -269,24 +270,34 @@ export default function SpeedDuelView({
       if (submitting || !currentQ) return;
       if (!currentQ.options || currentQ.options.length === 0) return;
 
-      const key = e.key.toUpperCase();
-      const optKeys = currentQ.options.map((o) => String(o.key).toUpperCase());
+      const isMulti = currentQ?.type === 'MULTIPLE_CHOICE' || currentQ?.type === 'MULTI_CORRECT';
+
+      const toggleMulti = (targetKey) => {
+        sound.click();
+        const arr = selectedOption ? selectedOption.split(',').map(s => s.trim().toUpperCase()).filter(Boolean) : [];
+        const next = arr.includes(targetKey) ? arr.filter(x => x !== targetKey) : [...arr, targetKey];
+        setSelectedOption(next.sort().join(', '));
+      };
 
       if (optKeys.includes(key)) {
-        sound.click();
-        setSelectedOption(currentQ.options.find((o) => String(o.key).toUpperCase() === key).key);
+        if (isMulti) {
+          toggleMulti(key);
+        } else {
+          sound.click();
+          setSelectedOption(currentQ.options.find((o) => String(o.key).toUpperCase() === key).key);
+        }
       } else if (key === '1' && optKeys.length > 0) {
-        sound.click();
-        setSelectedOption(currentQ.options[0].key);
+        if (isMulti) toggleMulti(currentQ.options[0].key);
+        else { sound.click(); setSelectedOption(currentQ.options[0].key); }
       } else if (key === '2' && optKeys.length > 1) {
-        sound.click();
-        setSelectedOption(currentQ.options[1].key);
+        if (isMulti) toggleMulti(currentQ.options[1].key);
+        else { sound.click(); setSelectedOption(currentQ.options[1].key); }
       } else if (key === '3' && optKeys.length > 2) {
-        sound.click();
-        setSelectedOption(currentQ.options[2].key);
+        if (isMulti) toggleMulti(currentQ.options[2].key);
+        else { sound.click(); setSelectedOption(currentQ.options[2].key); }
       } else if (key === '4' && optKeys.length > 3) {
-        sound.click();
-        setSelectedOption(currentQ.options[3].key);
+        if (isMulti) toggleMulti(currentQ.options[3].key);
+        else { sound.click(); setSelectedOption(currentQ.options[3].key); }
       } else if (e.key === 'Enter' && selectedOption) {
         doSubmit(selectedOption);
       }
@@ -296,7 +307,7 @@ export default function SpeedDuelView({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [selectedOption, submitting, currentQ]);
 
-  const myParticipant = roomState.participants?.find((p) => p.user_id === user.id);
+  const myParticipant = roomState.participants?.find((p) => String(p.user_id) === String(user?.id) || p.username === user?.username);
   const currentIdx = (myParticipant?.current_question_index || 0) + 1;
   const totalQuestions = roomState.total_questions || 5;
 
@@ -574,39 +585,57 @@ export default function SpeedDuelView({
             />
           </div>
         ) : (
-          <div className="grid grid-cols-1 gap-3 mb-6">
-            {currentQ.options?.map((opt) => {
-              const isSelected = selectedOption === opt.key;
-              return (
-                <button
-                  key={opt.key}
-                  type="button"
-                  disabled={submitting}
-                  onClick={() => {
-                    sound.click();
-                    setSelectedOption(opt.key);
-                  }}
-                  className={`flex items-start gap-3 p-4 rounded-2xl border text-left transition cursor-pointer ${
-                    isSelected
-                      ? 'border-orange-500 bg-orange-950/40 text-white shadow-lg shadow-orange-950/60 ring-1 ring-orange-500'
-                      : 'border-white/10 bg-[#1e2433] text-slate-200 hover:border-white/30 hover:bg-[#293144]'
-                  }`}
-                >
-                  <span
-                    className={`w-7 h-7 shrink-0 rounded-xl flex items-center justify-center font-mono font-bold text-xs transition ${
+          <div className="space-y-2 mb-6">
+            {(currentQ?.type === 'MULTIPLE_CHOICE' || currentQ?.type === 'MULTI_CORRECT') && (
+              <div className="text-[11px] font-bold text-amber-400 bg-amber-500/10 border border-amber-500/20 px-3 py-1 rounded-lg inline-flex items-center gap-1.5 mb-1">
+                <span>Multiple Correct: Select all applicable options</span>
+              </div>
+            )}
+            <div className="grid grid-cols-1 gap-3">
+              {currentQ.options?.map((opt) => {
+                const isMulti = currentQ?.type === 'MULTIPLE_CHOICE' || currentQ?.type === 'MULTI_CORRECT';
+                const isSelected = isMulti
+                  ? (selectedOption ? selectedOption.split(',').map(s => s.trim().toUpperCase()).includes(String(opt.key).toUpperCase()) : false)
+                  : selectedOption === opt.key;
+                return (
+                  <button
+                    key={opt.key}
+                    type="button"
+                    disabled={submitting}
+                    onClick={() => {
+                      if (isMulti) {
+                        const arr = selectedOption ? selectedOption.split(',').map(s => s.trim().toUpperCase()).filter(Boolean) : [];
+                        const targetKey = String(opt.key).toUpperCase();
+                        const next = arr.includes(targetKey) ? arr.filter(x => x !== targetKey) : [...arr, targetKey];
+                        sound.click();
+                        setSelectedOption(next.sort().join(', '));
+                      } else {
+                        sound.click();
+                        setSelectedOption(opt.key);
+                      }
+                    }}
+                    className={`flex items-start gap-3 p-4 rounded-2xl border text-left transition cursor-pointer ${
                       isSelected
-                        ? 'bg-orange-500 text-white'
-                        : 'bg-slate-800 text-slate-400'
+                        ? 'border-orange-500 bg-orange-950/40 text-white shadow-lg shadow-orange-950/60 ring-1 ring-orange-500'
+                        : 'border-white/10 bg-[#1e2433] text-slate-200 hover:border-white/30 hover:bg-[#293144]'
                     }`}
                   >
-                    {opt.key}
-                  </span>
-                  <div className="text-sm pt-0.5 flex-1">
-                    <MathRenderer content={opt.text} />
-                  </div>
-                </button>
-              );
-            })}
+                    <span
+                      className={`w-7 h-7 shrink-0 rounded-xl flex items-center justify-center font-mono font-bold text-xs transition ${
+                        isSelected
+                          ? 'bg-orange-500 text-white'
+                          : 'bg-slate-800 text-slate-400'
+                      }`}
+                    >
+                      {opt.key}
+                    </span>
+                    <div className="text-sm pt-0.5 flex-1">
+                      <MathRenderer content={opt.text} />
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
           </div>
         )}
 
@@ -660,8 +689,8 @@ export default function SpeedDuelView({
       </div>
 
       {/* Forfeit Confirmation Modal */}
-      {forfeitConfirmOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-150">
+      {forfeitConfirmOpen && typeof document !== 'undefined' && createPortal(
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-150">
           <div className="bg-[#1b2232] border border-rose-500/40 rounded-3xl max-w-md w-full p-6 text-slate-100 shadow-2xl space-y-4">
             <h3 className="text-base font-black text-rose-400">Forfeit Speed Duel?</h3>
             <p className="text-xs sm:text-sm text-slate-300 leading-relaxed">
@@ -690,7 +719,8 @@ export default function SpeedDuelView({
               </button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );

@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { api } from '../utils/api';
 import SphereGridSkillTree from './SphereGridSkillTree';
 import {
@@ -1342,8 +1343,8 @@ export default function ProfileView({
       {/* =========================================================================
           EDIT PASSPORT CUSTOMIZATION MODAL (IDENTITY SUITE)
           ========================================================================= */}
-      {editModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fadeIn">
+      {editModalOpen && typeof document !== 'undefined' && createPortal(
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fadeIn">
           <div className="bg-[#141724] border border-white/15 rounded-3xl p-6 sm:p-8 max-w-lg w-full max-h-[90vh] overflow-y-auto shadow-2xl relative">
             <h3 className="text-xl font-black text-white mb-1 flex items-center gap-2">
               <Edit3 className="w-5 h-5 text-orange-400" />
@@ -1508,7 +1509,8 @@ export default function ProfileView({
               </div>
             </form>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );

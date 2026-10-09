@@ -46,14 +46,27 @@ def normalize_answer(ans: Any) -> str:
     return mapping.get(s, s)
 
 def is_answer_correct(user_ans: str, correct_ans: str, q_type: str = "MCQ") -> bool:
-    """Robust answer equivalence checker supporting both MCQ options and Numerical types."""
+    """Robust answer equivalence checker supporting MCQ options, multi-correct sets, and Numerical types."""
+    if user_ans is None or correct_ans is None:
+        return False
+
     u_norm = normalize_answer(user_ans)
     c_norm = normalize_answer(correct_ans)
     if u_norm == c_norm:
         return True
 
+    # Multi-correct sets (e.g., "A, B" vs "B, A" or "1, 2" vs "A, B")
+    u_str = str(user_ans).strip()
+    c_str = str(correct_ans).strip()
+    if "," in u_str or "," in c_str or ";" in u_str or ";" in c_str or q_type in ("MULTIPLE_CHOICE", "MULTI_CORRECT"):
+        import re
+        u_parts = {normalize_answer(p) for p in re.split(r'[,;\s]+', u_str) if p}
+        c_parts = {normalize_answer(p) for p in re.split(r'[,;\s]+', c_str) if p}
+        if u_parts and u_parts == c_parts:
+            return True
+
     # If numerical, check float tolerance
-    if q_type == "NUMERICAL" or (user_ans and user_ans.replace('.', '', 1).isdigit()):
+    if q_type in ("NUMERICAL", "INTEGER", "SUBJECTIVE") or (user_ans and user_ans.replace('.', '', 1).isdigit()):
         try:
             u_val = float(str(user_ans).strip())
             c_val = float(str(correct_ans).strip())

@@ -194,11 +194,28 @@ export default function App() {
     }
   };
 
-  const handleJoinRoomCode = (room) => {
+  const handleJoinRoomCode = async (roomOrCode) => {
+    let room = roomOrCode;
+    if (typeof roomOrCode === 'string') {
+      try {
+        room = await api.rooms.get(roomOrCode);
+      } catch (err) {
+        alert(err.message || 'Failed to locate arena room.');
+        return;
+      }
+    } else if (roomOrCode && roomOrCode.room) {
+      room = roomOrCode.room;
+    }
+    if (!room) return;
+
     setCurrentRoom(room);
     setActiveTab('arena');
     if (room.status === 'IN_PROGRESS') {
-      const myPart = room.participants?.find((p) => p.user_id === user?.id);
+      setActiveMatch(room);
+      try {
+        localStorage.setItem('jee_active_test_room', room.code);
+      } catch (_) {}
+      const myPart = room.participants?.find((p) => String(p.user_id) === String(user?.id) || p.username === user?.username);
       if (myPart?.is_finished) {
         setRoomViewMode('waiting');
       } else {

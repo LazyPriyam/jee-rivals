@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { api } from '../utils/api';
 import MathRenderer from './MathRenderer';
 import { sound } from '../utils/sound';
@@ -52,22 +53,35 @@ export default function MockTestView({ room, user, onMatchComplete, onExitToDash
 
   // Global server-synchronized deadline
   const getExamDeadline = () => {
-    if (room.started_at) {
-      try {
-        const startEpoch = new Date(room.started_at.replace('Z', '+00:00')).getTime();
-        return startEpoch + initialDuration * 1000;
-      } catch (_) {}
-    }
-    if (room.time_remaining_seconds != null) {
+    // 1. Prefer positive server-computed remaining seconds
+    if (room.time_remaining_seconds != null && room.time_remaining_seconds > 0) {
       return Date.now() + room.time_remaining_seconds * 1000;
     }
-    if (savedProgress?.deadline) {
+    // 2. Strict UTC parse of started_at
+    if (room.started_at) {
+      try {
+        const utcStr = (room.started_at.endsWith('Z') || room.started_at.includes('+'))
+          ? room.started_at
+          : `${room.started_at}Z`;
+        const startEpoch = new Date(utcStr).getTime();
+        if (!isNaN(startEpoch)) {
+          const calcDeadline = startEpoch + initialDuration * 1000;
+          if (calcDeadline > Date.now()) {
+            return calcDeadline;
+          }
+        }
+      } catch (_) {}
+    }
+    // 3. Saved progress deadline if future
+    if (savedProgress?.deadline && savedProgress.deadline > Date.now()) {
       return savedProgress.deadline;
     }
-    if (savedProgress?.timeRemaining !== undefined && savedProgress?.timestamp) {
+    if (savedProgress?.timeRemaining !== undefined && savedProgress?.timestamp && savedProgress.timeRemaining > 0) {
       const elapsed = Math.floor((Date.now() - savedProgress.timestamp) / 1000);
       const rem = Math.max(0, savedProgress.timeRemaining - elapsed);
-      return Date.now() + rem * 1000;
+      if (rem > 0) {
+        return Date.now() + rem * 1000;
+      }
     }
     return Date.now() + initialDuration * 1000;
   };
@@ -139,7 +153,7 @@ export default function MockTestView({ room, user, onMatchComplete, onExitToDash
     const tick = () => {
       const rem = Math.max(0, Math.ceil((deadlineRef.current - Date.now()) / 1000));
       setTimeRemaining(rem);
-      if (rem <= 0) {
+      if (rem <= 0 && Date.now() - startTimeRef.current > 3000) {
         clearInterval(timerRef.current);
         handleFinalSubmit();
       }
@@ -741,8 +755,8 @@ export default function MockTestView({ room, user, onMatchComplete, onExitToDash
       </div>
 
       {/* 5. Question Paper Modal (Full Paper Review) */}
-      {questionPaperModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+      {questionPaperModalOpen && typeof document !== 'undefined' && createPortal(
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fadeIn">
           <div className="bg-white rounded-lg shadow-2xl max-w-4xl w-full max-h-[85vh] flex flex-col border border-slate-300">
             <div className="bg-[#1e293b] text-white p-3.5 flex items-center justify-between rounded-t-lg">
               <h3 className="font-bold text-sm">Full Examination Question Paper</h3>
@@ -802,12 +816,13 @@ export default function MockTestView({ room, user, onMatchComplete, onExitToDash
               </button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
       {/* 6. Authentic NTA Exam Summary & Submit Confirmation Modal */}
-      {submitModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm">
+      {submitModalOpen && typeof document !== 'undefined' && createPortal(
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm animate-fadeIn">
           <div className="bg-white rounded-lg shadow-2xl max-w-xl w-full border border-slate-300 overflow-hidden">
             <div className="bg-[#1e293b] text-white p-3.5 flex items-center justify-between">
               <h3 className="font-bold text-sm">Examination Summary</h3>
@@ -875,12 +890,13 @@ export default function MockTestView({ room, user, onMatchComplete, onExitToDash
               </div>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
       {/* 7. Exit Confirmation Modal on Browser Back Button */}
-      {exitWarningModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fadeIn">
+      {exitWarningModalOpen && typeof document !== 'undefined' && createPortal(
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fadeIn">
           <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full border border-slate-300 overflow-hidden text-slate-800">
             <div className="bg-[#1e293b] text-white p-4 flex items-center justify-between">
               <div className="flex items-center gap-2">
@@ -932,7 +948,8 @@ export default function MockTestView({ room, user, onMatchComplete, onExitToDash
               </div>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
       {/* Report Question Modal */}

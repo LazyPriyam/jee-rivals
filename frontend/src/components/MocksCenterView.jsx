@@ -69,9 +69,9 @@ export default function MocksCenterView({ user, onRoomCreated, onOpenAuth }) {
         base_correct_score: 100.0,
       });
 
-      // Automatically launch exam
-      await api.rooms.start(room.code);
-      onRoomCreated(room);
+      // Automatically launch exam and retrieve active started room
+      const startedRoom = await api.rooms.start(room.code);
+      onRoomCreated(startedRoom || { ...room, status: 'IN_PROGRESS' });
     } catch (err) {
       setError(err.message || 'Failed to initialize examination paper.');
     } finally {

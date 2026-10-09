@@ -168,9 +168,17 @@ def select_next_adaptive_question(
         placeholders = ",".join("?" for _ in effective_allowed)
         base_query += f" AND chapter IN ({placeholders})"
         params.extend(effective_allowed)
-    if target_exam and target_exam != "MIXED":
-        base_query += " AND target_exam = ?"
-        params.append(target_exam)
+    if target_exam and str(target_exam).upper() not in ("MIXED", "ALL"):
+        te_upper = str(target_exam).upper()
+        if "MAIN" in te_upper:
+            base_query += " AND (target_exam IN ('JEE_MAIN', 'MAIN') OR target_exam IS NULL)"
+        elif "ADVANCED" in te_upper:
+            base_query += " AND (target_exam IN ('JEE_ADVANCED', 'ADVANCED'))"
+        elif "OLYMPIAD" in te_upper:
+            base_query += " AND target_exam = 'OLYMPIAD'"
+        else:
+            base_query += " AND (UPPER(target_exam) = ? OR target_exam IS NULL)"
+            params.append(te_upper)
 
     cursor.execute(base_query, params)
     candidates = [dict(r) for r in cursor.fetchall()]

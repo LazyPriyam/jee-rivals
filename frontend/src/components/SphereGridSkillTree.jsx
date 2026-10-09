@@ -341,9 +341,10 @@ export default function SphereGridSkillTree({
           const liveQCount = typeof chapItem === 'object' ? (chapItem.question_count || 0) : 0;
           let cData = null;
           if (uMatch?.chapters) {
-            cData = uMatch.chapters.find(
-              (c) => (c.name || c).toLowerCase() === chapName.toLowerCase()
-            );
+            cData = uMatch.chapters.find((c) => {
+              const str = typeof c === 'string' ? c : (c?.name || c?.chapter || '');
+              return String(str).toLowerCase() === String(chapName).toLowerCase();
+            });
           }
           return {
             name: chapName,
