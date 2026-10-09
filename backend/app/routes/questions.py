@@ -556,6 +556,11 @@ def fix_question_key(question_id: str, payload: FixQuestionKeyRequest, admin: bo
         update_clauses.append("text = ?")
         params.append(payload.question_text.strip())
 
+    if payload.options is not None:
+        opts_val = json.dumps(payload.options) if not isinstance(payload.options, str) else payload.options
+        update_clauses.append("options = ?")
+        params.append(opts_val)
+
     params.append(question_id)
     c.execute(f"UPDATE questions SET {', '.join(update_clauses)} WHERE id = ?", tuple(params))
 

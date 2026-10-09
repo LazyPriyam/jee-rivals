@@ -21,10 +21,24 @@ from backend.app.tools.adaptive_engine import (
 router = APIRouter(prefix="/api/adaptive", tags=["Adaptive Practice Engine"])
 
 
+def normalize_answer_token(ans: Any) -> str:
+    """Normalizes option strings across formats: '1' -> 'A', '2' -> 'B', '3' -> 'C', '4' -> 'D', '(B)' -> 'B'."""
+    if ans is None:
+        return ""
+    s = str(ans).strip().upper().strip("()., []'\"")
+    mapping = {"1": "A", "2": "B", "3": "C", "4": "D"}
+    return mapping.get(s, s)
+
+
 def evaluate_answer(user_ans: Any, correct_ans: Any, question_type: str = "SINGLE_CHOICE") -> bool:
-    """Evaluates student answer with numerical float tolerance and case/space normalization."""
+    """Evaluates student answer with 1-4 <-> A-D option equivalence, multi-correct sets, and float tolerance."""
     if user_ans is None or correct_ans is None:
         return False
+
+    u_norm = normalize_answer_token(user_ans)
+    c_norm = normalize_answer_token(correct_ans)
+    if u_norm == c_norm:
+        return True
 
     u_str = str(user_ans).strip()
     c_str = str(correct_ans).strip()
@@ -32,10 +46,10 @@ def evaluate_answer(user_ans: Any, correct_ans: Any, question_type: str = "SINGL
     if u_str.upper() == c_str.upper():
         return True
 
-    # Multi-correct handling (e.g. "A, B" vs "A,B" vs "B,A")
+    # Multi-correct handling (e.g. "A, B" vs "A,B" or "1, 2" vs "A, B")
     if "," in c_str or question_type in ("MULTIPLE_CHOICE", "MULTI_CORRECT"):
-        c_set = {x.strip().upper() for x in c_str.split(",") if x.strip()}
-        u_set = {x.strip().upper() for x in u_str.split(",") if x.strip()}
+        c_set = {normalize_answer_token(x) for x in c_str.split(",") if x.strip()}
+        u_set = {normalize_answer_token(x) for x in u_str.split(",") if x.strip()}
         if c_set == u_set:
             return True
 
@@ -48,6 +62,7 @@ def evaluate_answer(user_ans: Any, correct_ans: Any, question_type: str = "SINGL
         pass
 
     return False
+
 
 
 class AdaptiveStartRequest(BaseModel):
