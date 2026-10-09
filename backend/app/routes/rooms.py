@@ -854,26 +854,30 @@ def get_room_state(code: str, user: dict) -> RoomState:
 
 def clean_abandoned_rooms():
     """
-    Auto-purges stale or abandoned battle rooms:
-    1. Rooms in 'LOBBY' created > 15 minutes ago.
-    2. Rooms with 0 human participants.
-    3. Rooms in 'IN_PROGRESS' started > 75 minutes ago with no active participants.
-    4. Rooms marked 'ABANDONED'.
+    Safely purges truly abandoned, unstarted ghost rooms without ever touching completed tests,
+    submitted answers, or active test histories:
+    1. Rooms in 'LOBBY' created > 30 minutes ago where zero participants took part.
+    2. Empty rooms with zero participants that have no answers or scores.
+    3. Never deletes COMPLETED rooms or rooms with submitted candidate answers/scores.
     """
     try:
         conn = get_connection()
         c = conn.cursor()
         now = datetime.datetime.utcnow()
-        lobby_cutoff = (now - datetime.timedelta(minutes=15)).isoformat()
-        progress_cutoff = (now - datetime.timedelta(minutes=75)).isoformat()
+        lobby_cutoff = (now - datetime.timedelta(minutes=30)).isoformat()
 
+        # Only select dead unstarted lobby rooms that have ZERO answers, zero scores, and zero finished participants
         c.execute("""
             SELECT id, code FROM rooms
-            WHERE (status = 'LOBBY' AND created_at < ?)
-               OR (status = 'IN_PROGRESS' AND started_at < ?)
-               OR status = 'ABANDONED'
-               OR (SELECT COUNT(*) FROM room_participants p WHERE p.room_id = rooms.id) = 0
-        """, (lobby_cutoff, progress_cutoff))
+            WHERE (
+                (status = 'LOBBY' AND created_at < ?)
+                OR (
+                    status = 'ABANDONED'
+                    AND (SELECT COUNT(*) FROM room_participants p WHERE p.room_id = rooms.id AND (p.is_finished = 1 OR p.score > 0 OR p.answers != '{}')) = 0
+                )
+            )
+            AND (SELECT COUNT(*) FROM room_participants p WHERE p.room_id = rooms.id AND (p.is_finished = 1 OR p.score > 0 OR p.answers != '{}')) = 0
+        """, (lobby_cutoff,))
         stale_rooms = [dict(r) for r in c.fetchall()]
 
         for r in stale_rooms:
@@ -892,7 +896,7 @@ class TransferHostRequest(BaseModel):
 
 @router.post("/{code}/leave")
 async def leave_room(code: str, user: dict = Depends(get_current_user)):
-    """Removes a user from room participants and automatically reassigns host, or deletes room if abandoned."""
+    """Removes user from unstarted lobby, or marks finished in-flight while preserving test history & answers."""
     code = code.strip().upper()
     conn = get_connection()
     c = conn.cursor()
@@ -906,31 +910,51 @@ async def leave_room(code: str, user: dict = Depends(get_current_user)):
     room = dict(room_row)
     room_id = room["id"]
 
-    # Delete leaving user from room_participants
-    c.execute("DELETE FROM room_participants WHERE room_id = ? AND user_id = ?", (room_id, user["id"]))
+    if room.get("status") == "LOBBY":
+        # In pre-match LOBBY: safely remove leaving participant from the room
+        c.execute("DELETE FROM room_participants WHERE room_id = ? AND user_id = ?", (room_id, user["id"]))
+    else:
+        # Match/Test is IN_PROGRESS or COMPLETED: PRESERVE candidate participant record and answers!
+        c.execute("""
+            UPDATE room_participants
+            SET is_finished = 1, finished_at = COALESCE(finished_at, ?)
+            WHERE room_id = ? AND user_id = ?
+        """, (datetime.datetime.utcnow().isoformat(), room_id, user["id"]))
 
-    # Query remaining participants
+    # Query remaining active participants
     c.execute("""
-        SELECT p.user_id, u.username
+        SELECT p.user_id, u.username, p.is_finished, p.score, p.answers
         FROM room_participants p
         JOIN users u ON p.user_id = u.id
         WHERE p.room_id = ?
         ORDER BY p.rowid ASC
     """, (room_id,))
     remaining = [dict(r) for r in c.fetchall()]
-    if len(remaining) == 0:
-        # All players have left - instantly delete the abandoned room!
-        c.execute("DELETE FROM room_participants WHERE room_id = ?", (room_id,))
-        c.execute("DELETE FROM rooms WHERE id = ?", (room_id,))
-        conn.commit()
-        conn.close()
 
-        await room_hub.broadcast_to_room(code, "ROOM_CLOSED", {"reason": "All players departed."})
-        return {
-            "success": True,
-            "remaining_participants": 0,
-            "room_deleted": True
-        }
+    if len(remaining) == 0:
+        if room.get("status") == "LOBBY":
+            # Unstarted lobby with no players: clean up the empty lobby
+            c.execute("DELETE FROM room_participants WHERE room_id = ?", (room_id,))
+            c.execute("DELETE FROM rooms WHERE id = ?", (room_id,))
+            conn.commit()
+            conn.close()
+            await room_hub.broadcast_to_room(code, "ROOM_CLOSED", {"reason": "All players departed."})
+            return {
+                "success": True,
+                "remaining_participants": 0,
+                "room_deleted": True
+            }
+        else:
+            # Test or duel had commenced: Mark COMPLETED so candidate scorecards and test archives are NEVER lost!
+            c.execute("UPDATE rooms SET status = 'COMPLETED', completed_at = COALESCE(completed_at, ?) WHERE id = ?",
+                      (datetime.datetime.utcnow().isoformat(), room_id))
+            conn.commit()
+            conn.close()
+            return {
+                "success": True,
+                "remaining_participants": 0,
+                "room_completed": True
+            }
 
     new_host_id = room["host_id"]
     host_changed = False

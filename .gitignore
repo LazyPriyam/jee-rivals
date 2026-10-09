@@ -28,3 +28,4 @@ Thumbs.db
 # Local test databases
 backend/storage/jee.db
 backend/storage/jee_rivals.db
+backend/storage/backups/*.db

@@ -6,6 +6,15 @@ import { sound } from '../utils/sound';
 import ReportQuestionModal from './ReportQuestionModal';
 import { Clock, AlertTriangle, FileText, X, Image as ImageIcon, CheckCircle, ChevronLeft, ChevronRight, User, Flag, BookOpen } from 'lucide-react';
 import { normalizeQuestionsWithComprehensions, buildComprehensionGroupMap } from '../utils/comprehension';
+import {
+  setActiveTestRoom,
+  clearActiveTestRoom,
+  getMockTestDraftProgress,
+  setMockTestDraftProgress,
+  clearMockTestDraftProgress,
+  getReportedQuestions,
+  addReportedQuestion
+} from '../utils/storageGuardian';
 
   const sortQuestionsBySubject = (raw) => {
     if (!raw || raw.length === 0) return [];
@@ -23,15 +32,7 @@ import { normalizeQuestionsWithComprehensions, buildComprehensionGroupMap } from
   };
 
 export default function MockTestView({ room, user, onMatchComplete, onExitToDashboard }) {
-  const storageKey = `jee_mock_test_progress_${user?.id || 'guest'}_${room.code}`;
-  const getSavedProgress = () => {
-    try {
-      const raw = localStorage.getItem(storageKey) || localStorage.getItem(`jee_mock_test_progress_${room.code}`);
-      if (raw) return JSON.parse(raw);
-    } catch (_) {}
-    return null;
-  };
-  const savedProgress = getSavedProgress();
+  const savedProgress = getMockTestDraftProgress(user?.id, room.code);
 
   const [questions, setQuestions] = useState(() => sortQuestionsBySubject(room.all_questions || []));
   const [currentIndex, setCurrentIndex] = useState(() => savedProgress?.currentIndex ?? 0);
@@ -43,24 +44,14 @@ export default function MockTestView({ room, user, onMatchComplete, onExitToDash
   const [exitWarningModalOpen, setExitWarningModalOpen] = useState(false);
   const [questionPaperModalOpen, setQuestionPaperModalOpen] = useState(false);
   const [reportModalOpen, setReportModalOpen] = useState(false);
-  const reportedStorageKey = `jee_reported_in_test_${user?.id || 'guest'}_${room.code}`;
-  const [reportedQuestions, setReportedQuestions] = useState(() => {
-    try {
-      const raw = localStorage.getItem(`jee_reported_in_test_${user?.id || 'guest'}_${room.code}`);
-      return raw ? new Set(JSON.parse(raw)) : new Set();
-    } catch (_) {
-      return new Set();
-    }
-  });
+  const [reportedQuestions, setReportedQuestions] = useState(() => getReportedQuestions(user?.id, room.code));
 
   const handleReportSuccess = ({ questionId }) => {
     if (!questionId) return;
+    addReportedQuestion(user?.id, room.code, questionId);
     setReportedQuestions((prev) => {
       const next = new Set(prev);
       next.add(questionId);
-      try {
-        localStorage.setItem(reportedStorageKey, JSON.stringify(Array.from(next)));
-      } catch (_) {}
       return next;
     });
   };
@@ -128,21 +119,19 @@ export default function MockTestView({ room, user, onMatchComplete, onExitToDash
     return () => window.removeEventListener('popstate', handlePopState);
   }, []);
 
-  // Save active room code and question progress to localStorage
+  // Save active room code and question progress to isolated storage
   useEffect(() => {
-    try {
-      localStorage.setItem('jee_active_test_room', room.code);
-      localStorage.setItem(storageKey, JSON.stringify({
-        currentIndex,
-        answers,
-        reviewMarks,
-        visited,
-        deadline: deadlineRef.current,
-        timeRemaining,
-        timestamp: Date.now()
-      }));
-    } catch (_) {}
-  }, [currentIndex, answers, reviewMarks, visited, timeRemaining, room.code]);
+    setActiveTestRoom(user?.id, room.code);
+    setMockTestDraftProgress(user?.id, room.code, {
+      currentIndex,
+      answers,
+      reviewMarks,
+      visited,
+      deadline: deadlineRef.current,
+      timeRemaining,
+      timestamp: Date.now()
+    });
+  }, [currentIndex, answers, reviewMarks, visited, timeRemaining, room.code, user?.id]);
 
   // Load questions if not loaded
   useEffect(() => {
@@ -318,11 +307,8 @@ export default function MockTestView({ room, user, onMatchComplete, onExitToDash
     setSubmitModalOpen(false);
     setExitWarningModalOpen(false);
 
-    try {
-      localStorage.removeItem(storageKey);
-      localStorage.removeItem(`jee_mock_test_progress_${room.code}`);
-      localStorage.removeItem('jee_active_test_room');
-    } catch (_) {}
+    clearMockTestDraftProgress(user?.id, room.code);
+    clearActiveTestRoom(user?.id);
 
     const totalTime = Math.round((Date.now() - startTimeRef.current) / 1000);
     try {

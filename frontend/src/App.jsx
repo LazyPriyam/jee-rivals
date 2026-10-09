@@ -32,6 +32,7 @@ import {
   getSavedAccounts,
   purgeUserSessionArtifacts
 } from './utils/api';
+import { setActiveTestRoom, clearActiveTestRoom } from './utils/storageGuardian';
 
 export default function App() {
   const [user, setUser] = useState(() => {
@@ -66,9 +67,7 @@ export default function App() {
         return res.active_room;
       } else {
         setActiveMatch(null);
-        try {
-          localStorage.removeItem('jee_active_test_room');
-        } catch (_) {}
+        clearActiveTestRoom(user?.id);
       }
     } catch (_) {}
     return null;
@@ -276,9 +275,7 @@ export default function App() {
     setCurrentRoom(room);
     setActiveTab('arena');
     if (room?.status === 'IN_PROGRESS') {
-      try {
-        localStorage.setItem('jee_active_test_room', room.code);
-      } catch (_) {}
+      setActiveTestRoom(user?.id, room.code);
       setRoomViewMode('battle');
     } else {
       setRoomViewMode('lobby');
@@ -308,9 +305,7 @@ export default function App() {
     setActiveTab('arena');
     if (room.status === 'IN_PROGRESS') {
       setActiveMatch(room);
-      try {
-        localStorage.setItem('jee_active_test_room', room.code);
-      } catch (_) {}
+      setActiveTestRoom(user?.id, room.code);
       const myPart = room.participants?.find((p) => String(p.user_id) === String(user?.id) || p.username === user?.username);
       if (myPart?.is_finished) {
         setRoomViewMode('waiting');
@@ -348,9 +343,7 @@ export default function App() {
   const handleResumeMatch = (room) => {
     setCurrentRoom(room);
     setActiveMatch(room);
-    try {
-      localStorage.setItem('jee_active_test_room', room.code);
-    } catch (_) {}
+    setActiveTestRoom(user?.id, room.code);
     const myPart = room.participants?.find((p) => p.user_id === user?.id);
     if (myPart?.is_finished) {
       setRoomViewMode('waiting');
@@ -367,9 +360,7 @@ export default function App() {
     setActiveMatch(null);
     setCurrentRoom(null);
     setRoomViewMode(null);
-    try {
-      localStorage.removeItem('jee_active_test_room');
-    } catch (_) {}
+    clearActiveTestRoom(user?.id);
     refreshUser();
   };
 

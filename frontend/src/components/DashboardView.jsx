@@ -5,6 +5,7 @@ import { sound } from '../utils/sound';
 import OngoingMatchCard from './OngoingMatchCard';
 import DivisionGuideModal from './DivisionGuideModal';
 import StreakModal from './StreakModal';
+import { clearActiveTestRoom } from '../utils/storageGuardian';
 
 export default function DashboardView({
   user,
@@ -79,9 +80,7 @@ export default function DashboardView({
     try {
       await api.rooms.forfeit(code);
       setCurrentActiveMatch(null);
-      try {
-        localStorage.removeItem('jee_active_test_room');
-      } catch (_) {}
+      clearActiveTestRoom(user?.id);
       if (onForfeitMatch) onForfeitMatch(code);
     } catch (err) {
       console.error('Error forfeiting match:', err);

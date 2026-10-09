@@ -3,6 +3,10 @@ import { createRoot } from 'react-dom/client'
 import './index.css'
 import 'katex/dist/katex.min.css'
 import App from './App.jsx'
+import { initStorageGuardian } from './utils/storageGuardian'
+
+// Initialize storage guardian & migration safety on app boot
+initStorageGuardian()
 
 createRoot(document.getElementById('root')).render(
   <StrictMode>
