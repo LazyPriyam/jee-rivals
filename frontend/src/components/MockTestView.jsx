@@ -23,10 +23,10 @@ import { normalizeQuestionsWithComprehensions, buildComprehensionGroupMap } from
   };
 
 export default function MockTestView({ room, user, onMatchComplete, onExitToDashboard }) {
-  const storageKey = `jee_mock_test_progress_${room.code}`;
+  const storageKey = `jee_mock_test_progress_${user?.id || 'guest'}_${room.code}`;
   const getSavedProgress = () => {
     try {
-      const raw = localStorage.getItem(storageKey);
+      const raw = localStorage.getItem(storageKey) || localStorage.getItem(`jee_mock_test_progress_${room.code}`);
       if (raw) return JSON.parse(raw);
     } catch (_) {}
     return null;
@@ -299,6 +299,7 @@ export default function MockTestView({ room, user, onMatchComplete, onExitToDash
 
     try {
       localStorage.removeItem(storageKey);
+      localStorage.removeItem(`jee_mock_test_progress_${room.code}`);
       localStorage.removeItem('jee_active_test_room');
     } catch (_) {}
 

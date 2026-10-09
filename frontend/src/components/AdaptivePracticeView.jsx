@@ -72,15 +72,20 @@ export default function AdaptivePracticeView({ user, onOpenAuth, onNavigateTab, 
   const [targetExam, setTargetExam] = useState('MIXED');
 
   // Learnt Chapters Scope
+  const storageLearntKey = user?.id ? `jee_user_learnt_chapters_${user.id}` : null;
+  const storageSessionKey = user?.id ? `jee_active_adaptive_session_${user.id}` : null;
+
   const [learntChapters, setLearntChapters] = useState(() => {
     try {
       if (user?.learnt_chapters && Array.isArray(user.learnt_chapters) && user.learnt_chapters.length > 0) {
         return user.learnt_chapters;
       }
-      const raw = localStorage.getItem('jee_user_learnt_chapters');
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        if (Array.isArray(parsed)) return parsed;
+      if (storageLearntKey) {
+        const raw = localStorage.getItem(storageLearntKey);
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed)) return parsed;
+        }
       }
     } catch (_) {}
     return [];
@@ -88,9 +93,11 @@ export default function AdaptivePracticeView({ user, onOpenAuth, onNavigateTab, 
 
   const [syllabusScope, setSyllabusScope] = useState(() => {
     try {
-      const raw = localStorage.getItem('jee_user_learnt_chapters');
-      const parsed = raw ? JSON.parse(raw) : [];
-      if (parsed.length > 0) return 'LEARNT_ONLY';
+      if (storageLearntKey) {
+        const raw = localStorage.getItem(storageLearntKey);
+        const parsed = raw ? JSON.parse(raw) : [];
+        if (parsed.length > 0) return 'LEARNT_ONLY';
+      }
     } catch (_) {}
     return 'FULL_SYLLABUS';
   });
@@ -101,35 +108,99 @@ export default function AdaptivePracticeView({ user, onOpenAuth, onNavigateTab, 
       if (user.learnt_chapters.length > 0) {
         setSyllabusScope('LEARNT_ONLY');
       }
+      if (storageLearntKey) {
+        try {
+          localStorage.setItem(storageLearntKey, JSON.stringify(user.learnt_chapters));
+        } catch (_) {}
+      }
+    } else if (!user) {
+      setLearntChapters([]);
     }
-  }, [user?.id, JSON.stringify(user?.learnt_chapters || [])]);
+  }, [user?.id, storageLearntKey, JSON.stringify(user?.learnt_chapters || [])]);
 
   const [exitModalOpen, setExitModalOpen] = useState(false);
+  const [sessionLoading, setSessionLoading] = useState(false);
   const timerRef = useRef(null);
 
-  // Restore active adaptive session from localStorage upon refresh
+  // Authoritative server-side active session check on mount and account change
   useEffect(() => {
-    try {
-      const raw = localStorage.getItem('jee_active_adaptive_session');
-      if (raw) {
-        const saved = JSON.parse(raw);
-        if (saved?.session && saved?.question) {
-          setSession(saved.session);
-          setQuestion(saved.question);
-          setSubmitted(saved.submitted || false);
-          setResult(saved.result || null);
-          setSelectedAnswer(saved.selectedAnswer || '');
-          setTimeSpentSeconds(saved.timeSpentSeconds || 0);
-        }
-      }
-    } catch (_) {}
-  }, []);
+    // If logged out, immediately purge in-memory session states
+    if (!user?.id) {
+      setSession(null);
+      setQuestion(null);
+      setSubmitted(false);
+      setResult(null);
+      setSelectedAnswer('');
+      setTimeSpentSeconds(0);
+      setSummary(null);
+      setActionError('');
+      return;
+    }
 
-  // Persist active adaptive session to localStorage
+    let isMounted = true;
+    setSessionLoading(true);
+
+    api.adaptive
+      .getActive()
+      .then((res) => {
+        if (!isMounted) return;
+        if (res?.active && res?.session && res?.question) {
+          setSession(res.session);
+          setQuestion(res.question);
+          setActionError('');
+
+          // Restore draft answer or time spent from user-scoped localStorage if matching this session
+          if (storageSessionKey) {
+            try {
+              const raw = localStorage.getItem(storageSessionKey);
+              if (raw) {
+                const saved = JSON.parse(raw);
+                if (saved?.session?.session_id === res.session.session_id && saved?.userId === user.id) {
+                  setSubmitted(saved.submitted || false);
+                  setResult(saved.result || null);
+                  setSelectedAnswer(saved.selectedAnswer || '');
+                  setTimeSpentSeconds(saved.timeSpentSeconds || 0);
+                }
+              }
+            } catch (_) {}
+          }
+        } else {
+          // Server says no active practice session for this user
+          setSession(null);
+          setQuestion(null);
+          setSubmitted(false);
+          setResult(null);
+          setSelectedAnswer('');
+          setTimeSpentSeconds(0);
+          if (storageSessionKey) {
+            try { localStorage.removeItem(storageSessionKey); } catch (_) {}
+          }
+          try { localStorage.removeItem('jee_active_adaptive_session'); } catch (_) {}
+        }
+      })
+      .catch((err) => {
+        if (!isMounted) return;
+        if (err?.status === 401 || err?.status === 403) {
+          setSession(null);
+          setQuestion(null);
+        }
+      })
+      .finally(() => {
+        if (isMounted) setSessionLoading(false);
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [user?.id, storageSessionKey]);
+
+  // Persist active adaptive session to user-scoped localStorage
   useEffect(() => {
+    if (!storageSessionKey || !user?.id) return;
     if (session && !summary) {
       try {
-        localStorage.setItem('jee_active_adaptive_session', JSON.stringify({
+        localStorage.setItem(storageSessionKey, JSON.stringify({
+          userId: user.id,
           session,
           question,
           submitted,
@@ -138,12 +209,15 @@ export default function AdaptivePracticeView({ user, onOpenAuth, onNavigateTab, 
           timeSpentSeconds,
         }));
       } catch (_) {}
-    } else if (summary) {
+    } else if (summary || !session) {
+      try {
+        localStorage.removeItem(storageSessionKey);
+      } catch (_) {}
       try {
         localStorage.removeItem('jee_active_adaptive_session');
       } catch (_) {}
     }
-  }, [session, question, submitted, result, selectedAnswer, timeSpentSeconds, summary]);
+  }, [storageSessionKey, user?.id, session, question, submitted, result, selectedAnswer, timeSpentSeconds, summary]);
 
   // Back button and Refresh protection
   useEffect(() => {
@@ -276,10 +350,54 @@ export default function AdaptivePracticeView({ user, onOpenAuth, onNavigateTab, 
         total_correct: resp.total_correct,
       }));
     } catch (err) {
-      setActionError(err.message || 'Failed to submit answer.');
+      handleSessionError(err, 'Failed to submit answer.');
     } finally {
       setSubmitting(false);
     }
+  };
+
+  const handleSessionError = (err, defaultMsg) => {
+    const msg = err?.message || defaultMsg;
+    if (
+      err?.status === 404 ||
+      err?.status === 400 ||
+      msg.toLowerCase().includes('not found') ||
+      msg.toLowerCase().includes('already completed')
+    ) {
+      // The session no longer exists on the server or belongs to another user
+      setSession(null);
+      setQuestion(null);
+      setResult(null);
+      setSubmitted(false);
+      setSelectedAnswer('');
+      if (storageSessionKey) {
+        try { localStorage.removeItem(storageSessionKey); } catch (_) {}
+      }
+      try { localStorage.removeItem('jee_active_adaptive_session'); } catch (_) {}
+      setActionError('The active practice session was concluded or belongs to another account. You can configure and start a fresh session below.');
+    } else {
+      setActionError(msg);
+    }
+  };
+
+  const handleCancelSession = async () => {
+    if (!session?.session_id) return;
+    if (!window.confirm('Are you sure you want to abandon this practice circuit?')) return;
+    sound.click();
+    setLoading(true);
+    try {
+      await api.adaptive.cancel(session.session_id);
+    } catch (_) {}
+    setSession(null);
+    setQuestion(null);
+    setResult(null);
+    setSubmitted(false);
+    setSelectedAnswer('');
+    if (storageSessionKey) {
+      try { localStorage.removeItem(storageSessionKey); } catch (_) {}
+    }
+    try { localStorage.removeItem('jee_active_adaptive_session'); } catch (_) {}
+    setLoading(false);
   };
 
   const handleNextQuestion = () => {
@@ -309,7 +427,7 @@ export default function AdaptivePracticeView({ user, onOpenAuth, onNavigateTab, 
       setResult(null);
       fetchAdaptiveStats();
     } catch (err) {
-      setActionError(err.message || 'Failed to conclude session.');
+      handleSessionError(err, 'Failed to conclude session.');
     } finally {
       setLoading(false);
     }
@@ -712,10 +830,20 @@ export default function AdaptivePracticeView({ user, onOpenAuth, onNavigateTab, 
                 type="button"
                 onClick={handleFinishSession}
                 className="px-3 py-1.5 rounded-xl border border-white/10 hover:bg-white/5 text-slate-400 hover:text-white text-xs font-mono transition cursor-pointer flex items-center gap-1"
-                title="Conclude Session"
+                title="Conclude Session & View Performance Report"
+              >
+                <Award className="w-3.5 h-3.5 text-amber-400" />
+                <span>Finish</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={handleCancelSession}
+                className="px-3 py-1.5 rounded-xl border border-red-500/20 hover:bg-red-500/10 text-red-400 text-xs font-mono transition cursor-pointer flex items-center gap-1"
+                title="Abandon Circuit"
               >
                 <LogOut className="w-3.5 h-3.5" />
-                <span>Finish</span>
+                <span>Exit</span>
               </button>
             </div>
           </div>
@@ -1219,10 +1347,10 @@ export default function AdaptivePracticeView({ user, onOpenAuth, onNavigateTab, 
                 <strong>Notice:</strong> You can stay in the sprint to continue climbing your chapter Elo, or conclude now to generate your diagnostic performance report.
               </div>
 
-              <div className="flex items-center justify-end gap-3 pt-2">
+              <div className="flex items-center justify-end gap-2 sm:gap-3 pt-2 flex-wrap">
                 <button
                   onClick={() => setExitModalOpen(false)}
-                  className="px-4 py-2.5 rounded-xl bg-orange-500 hover:bg-orange-600 text-white font-bold text-xs shadow cursor-pointer transition"
+                  className="px-3 sm:px-4 py-2 sm:py-2.5 rounded-xl bg-orange-500 hover:bg-orange-600 text-white font-bold text-xs shadow cursor-pointer transition"
                 >
                   Stay in Circuit
                 </button>
@@ -1231,9 +1359,18 @@ export default function AdaptivePracticeView({ user, onOpenAuth, onNavigateTab, 
                     setExitModalOpen(false);
                     handleFinishSession();
                   }}
-                  className="px-4 py-2.5 rounded-xl bg-white/10 hover:bg-red-500 hover:text-white text-slate-300 font-bold text-xs cursor-pointer transition"
+                  className="px-3 sm:px-4 py-2 sm:py-2.5 rounded-xl bg-white/10 hover:bg-amber-600 hover:text-white text-slate-300 font-bold text-xs cursor-pointer transition"
                 >
-                  Conclude & Exit
+                  Conclude & Report
+                </button>
+                <button
+                  onClick={() => {
+                    setExitModalOpen(false);
+                    handleCancelSession();
+                  }}
+                  className="px-3 sm:px-4 py-2 sm:py-2.5 rounded-xl bg-red-500/20 hover:bg-red-500 hover:text-white text-red-300 font-bold text-xs cursor-pointer transition border border-red-500/30"
+                >
+                  Abandon Circuit
                 </button>
               </div>
             </div>

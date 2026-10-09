@@ -55,14 +55,28 @@ export default function NotificationPanel({
   const [loadingConversations, setLoadingConversations] = useState(false);
   const [loading, setLoading] = useState(false);
   const [processingId, setProcessingId] = useState(null);
+  const storageToastKey = user?.id ? `jee_seen_toast_ids_${user.id}` : null;
   const [seenToastIds, setSeenToastIds] = useState(() => {
     try {
-      const raw = localStorage.getItem('jee_seen_toast_ids');
+      const raw = storageToastKey ? localStorage.getItem(storageToastKey) : null;
       return raw ? new Set(JSON.parse(raw)) : new Set();
     } catch (_) {
       return new Set();
     }
   });
+
+  useEffect(() => {
+    if (storageToastKey) {
+      try {
+        const raw = localStorage.getItem(storageToastKey);
+        setSeenToastIds(raw ? new Set(JSON.parse(raw)) : new Set());
+      } catch (_) {
+        setSeenToastIds(new Set());
+      }
+    } else {
+      setSeenToastIds(new Set());
+    }
+  }, [user?.id, storageToastKey]);
 
   useEffect(() => {
     if (user) {
@@ -102,7 +116,9 @@ export default function NotificationPanel({
             setSeenToastIds((prev) => {
               const next = new Set(prev).add(latest.id);
               try {
-                localStorage.setItem('jee_seen_toast_ids', JSON.stringify(Array.from(next)));
+                if (storageToastKey) {
+                  localStorage.setItem(storageToastKey, JSON.stringify(Array.from(next)));
+                }
               } catch (_) {}
               return next;
             });

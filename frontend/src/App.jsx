@@ -29,7 +29,8 @@ import {
   getCachedUser,
   setCachedUser,
   recordSavedAccount,
-  getSavedAccounts
+  getSavedAccounts,
+  purgeUserSessionArtifacts
 } from './utils/api';
 
 export default function App() {
@@ -171,11 +172,13 @@ export default function App() {
   };
 
   const handleLogout = () => {
+    purgeUserSessionArtifacts();
     setToken(null);
     setCachedUser(null);
     setUser(null);
     setCurrentRoom(null);
     setRoomViewMode(null);
+    setActiveMatch(null);
     setActiveTab('arena');
     setVisitedTabs({ arena: true });
     setAuthModalOpen(true);

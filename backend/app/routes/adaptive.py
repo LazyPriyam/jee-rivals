@@ -134,6 +134,9 @@ def start_adaptive_session(req: AdaptiveStartRequest, user: dict = Depends(get_c
 
     allowed_json = json.dumps(effective_allowed) if effective_allowed is not None else None
 
+    # Auto-abandon any previously running in-progress session for this user to enforce 1 active session per user
+    c.execute("UPDATE adaptive_sessions SET status = 'ABANDONED' WHERE user_id = ? AND status = 'IN_PROGRESS'", (user_id,))
+
     c.execute("""
         INSERT INTO adaptive_sessions (
             id, user_id, mode, target_questions, subject, chapter,
@@ -170,6 +173,112 @@ def start_adaptive_session(req: AdaptiveStartRequest, user: dict = Depends(get_c
             "is_remediation": meta.get("is_remediation", False)
         }
     }
+
+
+@router.get("/active")
+def get_active_adaptive_session(user: dict = Depends(get_current_user)):
+    """
+    Returns the user's currently active IN_PROGRESS adaptive practice session and its current question.
+    Provides authoritative server-side session control across devices, logins, and tabs.
+    """
+    conn = get_connection()
+    c = conn.cursor()
+
+    c.execute("""
+        SELECT * FROM adaptive_sessions
+        WHERE user_id = ? AND status = 'IN_PROGRESS'
+        ORDER BY created_at DESC
+        LIMIT 1
+    """, (user["id"],))
+    s_row = c.fetchone()
+    if not s_row:
+        conn.close()
+        return {"active": False}
+
+    sess = dict(s_row)
+    c.execute("SELECT * FROM questions WHERE id = ?", (sess.get("current_question_id"),))
+    q_row = c.fetchone()
+    conn.close()
+
+    if not q_row:
+        return {"active": False}
+
+    q = dict(q_row)
+    q_out = row_to_question_out(q)
+
+    allowed_list = None
+    if sess.get("allowed_chapters"):
+        try:
+            allowed_list = json.loads(sess["allowed_chapters"]) if isinstance(sess["allowed_chapters"], str) else sess["allowed_chapters"]
+        except Exception:
+            pass
+
+    return {
+        "active": True,
+        "session": {
+            "session_id": sess["id"],
+            "mode": sess["mode"],
+            "target_questions": sess.get("target_questions"),
+            "current_index": sess.get("current_index", 1),
+            "current_elo": round(float(sess.get("current_elo", 1500.0)), 1),
+            "initial_elo": round(float(sess.get("initial_elo", 1500.0)), 1),
+            "streak": sess.get("current_streak", 0),
+            "subject": sess.get("subject", "Full Syllabus"),
+            "chapter": sess.get("chapter"),
+            "target_exam": sess.get("target_exam", "MIXED"),
+            "total_correct": sess.get("total_correct", 0),
+            "total_attempted": sess.get("total_attempted", 0),
+            "allowed_chapters": allowed_list
+        },
+        "question": {
+            **q_out.dict(),
+            "target_elo": sess.get("current_elo"),
+            "tier_label": q.get("difficulty_tier") or "JEE_MAIN_STANDARD"
+        }
+    }
+
+
+@router.post("/cancel-active")
+def cancel_active_session(user: dict = Depends(get_current_user)):
+    """Cancels any running IN_PROGRESS adaptive sessions for the current user."""
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute("UPDATE adaptive_sessions SET status = 'ABANDONED' WHERE user_id = ? AND status = 'IN_PROGRESS'", (user["id"],))
+    conn.commit()
+    conn.close()
+    return {"success": True, "message": "Active adaptive practice cancelled."}
+
+
+@router.get("/{session_id}")
+def get_adaptive_session(session_id: str, user: dict = Depends(get_current_user)):
+    """Fetches a specific adaptive session for the user."""
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute("SELECT * FROM adaptive_sessions WHERE id = ? AND user_id = ?", (session_id, user["id"]))
+    s_row = c.fetchone()
+    if not s_row:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Adaptive session not found.")
+    sess = dict(s_row)
+    c.execute("SELECT * FROM questions WHERE id = ?", (sess.get("current_question_id"),))
+    q_row = c.fetchone()
+    conn.close()
+    q_out = row_to_question_out(dict(q_row)) if q_row else None
+    return {
+        "session": sess,
+        "question": q_out.dict() if q_out else None
+    }
+
+
+@router.post("/{session_id}/cancel")
+def cancel_specific_session(session_id: str, user: dict = Depends(get_current_user)):
+    """Cancels/abandons a specific adaptive session for the current user."""
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute("UPDATE adaptive_sessions SET status = 'ABANDONED' WHERE id = ? AND user_id = ?", (session_id, user["id"]))
+    conn.commit()
+    conn.close()
+    return {"success": True, "message": f"Session {session_id} abandoned."}
 
 
 @router.post("/{session_id}/submit")

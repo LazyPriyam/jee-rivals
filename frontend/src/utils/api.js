@@ -48,11 +48,30 @@ export function setToken(token, rememberMe = true) {
         localStorage.setItem("jee_remember_me", "false");
       }
     } else {
-      sessionStorage.removeItem("jee_rivals_token");
-      localStorage.removeItem("jee_rivals_token");
-      sessionStorage.removeItem("jee_rivals_user");
-      localStorage.removeItem("jee_rivals_user");
+      purgeUserSessionArtifacts();
     }
+  } catch (_) {}
+}
+
+export function purgeUserSessionArtifacts() {
+  try {
+    sessionStorage.clear();
+    const toRemove = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (
+        k &&
+        (k.startsWith("jee_active_") ||
+         k.startsWith("jee_mock_test_progress_") ||
+         k.startsWith("jee_user_learnt_chapters") ||
+         k.startsWith("jee_seen_toast_ids") ||
+         k === "jee_rivals_token" ||
+         k === "jee_rivals_user")
+      ) {
+        toRemove.push(k);
+      }
+    }
+    toRemove.forEach((k) => localStorage.removeItem(k));
   } catch (_) {}
 }
 
@@ -458,7 +477,16 @@ export const api = {
         method: 'POST',
       }),
     getStats: () => request('/api/adaptive/stats'),
+    getActive: () => request('/api/adaptive/active'),
     getSession: (sessionId) => request(`/api/adaptive/${sessionId}`),
+    cancel: (sessionId) =>
+      request(`/api/adaptive/${sessionId}/cancel`, {
+        method: 'POST',
+      }),
+    cancelActive: () =>
+      request('/api/adaptive/cancel-active', {
+        method: 'POST',
+      }),
   },
   updates: {
     getAll: () => request('/api/updates'),

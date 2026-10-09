@@ -223,15 +223,18 @@ export default function SphereGridSkillTree({
   }, []);
 
   // Learnt / Active Chapters state
+  const storageLearntKey = currentUser?.id ? `jee_user_learnt_chapters_${currentUser.id}` : null;
   const [learntChapters, setLearntChapters] = useState(() => {
     try {
       if (currentUser?.learnt_chapters && Array.isArray(currentUser.learnt_chapters) && currentUser.learnt_chapters.length > 0) {
         return new Set(currentUser.learnt_chapters);
       }
-      const raw = localStorage.getItem('jee_user_learnt_chapters');
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        if (Array.isArray(parsed)) return new Set(parsed);
+      if (storageLearntKey) {
+        const raw = localStorage.getItem(storageLearntKey);
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed)) return new Set(parsed);
+        }
       }
     } catch (_) {}
     return new Set();
@@ -241,18 +244,24 @@ export default function SphereGridSkillTree({
   useEffect(() => {
     if (currentUser?.learnt_chapters && Array.isArray(currentUser.learnt_chapters)) {
       setLearntChapters(new Set(currentUser.learnt_chapters));
-      try {
-        localStorage.setItem('jee_user_learnt_chapters', JSON.stringify(currentUser.learnt_chapters));
-      } catch (_) {}
+      if (storageLearntKey) {
+        try {
+          localStorage.setItem(storageLearntKey, JSON.stringify(currentUser.learnt_chapters));
+        } catch (_) {}
+      }
+    } else if (!currentUser) {
+      setLearntChapters(new Set());
     }
-  }, [currentUser?.id, JSON.stringify(currentUser?.learnt_chapters || [])]);
+  }, [currentUser?.id, storageLearntKey, JSON.stringify(currentUser?.learnt_chapters || [])]);
 
   // Persist learnt chapters to backend and localStorage
   const saveLearntChapters = async (newSet) => {
     const arr = Array.from(newSet);
-    try {
-      localStorage.setItem('jee_user_learnt_chapters', JSON.stringify(arr));
-    } catch (_) {}
+    if (storageLearntKey) {
+      try {
+        localStorage.setItem(storageLearntKey, JSON.stringify(arr));
+      } catch (_) {}
+    }
 
     if (currentUser) {
       setSavingLearnt(true);
