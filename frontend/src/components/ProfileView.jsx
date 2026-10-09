@@ -6,7 +6,8 @@ import {
   User, Trophy, Shield, Activity, Target, Zap, Clock, CheckCircle2,
   XCircle, ArrowLeft, RefreshCw, Flame, Edit3, BookOpen, Award,
   Swords, TrendingUp, Sparkles, Calendar, GraduationCap, Pin, PinOff,
-  ChevronRight, Lock, Check, Layers, BarChart2, Star, Send
+  ChevronRight, Lock, Check, Layers, BarChart2, Star, Send,
+  Share2, Eye, FileText, Search
 } from 'lucide-react';
 
 const DIVISION_COLORS = {
@@ -133,13 +134,17 @@ export default function ProfileView({
   onNavigateTab,
   onUpdateUser,
   onStartPreset,
+  onSelectTest,
+  onViewProfile,
   isActive
 }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [activeSubTab, setActiveSubTab] = useState('overview'); // 'overview', 'skills', 'trophies', 'matches'
+  const [activeSubTab, setActiveSubTab] = useState('overview'); // 'overview', 'skills', 'trophies', 'tests', 'matches'
   const [selectedSubject, setSelectedSubject] = useState('All');
   const [selectedAchFilter, setSelectedAchFilter] = useState('ALL');
+  const [inspectorInput, setInspectorInput] = useState('');
+  const [copiedLink, setCopiedLink] = useState(false);
   const [editModalOpen, setEditModalOpen] = useState(false);
   const [editForm, setEditForm] = useState({
     target_college: '',
@@ -284,15 +289,90 @@ export default function ProfileView({
 
   return (
     <div className="max-w-6xl mx-auto px-4 py-8 page-transition pb-24">
-      {onBack && (
-        <button
-          onClick={onBack}
-          className="mb-6 inline-flex items-center gap-2 text-sm text-slate-400 hover:text-white transition cursor-pointer bg-[#1e222d] px-3.5 py-1.5 rounded-xl border border-white/10"
-        >
-          <ArrowLeft className="w-4 h-4 text-orange-400" />
-          <span>Back to Arena</span>
-        </button>
-      )}
+      {/* Public Dossier Inspector Bar & Browser Search Control */}
+      <div className="mb-6 flex flex-col md:flex-row items-stretch md:items-center justify-between gap-4 bg-[#1a1f2e] border border-orange-500/30 p-4 rounded-2xl shadow-lg">
+        <div className="flex items-center gap-3">
+          {onBack ? (
+            <button
+              onClick={onBack}
+              className="inline-flex items-center gap-2 text-xs font-bold text-white hover:text-orange-400 bg-orange-500/20 hover:bg-orange-500/30 border border-orange-500/40 px-3.5 py-2 rounded-xl transition cursor-pointer shrink-0"
+            >
+              <ArrowLeft className="w-3.5 h-3.5 text-orange-400" />
+              <span>{isOwnProfile ? 'Back' : 'Back to My Profile'}</span>
+            </button>
+          ) : null}
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-black uppercase font-mono text-orange-400 flex items-center gap-1.5">
+                <Eye className="w-3.5 h-3.5" />
+                <span>{isOwnProfile ? 'Your Aspirant Dossier' : `Inspecting Candidate: @${p.username}`}</span>
+              </span>
+            </div>
+            <p className="text-[11px] text-slate-400">
+              {isOwnProfile
+                ? 'Your verified examination dossier, skill radar, test histories, and trophies.'
+                : `Viewing public statistics, examination papers, skill tree, and battle logs for ${p.username}.`}
+            </p>
+          </div>
+        </div>
+
+        {/* Browser Inspector & Quick Share Tool */}
+        <div className="flex items-center gap-2 self-end md:self-auto w-full md:w-auto">
+          {/* In-Browser Profile Search Input */}
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (inspectorInput.trim() && onViewProfile) {
+                onViewProfile(inspectorInput.trim());
+                setInspectorInput('');
+              }
+            }}
+            className="relative flex-1 md:w-56"
+          >
+            <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+            <input
+              type="text"
+              value={inspectorInput}
+              onChange={(e) => setInspectorInput(e.target.value)}
+              placeholder="Search candidate username..."
+              className="w-full pl-8 pr-14 py-1.5 bg-[#121622] border border-white/10 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-orange-500 font-mono"
+            />
+            <button
+              type="submit"
+              disabled={!inspectorInput.trim()}
+              className="absolute right-1.5 top-1/2 -translate-y-1/2 px-2 py-0.5 rounded-lg bg-orange-500 hover:bg-orange-600 disabled:opacity-30 text-[10px] font-bold text-white transition cursor-pointer"
+            >
+              Inspect
+            </button>
+          </form>
+
+          {/* Copy Profile Link Button */}
+          <button
+            onClick={() => {
+              try {
+                const url = `${window.location.origin}${window.location.pathname}?profile=${encodeURIComponent(p.username)}`;
+                navigator.clipboard.writeText(url);
+                setCopiedLink(true);
+                setTimeout(() => setCopiedLink(false), 2500);
+              } catch (_) {}
+            }}
+            title="Copy shareable browser link to this profile"
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-xs font-bold text-slate-300 hover:text-white transition cursor-pointer shrink-0"
+          >
+            {copiedLink ? (
+              <>
+                <Check className="w-3.5 h-3.5 text-emerald-400" />
+                <span className="text-emerald-400">Copied!</span>
+              </>
+            ) : (
+              <>
+                <Share2 className="w-3.5 h-3.5 text-orange-400" />
+                <span>Share URL</span>
+              </>
+            )}
+          </button>
+        </div>
+      </div>
 
       {/* =========================================================================
           HERO ASPIRANT PASSPORT BANNER (THEMEABLE & CUSTOMIZABLE)
@@ -477,7 +557,7 @@ export default function ProfileView({
       </div>
 
       {/* =========================================================================
-          DOSSIER 4-TAB NAVIGATION BAR
+          DOSSIER 5-TAB NAVIGATION BAR
           ========================================================================= */}
       <div className="flex items-center gap-2 border-b border-white/10 mb-8 overflow-x-auto pb-1 scrollbar-none">
         <button
@@ -503,7 +583,7 @@ export default function ProfileView({
           <BookOpen className="w-4 h-4" />
           <span>Syllabus Skill Tree</span>
           <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-black/40 border border-white/20">
-            {data.skill_tree?.total_mastered || 0}/{data.skill_tree?.total_chapters || 59}
+            {data.skill_tree?.total_mastered || 0}/{data.skill_tree?.total_chapters || p.total_syllabus_chapters || 92}
           </span>
         </button>
 
@@ -519,6 +599,21 @@ export default function ProfileView({
           <span>Trophies & Badges</span>
           <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-black/40 border border-white/20">
             {(data.achievements || []).filter((a) => a.is_unlocked).length}/{(data.achievements || []).length}
+          </span>
+        </button>
+
+        <button
+          onClick={() => setActiveSubTab('tests')}
+          className={`flex items-center gap-2 px-5 py-3 rounded-2xl text-sm font-bold transition whitespace-nowrap cursor-pointer ${
+            activeSubTab === 'tests'
+              ? 'bg-orange-500 text-white shadow-lg shadow-orange-500/20'
+              : 'text-slate-400 hover:text-white hover:bg-white/5'
+          }`}
+        >
+          <FileText className="w-4 h-4" />
+          <span>Mock Tests & Papers</span>
+          <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-black/40 border border-white/20">
+            {(data.test_history || []).length}
           </span>
         </button>
 
@@ -1112,11 +1207,13 @@ export default function ProfileView({
           <SphereGridSkillTree
             skillTreeData={data.skill_tree?.tree || {}}
             totalMastered={data.skill_tree?.total_mastered || 0}
-            totalChapters={data.skill_tree?.total_chapters || 59}
+            totalChapters={data.skill_tree?.total_chapters || p.total_syllabus_chapters || 92}
             masteryPercentage={data.skill_tree?.mastery_percentage || 0}
             onNavigateTab={onNavigateTab}
             onStartPreset={onStartPreset}
             currentUser={currentUser}
+            profileUser={p}
+            isOwnProfile={isOwnProfile}
           />
         </div>
       )}
@@ -1234,7 +1331,153 @@ export default function ProfileView({
       )}
 
       {/* =========================================================================
-          TAB 4: BATTLE LOG & MATCH HISTORY (CHESS.COM STYLE)
+          TAB 4: MOCK EXAMINATION PAPERS & TEST ARCHIVES (SCORECARDS)
+          ========================================================================= */}
+      {activeSubTab === 'tests' && (
+        <div className="space-y-6 animate-fadeIn">
+          {/* Header Banner */}
+          <div className="bg-[#161a24] border border-white/10 rounded-3xl p-6 shadow-xl flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div>
+              <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                <FileText className="w-5 h-5 text-orange-400" />
+                <span>{isOwnProfile ? 'Your Completed Mock Examination Papers' : `${p.username}'s Mock Papers & Test History`}</span>
+              </h3>
+              <p className="text-xs text-slate-400 mt-1">
+                Full chronological archive of timed JEE NTA papers, custom blueprint tests, and diagnostic scorecards.
+              </p>
+            </div>
+
+            {/* Quick Metrics */}
+            <div className="flex items-center gap-3">
+              <div className="bg-[#11141d] border border-white/10 px-4 py-2.5 rounded-2xl text-center">
+                <span className="text-[10px] font-mono uppercase text-slate-400 block">Total Papers</span>
+                <span className="text-base font-black font-mono text-orange-400">{(data.test_history || []).length}</span>
+              </div>
+              <div className="bg-[#11141d] border border-white/10 px-4 py-2.5 rounded-2xl text-center">
+                <span className="text-[10px] font-mono uppercase text-slate-400 block">Avg Accuracy</span>
+                <span className="text-base font-black font-mono text-emerald-400">
+                  {((data.test_history || []).length > 0
+                    ? Math.round((data.test_history || []).reduce((acc, t) => acc + (t.accuracy || 0), 0) / (data.test_history || []).length)
+                    : 0)}%
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {/* Tests List */}
+          {(data.test_history || []).length > 0 ? (
+            <div className="space-y-3.5">
+              {(data.test_history || []).map((t, idx) => {
+                const marksPct = t.marks_percentage || 0;
+                const scoreColor = marksPct >= 60 ? 'text-emerald-400' : marksPct >= 35 ? 'text-amber-400' : 'text-orange-400';
+                const formattedDate = (t.completed_at || t.created_at || '').slice(0, 10);
+
+                return (
+                  <div
+                    key={t.room_id || t.code || idx}
+                    className="bg-[#161a24] border border-white/10 rounded-2xl p-5 hover:border-white/20 transition-all shadow-md flex flex-col md:flex-row items-stretch md:items-center justify-between gap-5"
+                  >
+                    {/* Left: Test Details & Badges */}
+                    <div className="space-y-1.5 flex-1 min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="text-[10px] font-mono font-bold px-2.5 py-0.5 rounded-lg bg-orange-500/15 text-orange-400 border border-orange-500/30">
+                          {t.target_exam === 'MAIN' ? 'JEE Main (NTA)' : t.target_exam === 'ADVANCED' ? 'JEE Advanced' : t.target_exam || 'JEE Main'}
+                        </span>
+                        <span className="text-[10px] font-mono px-2 py-0.5 rounded-lg bg-white/5 text-slate-300 border border-white/10">
+                          {t.mode === 'MOCK_TEST' ? 'Full Mock Exam' : 'Custom Blueprint'}
+                        </span>
+                        <span className="text-[10px] font-mono text-slate-500 flex items-center gap-1">
+                          <Calendar className="w-3 h-3" />
+                          <span>{formattedDate}</span>
+                        </span>
+                      </div>
+
+                      <h4 className="text-sm sm:text-base font-bold text-white truncate">
+                        {t.preset_name || `Test Paper #${t.code}`}
+                      </h4>
+
+                      <div className="flex flex-wrap items-center gap-3 text-xs text-slate-400 font-mono">
+                        <span>{t.total_questions} Questions</span>
+                        <span>•</span>
+                        <span>{t.duration_minutes || 180} Mins</span>
+                        <span>•</span>
+                        <span className="text-emerald-400 font-bold">{t.correct_count} Correct</span>
+                        <span className="text-red-400 font-bold">{t.incorrect_count} Incorrect</span>
+                        <span className="text-slate-400">{t.unattempted_count} Skipped</span>
+                      </div>
+                    </div>
+
+                    {/* Middle: Marks & Accuracy Metrics */}
+                    <div className="flex items-center gap-5 border-t md:border-t-0 md:border-l border-white/10 pt-3 md:pt-0 md:pl-5 shrink-0">
+                      <div className="text-center md:text-right">
+                        <span className="text-[10px] font-mono uppercase text-slate-400 block">Marks Scored</span>
+                        <span className={`text-lg font-black font-mono ${scoreColor}`}>
+                          {t.marks} <span className="text-xs text-slate-500">/ {t.max_marks}</span>
+                        </span>
+                        <span className="text-[10px] text-slate-400 font-mono block">
+                          ({marksPct}%)
+                        </span>
+                      </div>
+
+                      <div className="text-center md:text-right">
+                        <span className="text-[10px] font-mono uppercase text-slate-400 block">Accuracy</span>
+                        <span className="text-lg font-black font-mono text-white">
+                          {t.accuracy}%
+                        </span>
+                        <span className="text-[10px] text-slate-400 font-mono block">
+                          {t.total_attempted} attempted
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Right: Review Paper CTA */}
+                    <div className="shrink-0 flex items-center justify-end">
+                      <button
+                        onClick={() => {
+                          if (onSelectTest) {
+                            onSelectTest(t.code, p.username);
+                          } else if (onNavigateTab) {
+                            onNavigateTab('history');
+                          }
+                        }}
+                        className="w-full md:w-auto px-4 py-2.5 rounded-xl bg-orange-500 hover:bg-orange-600 text-white font-bold text-xs shadow-md shadow-orange-500/20 transition cursor-pointer flex items-center justify-center gap-1.5"
+                      >
+                        <span>Review Paper & Analysis</span>
+                        <ChevronRight className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="bg-[#161a24] border border-white/10 rounded-3xl p-12 text-center">
+              <FileText className="w-12 h-12 text-slate-400 mx-auto mb-3" />
+              <h4 className="text-base font-bold text-white mb-1">
+                {isOwnProfile ? 'No Mock Examination Papers Recorded Yet' : `No Completed Tests Found for @${p.username}`}
+              </h4>
+              <p className="text-xs text-slate-400 max-w-sm mx-auto mb-5">
+                {isOwnProfile
+                  ? 'Attempt an official NTA Mock Test or create a custom Blueprint paper to start building your test history.'
+                  : `${p.username} has not completed any full mock examination papers yet.`}
+              </p>
+              {isOwnProfile && (
+                <button
+                  onClick={() => {
+                    if (onNavigateTab) onNavigateTab('mocks');
+                  }}
+                  className="px-5 py-2.5 rounded-2xl bg-orange-500 hover:bg-orange-600 text-white font-bold text-xs shadow-lg shadow-orange-500/20 transition cursor-pointer"
+                >
+                  Enter Mock Examination Center
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* =========================================================================
+          TAB 5: BATTLE LOG & MATCH HISTORY (CHESS.COM STYLE)
           ========================================================================= */}
       {activeSubTab === 'matches' && (
         <div className="space-y-4 animate-fadeIn">
@@ -1280,26 +1523,36 @@ export default function ProfileView({
                     {/* Middle: Opponent Card & Score Showdown */}
                     <div className="flex items-center justify-center gap-4 flex-1 w-full sm:w-auto">
                       <div className="text-center sm:text-right">
-                        <span className="text-[10px] uppercase font-bold text-slate-400 block">Your Score</span>
+                        <span className="text-[10px] uppercase font-bold text-slate-400 block">
+                          {isOwnProfile ? 'Your Score' : `${p.username}'s Score`}
+                        </span>
                         <span className="text-base font-black font-mono text-white">{m.my_score} pts</span>
                       </div>
 
                       <span className="text-xs font-black text-slate-400">VS</span>
 
                       {/* Opponent Identity */}
-                      <div className="flex items-center gap-2.5">
-                        <div className="w-9 h-9 rounded-xl bg-[#10141f] border border-white/15 flex items-center justify-center text-lg shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (m.opponent?.username && onViewProfile && m.opponent?.username !== 'Practice Arena Bot') {
+                            onViewProfile(m.opponent.username);
+                          }
+                        }}
+                        className="flex items-center gap-2.5 text-left hover:opacity-80 transition cursor-pointer group"
+                      >
+                        <div className="w-9 h-9 rounded-xl bg-[#10141f] border border-white/15 flex items-center justify-center text-lg shrink-0 group-hover:border-orange-500/50">
                           {AVATAR_MAP[m.opponent?.avatar_id] || '🤖'}
                         </div>
                         <div className="text-left">
-                          <span className="text-xs font-bold text-white block truncate max-w-[140px]">
+                          <span className="text-xs font-bold text-white block truncate max-w-[140px] group-hover:text-orange-400">
                             {m.opponent?.username || 'Opponent'}
                           </span>
                           <span className="text-[10px] text-slate-400 font-mono block">
                             {Math.round(m.opponent?.elo || 1200)} Elo • {m.opponent?.score || 0} pts
                           </span>
                         </div>
-                      </div>
+                      </button>
                     </div>
 
                     {/* Right: Target Exam Badge & Quick Action */}

@@ -356,6 +356,7 @@ export const api = {
       }),
     results: (code) => request(`/api/rooms/${code}/results`),
     getMyHistory: () => request("/api/rooms/my/history"),
+    getUserHistory: (username) => request(`/api/rooms/user/${encodeURIComponent(username)}/history`),
     getActive: () => request("/api/rooms/user/active"),
     forfeit: (code) =>
       request(`/api/rooms/${code}/forfeit`, {

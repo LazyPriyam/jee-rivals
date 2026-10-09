@@ -4,7 +4,7 @@ import { api } from '../utils/api';
 import MathRenderer from './MathRenderer';
 import { Trophy, Crown, ArrowLeft, RefreshCw, CheckCircle2, XCircle, BookOpen, AlertTriangle, Lightbulb, Image as ImageIcon, Flame } from 'lucide-react';
 
-export default function ResultsView({ roomCode, user, onReturnArena, onRematch }) {
+export default function ResultsView({ roomCode, user, onReturnArena, onRematch, onViewProfile }) {
   const [results, setResults] = useState(null);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('summary'); // 'summary' or 'solutions'
@@ -101,7 +101,11 @@ export default function ResultsView({ roomCode, user, onReturnArena, onRematch }
               <div className="order-2 md:order-1 bg-[#101524] border border-white/10 rounded-2xl p-5 text-center shadow-lg">
                 <span className="text-2xl mb-1 block">🥈</span>
                 <span className="text-xs font-mono font-bold text-slate-400">RANK #2</span>
-                <h3 className="text-base font-bold text-white truncate mt-1">
+                <h3 
+                  onClick={() => onViewProfile && onViewProfile(participants[1].username)}
+                  className="text-base font-bold text-white truncate mt-1 hover:text-orange-400 hover:underline cursor-pointer transition-colors"
+                  title={`View ${participants[1].username}'s profile`}
+                >
                   {participants[1].username}
                 </h3>
                 {results.mode === 'MOCK_TEST' ? (
@@ -131,7 +135,11 @@ export default function ResultsView({ roomCode, user, onReturnArena, onRematch }
               <div className="order-1 md:order-2 bg-gradient-to-b from-[#182136] to-[#101524] border-2 border-orange-500 rounded-3xl p-6 text-center shadow-2xl shadow-orange-950/50 -translate-y-2 glow-orange-subtle">
                 <span className="text-4xl mb-1 block">👑</span>
                 <span className="text-xs font-mono font-bold text-amber-400">CHAMPION #1</span>
-                <h3 className="text-lg font-black text-white truncate mt-1">
+                <h3 
+                  onClick={() => onViewProfile && onViewProfile(winner.username)}
+                  className="text-lg font-black text-white truncate mt-1 hover:text-orange-400 hover:underline cursor-pointer transition-colors"
+                  title={`View ${winner.username}'s profile`}
+                >
                   {winner.username}
                 </h3>
                 {results.mode === 'MOCK_TEST' ? (
@@ -161,7 +169,11 @@ export default function ResultsView({ roomCode, user, onReturnArena, onRematch }
               <div className="order-3 bg-[#101524] border border-white/10 rounded-2xl p-5 text-center shadow-lg">
                 <span className="text-2xl mb-1 block">🥉</span>
                 <span className="text-xs font-mono font-bold text-slate-400">RANK #3</span>
-                <h3 className="text-base font-bold text-white truncate mt-1">
+                <h3 
+                  onClick={() => onViewProfile && onViewProfile(participants[2].username)}
+                  className="text-base font-bold text-white truncate mt-1 hover:text-orange-400 hover:underline cursor-pointer transition-colors"
+                  title={`View ${participants[2].username}'s profile`}
+                >
                   {participants[2].username}
                 </h3>
                 {results.mode === 'MOCK_TEST' ? (
@@ -228,7 +240,13 @@ export default function ResultsView({ roomCode, user, onReturnArena, onRematch }
                         </td>
                         <td className="py-3.5">
                           <div className="flex items-center gap-2">
-                            <span className="font-bold text-white">{p.username}</span>
+                            <span 
+                              onClick={() => onViewProfile && onViewProfile(p.username)}
+                              className="font-bold text-white hover:text-orange-400 hover:underline cursor-pointer transition-colors"
+                              title={`View ${p.username}'s profile`}
+                            >
+                              {p.username}
+                            </span>
                             {isMe && (
                               <span className="text-[10px] px-1.5 py-0.5 bg-orange-950 border border-orange-500/40 text-orange-400 rounded font-bold">
                                 YOU

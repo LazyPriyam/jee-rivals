@@ -46,6 +46,7 @@ export default function App() {
   const [createRoomModalOpen, setCreateRoomModalOpen] = useState(false);
   const [inspectProfileUser, setInspectProfileUser] = useState(null);
   const [inspectTestCode, setInspectTestCode] = useState(null);
+  const [inspectTestUser, setInspectTestUser] = useState(null);
   const [skillTreePayload, setSkillTreePayload] = useState(null);
   const [activeChatFriend, setActiveChatFriend] = useState(null);
   const [chatDrawerOpen, setChatDrawerOpen] = useState(false);
@@ -149,26 +150,113 @@ export default function App() {
     }
   }, []);
 
-  // Handle direct join link from URL query parameters (e.g. ?join=ABC12)
+  // Handle direct link & browser deep link from URL query parameters (e.g. ?profile=username, ?test=CODE, ?join=ABC12, ?tab=...)
   useEffect(() => {
-    if (!user) return;
-    const params = new URLSearchParams(window.location.search);
-    const joinCode = params.get('join') || params.get('room');
-    if (joinCode) {
-      api.rooms.join(joinCode.trim().toUpperCase())
-        .then((room) => {
-          handleEnterRoom(room);
-          window.history.replaceState({}, document.title, window.location.pathname);
-        })
-        .catch(() => {});
-    }
-  }, [user]);
+    const syncFromUrl = () => {
+      const params = new URLSearchParams(window.location.search);
+      const profileParam = params.get('profile') || params.get('user');
+      const testParam = params.get('test') || params.get('exam');
+      const joinCode = params.get('join') || params.get('room');
+      const tabParam = params.get('tab');
+
+      if (profileParam) {
+        setInspectProfileUser(profileParam.trim());
+        switchTab('profile', false);
+      }
+      if (testParam) {
+        setInspectTestCode(testParam.trim().toUpperCase());
+        const candidate = params.get('candidate') || params.get('test_user');
+        if (candidate) setInspectTestUser(candidate.trim());
+        switchTab('history', false);
+      } else if (tabParam && ['arena', 'tournaments', 'mocks', 'history', 'generator', 'invite', 'leaderboards', 'profile', 'settings'].includes(tabParam)) {
+        switchTab(tabParam, false);
+      }
+
+      if (joinCode && user) {
+        api.rooms.join(joinCode.trim().toUpperCase())
+          .then((room) => {
+            handleEnterRoom(room);
+          })
+          .catch(() => {});
+      }
+    };
+
+    syncFromUrl();
+    window.addEventListener('popstate', syncFromUrl);
+    return () => window.removeEventListener('popstate', syncFromUrl);
+  }, [Boolean(user)]);
 
   const [visitedTabs, setVisitedTabs] = useState({ arena: true });
 
-  const switchTab = (tab) => {
+  const switchTab = (tab, updateUrl = true) => {
     setActiveTab(tab);
     setVisitedTabs((prev) => (prev[tab] ? prev : { ...prev, [tab]: true }));
+    if (updateUrl) {
+      try {
+        const url = new URL(window.location.href);
+        url.searchParams.set('tab', tab);
+        if (tab !== 'profile') {
+          url.searchParams.delete('profile');
+          url.searchParams.delete('user');
+        }
+        if (tab !== 'history') {
+          url.searchParams.delete('test');
+          url.searchParams.delete('exam');
+          url.searchParams.delete('candidate');
+        }
+        window.history.pushState({}, '', url.toString());
+      } catch (_) {}
+    }
+  };
+
+  const handleViewProfile = (uname) => {
+    if (!uname) return;
+    const cleanUname = uname.trim();
+    setInspectProfileUser(cleanUname);
+    switchTab('profile', false);
+    try {
+      const url = new URL(window.location.href);
+      url.searchParams.set('tab', 'profile');
+      url.searchParams.set('profile', cleanUname);
+      window.history.pushState({}, '', url.toString());
+    } catch (_) {}
+  };
+
+  const handleBackFromProfile = () => {
+    setInspectProfileUser(null);
+    try {
+      const url = new URL(window.location.href);
+      url.searchParams.delete('profile');
+      url.searchParams.delete('user');
+      window.history.pushState({}, '', url.toString());
+    } catch (_) {}
+  };
+
+  const handleSelectTest = (code, candidateUsername = null) => {
+    if (!code) return;
+    const cleanCode = code.trim().toUpperCase();
+    setInspectTestCode(cleanCode);
+    setInspectTestUser(candidateUsername ? candidateUsername.trim() : null);
+    switchTab('history', false);
+    try {
+      const url = new URL(window.location.href);
+      url.searchParams.set('tab', 'history');
+      url.searchParams.set('test', cleanCode);
+      if (candidateUsername) url.searchParams.set('candidate', candidateUsername.trim());
+      window.history.pushState({}, '', url.toString());
+    } catch (_) {}
+  };
+
+  const handleBackFromTestAnalysis = () => {
+    setInspectTestCode(null);
+    setInspectTestUser(null);
+    try {
+      const url = new URL(window.location.href);
+      url.searchParams.delete('test');
+      url.searchParams.delete('exam');
+      url.searchParams.delete('candidate');
+      window.history.pushState({}, '', url.toString());
+    } catch (_) {}
   };
 
   const handleLogout = () => {
@@ -345,6 +433,7 @@ export default function App() {
             <RoomLobbyView
               room={currentRoom}
               user={user}
+              onViewProfile={handleViewProfile}
               onStartMatch={(latestRoom) => {
                 if (latestRoom) setCurrentRoom(latestRoom);
                 setRoomViewMode('battle');
@@ -414,6 +503,7 @@ export default function App() {
             <ResultsView
               roomCode={currentRoom.code}
               user={user}
+              onViewProfile={handleViewProfile}
               onReturnArena={() => {
                 setCurrentRoom(null);
                 setRoomViewMode(null);
@@ -486,10 +576,7 @@ export default function App() {
               user={user}
               onJoinRoomCode={handleJoinRoomCode}
               onOpenAuth={() => setAuthModalOpen(true)}
-              onViewProfile={(uname) => {
-                setInspectProfileUser(uname);
-                switchTab('profile');
-              }}
+              onViewProfile={handleViewProfile}
               isActive={activeTab === 'tournaments'}
             />
           </div>
@@ -515,15 +602,18 @@ export default function App() {
               <TestAnalysisView
                 roomCode={inspectTestCode}
                 user={user}
-                onBack={() => setInspectTestCode(null)}
+                inspectUsername={inspectTestUser}
+                onBack={handleBackFromTestAnalysis}
               />
             ) : (
               <TestHistoryView
                 user={user}
-                onSelectTest={(code) => setInspectTestCode(code)}
+                inspectUsername={inspectTestUser}
+                onSelectTest={handleSelectTest}
                 onResumeTest={handleJoinRoomCode}
                 onNavigateTab={switchTab}
                 onOpenAuth={() => setAuthModalOpen(true)}
+                onClearInspect={() => setInspectTestUser(null)}
               />
             )}
           </div>
@@ -551,10 +641,7 @@ export default function App() {
               onJoinRoomCode={handleJoinRoomCode}
               onRoomCreated={handleRoomCreated}
               onOpenAuth={() => setAuthModalOpen(true)}
-              onViewProfile={(uname) => {
-                setInspectProfileUser(uname);
-                switchTab('profile');
-              }}
+              onViewProfile={handleViewProfile}
               isActive={activeTab === 'invite'}
               onOpenChat={handleOpenChat}
             />
@@ -567,10 +654,7 @@ export default function App() {
             <LeaderboardsView
               user={user}
               onNavigateTab={switchTab}
-              onViewProfile={(uname) => {
-                setInspectProfileUser(uname);
-                switchTab('profile');
-              }}
+              onViewProfile={handleViewProfile}
               isActive={activeTab === 'leaderboards'}
             />
           </div>
@@ -582,8 +666,10 @@ export default function App() {
             <ProfileView
               username={inspectProfileUser}
               currentUser={user}
-              onBack={inspectProfileUser ? () => setInspectProfileUser(null) : null}
+              onBack={inspectProfileUser ? handleBackFromProfile : null}
               onNavigateTab={switchTab}
+              onViewProfile={handleViewProfile}
+              onSelectTest={handleSelectTest}
               onUpdateUser={(u) => {
                 setUser(u);
                 setCachedUser(u);
@@ -651,8 +737,7 @@ export default function App() {
         }}
         onViewProfile={(friend) => {
           setChatDrawerOpen(false);
-          setInspectProfileUser(friend.username);
-          switchTab('profile');
+          handleViewProfile(friend.username);
         }}
       />
     </div>

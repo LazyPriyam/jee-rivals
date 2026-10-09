@@ -206,6 +206,8 @@ export default function SphereGridSkillTree({
   onNavigateTab,
   onStartPreset,
   currentUser = null,
+  profileUser = null,
+  isOwnProfile = true,
 }) {
   const [selectedSubject, setSelectedSubject] = useState('All');
   const [savingLearnt, setSavingLearnt] = useState(false);
@@ -223,11 +225,12 @@ export default function SphereGridSkillTree({
   }, []);
 
   // Learnt / Active Chapters state
-  const storageLearntKey = currentUser?.id ? `jee_user_learnt_chapters_${currentUser.id}` : null;
+  const effectiveUser = isOwnProfile ? currentUser : (profileUser || currentUser);
+  const storageLearntKey = isOwnProfile && currentUser?.id ? `jee_user_learnt_chapters_${currentUser.id}` : null;
   const [learntChapters, setLearntChapters] = useState(() => {
     try {
-      if (currentUser?.learnt_chapters && Array.isArray(currentUser.learnt_chapters) && currentUser.learnt_chapters.length > 0) {
-        return new Set(currentUser.learnt_chapters);
+      if (effectiveUser?.learnt_chapters && Array.isArray(effectiveUser.learnt_chapters) && effectiveUser.learnt_chapters.length > 0) {
+        return new Set(effectiveUser.learnt_chapters);
       }
       if (storageLearntKey) {
         const raw = localStorage.getItem(storageLearntKey);
@@ -240,22 +243,23 @@ export default function SphereGridSkillTree({
     return new Set();
   });
 
-  // Sync with currentUser when loaded
+  // Sync with effectiveUser when loaded
   useEffect(() => {
-    if (currentUser?.learnt_chapters && Array.isArray(currentUser.learnt_chapters)) {
-      setLearntChapters(new Set(currentUser.learnt_chapters));
+    if (effectiveUser?.learnt_chapters && Array.isArray(effectiveUser.learnt_chapters)) {
+      setLearntChapters(new Set(effectiveUser.learnt_chapters));
       if (storageLearntKey) {
         try {
-          localStorage.setItem(storageLearntKey, JSON.stringify(currentUser.learnt_chapters));
+          localStorage.setItem(storageLearntKey, JSON.stringify(effectiveUser.learnt_chapters));
         } catch (_) {}
       }
-    } else if (!currentUser) {
+    } else if (!effectiveUser) {
       setLearntChapters(new Set());
     }
-  }, [currentUser?.id, storageLearntKey, JSON.stringify(currentUser?.learnt_chapters || [])]);
+  }, [effectiveUser?.id, storageLearntKey, JSON.stringify(effectiveUser?.learnt_chapters || [])]);
 
   // Persist learnt chapters to backend and localStorage
   const saveLearntChapters = async (newSet) => {
+    if (!isOwnProfile) return;
     const arr = Array.from(newSet);
     if (storageLearntKey) {
       try {
@@ -571,16 +575,18 @@ export default function SphereGridSkillTree({
                       </span>
                     </span>
 
-                    <button
-                      onClick={() => toggleUnitAll(unitObj.chapters, !allInUnitLearnt)}
-                      className={`text-[11px] font-mono font-bold px-2.5 py-1 rounded-lg transition cursor-pointer border ${
-                        allInUnitLearnt
-                          ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
-                          : 'bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white border-white/10'
-                      }`}
-                    >
-                      {allInUnitLearnt ? '✓ All Marked Learnt' : '+ Mark Unit as Learnt'}
-                    </button>
+                    {isOwnProfile && (
+                      <button
+                        onClick={() => toggleUnitAll(unitObj.chapters, !allInUnitLearnt)}
+                        className={`text-[11px] font-mono font-bold px-2.5 py-1 rounded-lg transition cursor-pointer border ${
+                          allInUnitLearnt
+                            ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
+                            : 'bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white border-white/10'
+                        }`}
+                      >
+                        {allInUnitLearnt ? '✓ All Marked Learnt' : '+ Mark Unit as Learnt'}
+                      </button>
+                    )}
                   </div>
 
                   {/* Chapter Cards Grid */}
@@ -650,27 +656,49 @@ export default function SphereGridSkillTree({
                             </div>
 
                             {/* Learnt / Active Toggle Button */}
-                            <button
-                              type="button"
-                              onClick={() => toggleLearnt(chap.name)}
-                              className={`w-full py-2 px-3 rounded-xl text-xs font-bold transition flex items-center justify-between cursor-pointer border ${
-                                isLearnt
-                                  ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40 hover:bg-emerald-500/30'
-                                  : 'bg-white/5 text-slate-400 border-white/10 hover:bg-white/10 hover:text-white'
-                              }`}
-                            >
-                              <div className="flex items-center gap-1.5">
-                                {isLearnt ? (
-                                  <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-                                ) : (
-                                  <Circle className="w-4 h-4 text-slate-500 shrink-0" />
-                                )}
-                                <span>{isLearnt ? 'Learnt & Active in Practice' : 'Mark as Learnt'}</span>
+                            {isOwnProfile ? (
+                              <button
+                                type="button"
+                                onClick={() => toggleLearnt(chap.name)}
+                                className={`w-full py-2 px-3 rounded-xl text-xs font-bold transition flex items-center justify-between cursor-pointer border ${
+                                  isLearnt
+                                    ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40 hover:bg-emerald-500/30'
+                                    : 'bg-white/5 text-slate-400 border-white/10 hover:bg-white/10 hover:text-white'
+                                }`}
+                              >
+                                <div className="flex items-center gap-1.5">
+                                  {isLearnt ? (
+                                    <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                                  ) : (
+                                    <Circle className="w-4 h-4 text-slate-500 shrink-0" />
+                                  )}
+                                  <span>{isLearnt ? 'Learnt & Active in Practice' : 'Mark as Learnt'}</span>
+                                </div>
+                                <span className="text-[10px] font-mono uppercase font-black">
+                                  {isLearnt ? 'ACTIVE' : '+ ADD'}
+                                </span>
+                              </button>
+                            ) : (
+                              <div
+                                className={`w-full py-2 px-3 rounded-xl text-xs font-bold flex items-center justify-between border ${
+                                  isLearnt
+                                    ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
+                                    : 'bg-white/5 text-slate-500 border-white/10'
+                                }`}
+                              >
+                                <div className="flex items-center gap-1.5">
+                                  {isLearnt ? (
+                                    <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                                  ) : (
+                                    <Circle className="w-4 h-4 text-slate-600 shrink-0" />
+                                  )}
+                                  <span>{isLearnt ? 'Learnt by Aspirant' : 'Not Marked Learnt'}</span>
+                                </div>
+                                <span className="text-[10px] font-mono uppercase font-black">
+                                  {isLearnt ? 'ACTIVE' : 'INACTIVE'}
+                                </span>
                               </div>
-                              <span className="text-[10px] font-mono uppercase font-black">
-                                {isLearnt ? 'ACTIVE' : '+ ADD'}
-                              </span>
-                            </button>
+                            )}
                           </div>
 
                           {/* Direct Actions: Drill / Duel */}

@@ -20,7 +20,7 @@ from backend.app.models import (
     QuestionSolutionOut
 )
 from backend.app.database import get_connection, get_user_by_id
-from backend.app.auth import get_current_user
+from backend.app.auth import get_current_user, get_user_by_username
 from backend.app.websockets.room_hub import room_hub
 from backend.app.routes.questions import row_to_question_out
 from backend.app.tools.question_verifier import audit_and_heal_question
@@ -287,6 +287,16 @@ def get_user_test_history(user: dict = Depends(get_current_user)):
         })
 
     return history
+
+
+@router.get("/user/{username}/history")
+def get_user_test_history_by_username(username: str):
+    """Returns past completed mock tests, papers, and battle rooms for any specified candidate."""
+    u = get_user_by_username(username.strip())
+    if not u:
+        raise HTTPException(status_code=404, detail=f"User '{username}' not found.")
+    return get_user_test_history(user=u)
+
 
 
 @router.post("/create", response_model=RoomState)

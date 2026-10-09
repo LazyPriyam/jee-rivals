@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { api, getToken } from '../utils/api';
 import { Copy, Check, Users, Swords, Play, ArrowLeft, Crown, Sparkles, BookOpen, AlertCircle, Flame, Link2, Share2, Trash2, UserX } from 'lucide-react';
 
-export default function RoomLobbyView({ room, user, onStartMatch, onLeaveRoom }) {
+export default function RoomLobbyView({ room, user, onStartMatch, onLeaveRoom, onViewProfile }) {
   const [currentRoom, setCurrentRoom] = useState(room);
   const [copied, setCopied] = useState(false);
   const [copiedLink, setCopiedLink] = useState(false);
@@ -318,7 +318,12 @@ export default function RoomLobbyView({ room, user, onStartMatch, onLeaveRoom })
                     </div>
                     <div className="overflow-hidden">
                       <div className="flex items-center gap-1.5 font-bold text-xs text-white">
-                        <span className="truncate">{p.username}</span>
+                        <span
+                          onClick={() => onViewProfile && onViewProfile(p.username)}
+                          className="truncate hover:text-orange-400 hover:underline cursor-pointer"
+                        >
+                          {p.username}
+                        </span>
                         {pIsHost && (
                           <span className="inline-flex items-center gap-0.5 px-1.5 py-0.2 rounded bg-amber-950/90 border border-amber-500/50 text-[10px] text-amber-300 font-mono shrink-0">
                             <Crown className="w-2.5 h-2.5 fill-amber-400 text-amber-400" />

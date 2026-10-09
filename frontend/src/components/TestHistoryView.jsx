@@ -19,21 +19,28 @@ import {
   ChevronRight
 } from 'lucide-react';
 
-export default function TestHistoryView({ user, onSelectTest, onResumeTest, onNavigateTab, onOpenAuth }) {
+export default function TestHistoryView({ user, inspectUsername, onSelectTest, onResumeTest, onNavigateTab, onOpenAuth, onClearInspect }) {
   const [history, setHistory] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [selectedMode, setSelectedMode] = useState('ALL'); // 'ALL', 'MOCK_TEST', 'SPEED_DUEL', 'GROUP'
   const [searchQuery, setSearchQuery] = useState('');
 
+  const targetUsername = inspectUsername || user?.username;
+  const isOwnHistory = !inspectUsername || (user && inspectUsername.toLowerCase() === user.username.toLowerCase());
+
   const fetchHistory = () => {
-    if (!user) {
+    if (!targetUsername && !user) {
       setLoading(false);
       return;
     }
     setLoading(true);
     setError('');
-    api.rooms.getMyHistory()
+    const req = inspectUsername && !isOwnHistory
+      ? api.rooms.getUserHistory(inspectUsername)
+      : api.rooms.getMyHistory();
+
+    req
       .then((data) => {
         setHistory(data || []);
         setLoading(false);
@@ -46,7 +53,7 @@ export default function TestHistoryView({ user, onSelectTest, onResumeTest, onNa
 
   useEffect(() => {
     fetchHistory();
-  }, [user?.id]);
+  }, [user?.id, inspectUsername]);
 
   if (!user) {
     return (
@@ -100,6 +107,22 @@ export default function TestHistoryView({ user, onSelectTest, onResumeTest, onNa
     <div className="max-w-6xl mx-auto px-4 py-8 page-transition space-y-8">
       {/* Page Header Banner */}
       <div className="bg-gradient-to-r from-[#172033] via-[#1f283c] to-[#172033] border border-orange-500/30 rounded-3xl p-6 sm:p-10 shadow-2xl glow-orange-subtle">
+        {!isOwnHistory && (
+          <div className="bg-[#1a1f2e] border border-orange-500/30 p-4 rounded-2xl flex items-center justify-between mb-2">
+            <span className="text-xs font-mono font-bold text-orange-400">
+              Viewing examination archives of candidate: @{inspectUsername}
+            </span>
+            {onClearInspect && (
+              <button
+                onClick={onClearInspect}
+                className="text-xs font-bold px-3 py-1 bg-white/10 hover:bg-white/20 text-white rounded-lg transition cursor-pointer"
+              >
+                Back to My Test History
+              </button>
+            )}
+          </div>
+        )}
+
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
           <div>
             <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-orange-950/80 border border-orange-500/40 text-orange-400 text-xs font-bold uppercase tracking-wider mb-2 font-mono">
@@ -362,7 +385,7 @@ export default function TestHistoryView({ user, onSelectTest, onResumeTest, onNa
                     <button
                       onClick={() => {
                         sound.click();
-                        onSelectTest(item.code);
+                        onSelectTest(item.code, targetUsername);
                       }}
                       className="px-4 py-2.5 rounded-xl bg-orange-500 hover:bg-orange-600 text-white font-bold text-xs transition shadow-lg shadow-orange-950/40 cursor-pointer flex items-center gap-1.5 shrink-0"
                     >

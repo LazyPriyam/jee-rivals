@@ -419,6 +419,13 @@ def get_public_profile(username: str):
             "avg_time": round(r["avg_time"] or 0, 1)
         })
 
+    # 7. Completed Mock Tests & Practice Examination Papers
+    from backend.app.routes.rooms import get_user_test_history
+    try:
+        test_history = get_user_test_history(user=user)
+    except Exception:
+        test_history = []
+
     profile = format_user_profile(user, cursor=c)
     conn.close()
 
@@ -428,6 +435,7 @@ def get_public_profile(username: str):
         "skill_tree": skill_tree_data,
         "achievements": achievements_data,
         "match_history": match_history,
+        "test_history": test_history,
         "recent_activity": recent_acts,
         "chapter_breakdown": chap_perf
     }

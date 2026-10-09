@@ -36,7 +36,7 @@ import {
 } from 'lucide-react';
 import ReportQuestionModal from './ReportQuestionModal';
 
-export default function TestAnalysisView({ roomCode, user, onBack, onStartPreset, onJoinRoomCode }) {
+export default function TestAnalysisView({ roomCode, user, inspectUsername, onBack, onStartPreset, onJoinRoomCode }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -139,8 +139,10 @@ export default function TestAnalysisView({ roomCode, user, onBack, onStartPreset
     );
   }
 
-  // Find calling user's participant record
-  const myParticipant = (data.participants || []).find((p) => p.user_id === user?.id) || (data.participants || [])[0] || {};
+  // Find calling user's participant record or inspected candidate
+  const myParticipant = inspectUsername
+    ? ((data.participants || []).find((p) => (p.username || '').toLowerCase() === inspectUsername.toLowerCase()) || (data.participants || []).find((p) => p.user_id === user?.id) || (data.participants || [])[0] || {})
+    : ((data.participants || []).find((p) => p.user_id === user?.id) || (data.participants || [])[0] || {});
   const userAnswers = myParticipant.answers || {};
 
   const questionsList = data.questions || [];
