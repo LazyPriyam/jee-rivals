@@ -675,6 +675,7 @@ export default function ProfileView({
             growthTriad={p.growth_triad || data.user?.growth_triad}
             user={p}
             compact={false}
+            onNavigateTab={onNavigateTab}
           />
 
           {/* Quad Metric Stats Grid */}

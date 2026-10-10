@@ -24,7 +24,8 @@ import {
   ArrowRight,
   ShieldAlert,
   Zap,
-  Target
+  Target,
+  Clock
 } from 'lucide-react';
 import { api } from '../utils/api';
 import { sound } from '../utils/sound';
@@ -340,6 +341,22 @@ export default function ChapterMasteryView({
         <div className="flex items-center justify-center py-12 text-slate-400 gap-3">
           <RefreshCw className="w-5 h-5 animate-spin text-orange-400" />
           <span className="text-xs font-mono">Synthesizing chapter telemetry & error archives...</span>
+        </div>
+      )}
+
+      {error && !loading && (
+        <div className="p-4 rounded-xl bg-red-950/60 border border-red-500/40 text-red-300 text-xs flex items-center justify-between shadow-lg">
+          <div className="flex items-center gap-2">
+            <AlertTriangle className="w-4 h-4 text-red-400 shrink-0" />
+            <span>{error}</span>
+          </div>
+          <button
+            type="button"
+            onClick={fetchData}
+            className="px-3 py-1 bg-red-500/30 hover:bg-red-500/40 text-white rounded-lg font-bold cursor-pointer transition text-xs"
+          >
+            Retry
+          </button>
         </div>
       )}
 

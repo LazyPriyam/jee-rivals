@@ -204,7 +204,7 @@ export default function App() {
         const candidate = params.get('candidate') || params.get('test_user');
         if (candidate) setInspectTestUser(candidate.trim());
         switchTab('history', false);
-      } else if (tabParam && ['arena', 'tournaments', 'mocks', 'history', 'generator', 'invite', 'leaderboards', 'profile', 'settings'].includes(tabParam)) {
+      } else if (tabParam && ['arena', 'adaptive', 'mastery', 'skills', 'tournaments', 'mocks', 'history', 'generator', 'invite', 'leaderboards', 'profile', 'settings'].includes(tabParam)) {
         switchTab(tabParam, false);
       }
 

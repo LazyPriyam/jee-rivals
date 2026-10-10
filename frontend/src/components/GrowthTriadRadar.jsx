@@ -225,17 +225,32 @@ export default function GrowthTriadRadar({ growthTriad, user, compact = false, o
         <div className="lg:col-span-7 space-y-3">
           {/* Pillar 1: Chapter Knowledge */}
           {(activePillar === 'ALL' || activePillar === 'KNOWLEDGE') && (
-            <div className="p-3.5 sm:p-4 rounded-2xl bg-[#141824] border border-emerald-500/30 hover:border-emerald-500/50 transition">
+            <div
+              onClick={() => {
+                if (onNavigateTab) {
+                  sound.click();
+                  onNavigateTab('mastery');
+                }
+              }}
+              className={`p-3.5 sm:p-4 rounded-2xl bg-[#141824] border border-emerald-500/30 hover:border-emerald-500/60 transition ${
+                onNavigateTab ? 'cursor-pointer hover:bg-[#161e2a] group' : ''
+              }`}
+            >
               <div className="flex items-center justify-between mb-2">
                 <div className="flex items-center gap-2">
                   <div className="p-1.5 rounded-lg bg-emerald-500/20 text-emerald-400">
                     <BookOpen className="w-4 h-4" />
                   </div>
                   <div>
-                    <h4 className="text-xs font-black uppercase text-white tracking-wider">
-                      Chapter Knowledge
+                    <h4 className="text-xs font-black uppercase text-white tracking-wider flex items-center gap-1.5">
+                      <span>Chapter Knowledge</span>
+                      {onNavigateTab && (
+                        <ArrowRight className="w-3.5 h-3.5 text-emerald-400 opacity-60 group-hover:opacity-100 group-hover:translate-x-0.5 transition-all" />
+                      )}
                     </h4>
-                    <span className="text-[10px] text-slate-400">Syllabus Breadth & Depth</span>
+                    <span className="text-[10px] text-slate-400">
+                      Syllabus Breadth & Depth {onNavigateTab ? '• View 92-Chapter Matrix →' : ''}
+                    </span>
                   </div>
                 </div>
                 <div className="text-right">
