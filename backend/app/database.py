@@ -242,9 +242,12 @@ def get_turso_client():
         with _TURSO_LOCK:
             if _TURSO_CLIENT is None or getattr(_TURSO_CLIENT, "closed", False):
                 import libsql_client
-                logger.info(f"[TURSO] Connecting to Turso Cloud SQLite: {TURSO_DATABASE_URL}")
+                url = TURSO_DATABASE_URL.strip()
+                if url.startswith("libsql://"):
+                    url = "https://" + url[len("libsql://"):]
+                logger.info(f"[TURSO] Connecting to Turso Cloud SQLite: {url}")
                 _TURSO_CLIENT = libsql_client.create_client_sync(
-                    url=TURSO_DATABASE_URL,
+                    url=url,
                     auth_token=TURSO_AUTH_TOKEN or None
                 )
     return _TURSO_CLIENT

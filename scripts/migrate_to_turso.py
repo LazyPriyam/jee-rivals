@@ -36,9 +36,14 @@ def migrate_to_turso(url: str, token: str):
         print("[ERROR] Turso Database URL is required.")
         sys.exit(1)
 
-    print(f"\n[1/4] Connecting to Turso Cloud at: {url}")
+    # Normalize libsql:// to https:// for direct HTTPS API pipeline compatibility
+    http_url = url
+    if http_url.startswith("libsql://"):
+        http_url = "https://" + http_url[len("libsql://"):]
+
+    print(f"\n[1/4] Connecting to Turso Cloud at: {http_url}")
     import libsql_client
-    turso_client = libsql_client.create_client_sync(url=url, auth_token=token or None)
+    turso_client = libsql_client.create_client_sync(url=http_url, auth_token=token or None)
     turso_conn = TursoConnection(turso_client)
 
     # 1. Run migrations to initialize all tables
