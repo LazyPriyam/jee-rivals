@@ -57,11 +57,25 @@ def restore_user_from_token_payload(payload: dict) -> Optional[dict]:
     """
     Safely self-heals/restores an authenticated user account into SQLite
     if the cloud container underwent an ephemeral restart or storage wipe.
+    Strictly checks tombstone registry so deleted accounts are NEVER resurrected.
     """
     user_id = payload.get("sub")
     username = payload.get("username")
     if not user_id or not username:
         return None
+
+    # Tombstone barrier: strictly reject deleted accounts
+    try:
+        conn = get_connection()
+        c = conn.cursor()
+        c.execute("SELECT 1 FROM deleted_accounts WHERE id = ? OR LOWER(username) = LOWER(?)", (user_id, username))
+        if c.fetchone():
+            conn.close()
+            return None
+        conn.close()
+    except Exception:
+        pass
+
     try:
         # Check persistent backup first to preserve complete progress
         try:
@@ -111,6 +125,24 @@ def get_current_user(credentials: Optional[HTTPAuthorizationCredentials] = Depen
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid or expired session token."
         )
+
+    # Tombstone barrier: reject permanently deleted accounts immediately
+    try:
+        conn = get_connection()
+        c = conn.cursor()
+        c.execute("SELECT 1 FROM deleted_accounts WHERE id = ? OR LOWER(username) = LOWER(?)", (payload["sub"], payload.get("username", "")))
+        is_deleted = c.fetchone() is not None
+        conn.close()
+        if is_deleted:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="This account has been permanently deleted. Please register a new account."
+            )
+    except HTTPException:
+        raise
+    except Exception:
+        pass
+
     user = get_user_by_id(payload["sub"])
     if not user:
         user = restore_user_from_token_payload(payload)

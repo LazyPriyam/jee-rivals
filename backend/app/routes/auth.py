@@ -230,6 +230,24 @@ def register(req: UserRegisterRequest):
 @router.post("/login", response_model=AuthResponse)
 def login(req: UserLoginRequest):
     username = req.username.strip()
+
+    # Tombstone barrier: reject permanently deleted accounts
+    try:
+        conn = get_connection()
+        c = conn.cursor()
+        c.execute("SELECT 1 FROM deleted_accounts WHERE LOWER(username) = LOWER(?)", (username,))
+        is_del = c.fetchone() is not None
+        conn.close()
+        if is_del:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail=f"Account '{username}' was permanently deleted and cannot be accessed."
+            )
+    except HTTPException:
+        raise
+    except Exception:
+        pass
+
     user = get_user_by_username(username)
     if not user:
         # Check persistent backup first to prevent ephemeral wipes
@@ -502,9 +520,24 @@ def delete_account(req: DeleteAccountRequest, user: dict = Depends(get_current_u
         # 6. Primary user record
         c.execute("DELETE FROM users WHERE id = ?", (user_id,))
 
+        # 7. Record in deleted_accounts tombstone registry
+        now_iso = datetime.datetime.utcnow().isoformat()
+        c.execute("""
+            INSERT OR REPLACE INTO deleted_accounts (id, username, deleted_at, reason)
+            VALUES (?, ?, ?, 'user_pin_purge')
+        """, (user_id, user["username"], now_iso))
+
         conn.commit()
     finally:
         conn.close()
+
+    # 8. Immediately purge from persistent JSON vaults
+    try:
+        from backend.app.database import purge_user_from_vaults, backup_all_users
+        purge_user_from_vaults(user_id, user["username"])
+        backup_all_users()
+    except Exception as e:
+        print(f"[DELETE] Note purging vaults: {e}")
 
     return {
         "message": f"Aspirant account '{user['username']}' and all associated records have been permanently deleted.",

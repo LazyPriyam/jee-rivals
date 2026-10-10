@@ -181,18 +181,29 @@ export async function switchSavedAccount(username) {
       setCachedUser(me);
       recordSavedAccount(me, acc.token, acc.pin);
       return me;
-    } catch (_) {
+    } catch (err) {
+      if (err?.message?.toLowerCase().includes("deleted")) {
+        removeSavedAccount(acc.username);
+        throw err;
+      }
       // Session expired, attempt auto-heal via saved PIN
     }
   }
 
   // 2. Try saved PIN if token expired or container restarted
   if (acc.pin) {
-    const resp = await api.auth.login(acc.username, acc.pin);
-    setToken(resp.token, true);
-    setCachedUser(resp.user);
-    recordSavedAccount(resp.user, resp.token, acc.pin);
-    return resp.user;
+    try {
+      const resp = await api.auth.login(acc.username, acc.pin);
+      setToken(resp.token, true);
+      setCachedUser(resp.user);
+      recordSavedAccount(resp.user, resp.token, acc.pin);
+      return resp.user;
+    } catch (err) {
+      if (err?.message?.toLowerCase().includes("deleted") || err?.message?.toLowerCase().includes("not found")) {
+        removeSavedAccount(acc.username);
+      }
+      throw err;
+    }
   }
 
   throw new Error(`Session expired for ${username}. Please enter your PIN to sign in.`);

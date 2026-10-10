@@ -507,6 +507,24 @@ def migration_005_safe_column_extensions(conn: sqlite3.Connection):
             c.execute(f"ALTER TABLE tournament_matches ADD COLUMN {col_name} {col_def};")
 
 
+def migration_006_deleted_accounts_tombstones(conn: sqlite3.Connection):
+    """
+    Creates the deleted_accounts tombstone registry.
+    Ensures that permanently deleted accounts and their JWT tokens can never be
+    auto-resurrected by background syncs or client caches.
+    """
+    c = conn.cursor()
+    c.execute("""
+    CREATE TABLE IF NOT EXISTS deleted_accounts (
+        id TEXT PRIMARY KEY,
+        username TEXT NOT NULL COLLATE NOCASE,
+        deleted_at TEXT NOT NULL,
+        reason TEXT DEFAULT 'user_requested_purge'
+    );
+    """)
+    c.execute("CREATE INDEX IF NOT EXISTS idx_deleted_accounts_username ON deleted_accounts(username);")
+
+
 # Master migration registry (ordered sequentially)
 MIGRATIONS: List[Dict[str, Any]] = [
     {
@@ -533,6 +551,11 @@ MIGRATIONS: List[Dict[str, Any]] = [
         "version": 5,
         "name": "safe_column_extensions",
         "func": migration_005_safe_column_extensions,
+    },
+    {
+        "version": 6,
+        "name": "deleted_accounts_tombstones",
+        "func": migration_006_deleted_accounts_tombstones,
     },
 ]
 
