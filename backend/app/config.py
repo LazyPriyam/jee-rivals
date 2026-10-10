@@ -23,3 +23,7 @@ ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 365  # 1 year session for remember me pe
 
 # Admin Token for Local-to-Cloud Sync
 ADMIN_SYNC_TOKEN = os.environ.get("ADMIN_SYNC_TOKEN", "rivals_sync_admin_key_jee2026")
+
+# Turso Cloud SQLite Configuration (Persistent Cloud Database)
+TURSO_DATABASE_URL = os.environ.get("TURSO_DATABASE_URL", "").strip()
+TURSO_AUTH_TOKEN = os.environ.get("TURSO_AUTH_TOKEN", "").strip()

@@ -2,15 +2,263 @@ import sqlite3
 import json
 import datetime
 import os
-from typing import Optional, List, Dict, Any
+import threading
+import logging
+from typing import Optional, List, Dict, Any, Tuple, Union
 from pathlib import Path
-from backend.app.config import DB_PATH, STORAGE_DIR
+from backend.app.config import DB_PATH, STORAGE_DIR, TURSO_DATABASE_URL, TURSO_AUTH_TOKEN
+
+logger = logging.getLogger("jee_rivals.database")
 
 BACKUP_JSON_PATH = STORAGE_DIR / "backups" / "users_backup.json"
 MASTER_VAULT_PATH = STORAGE_DIR / "backups" / "aspirants_master_vault.json"
 
+# ==============================================================================
+# TURSO CLOUD SQLITE ADAPTER (libSQL)
+# ==============================================================================
 
-def get_connection() -> sqlite3.Connection:
+class TursoRow:
+    """
+    Drop-in replacement for sqlite3.Row that supports:
+    - positional indexing: row[0]
+    - column name lookup: row['username'] (case-insensitive)
+    - dict conversion: dict(row)
+    - iteration and dictionary methods (.keys(), .values(), .items(), .get())
+    """
+    def __init__(self, cols: Tuple[str, ...], vals: Tuple[Any, ...]):
+        self._cols = tuple(cols)
+        self._vals = tuple(vals)
+        self._map = dict(zip(self._cols, self._vals))
+        self._lower_map = {c.lower(): v for c, v in zip(self._cols, self._vals)}
+
+    def __getitem__(self, key: Union[int, str]):
+        if isinstance(key, int):
+            return self._vals[key]
+        if key in self._map:
+            return self._map[key]
+        if isinstance(key, str) and key.lower() in self._lower_map:
+            return self._lower_map[key.lower()]
+        raise KeyError(key)
+
+    def keys(self):
+        return self._cols
+
+    def values(self):
+        return self._vals
+
+    def items(self):
+        return self._map.items()
+
+    def get(self, key: str, default: Any = None):
+        if key in self._map:
+            return self._map[key]
+        if isinstance(key, str) and key.lower() in self._lower_map:
+            return self._lower_map[key.lower()]
+        return default
+
+    def __len__(self):
+        return len(self._vals)
+
+    def __iter__(self):
+        return iter(self._cols)
+
+    def __repr__(self):
+        return f"<TursoRow {self._map}>"
+
+
+class TursoCursor:
+    """
+    Cursor adapter that wraps libsql_client results to match sqlite3.Cursor.
+    """
+    def __init__(self, conn: "TursoConnection"):
+        self.conn = conn
+        self._result_rows: List[TursoRow] = []
+        self._row_idx: int = 0
+        self.lastrowid: Optional[int] = None
+        self.rowcount: int = -1
+        self.description: Optional[Tuple] = None
+
+    def execute(self, sql: str, parameters: Any = None):
+        args = []
+        if parameters is not None:
+            if isinstance(parameters, (list, tuple)):
+                args = list(parameters)
+            elif isinstance(parameters, dict):
+                args = parameters
+            else:
+                args = [parameters]
+
+        res = self.conn._execute_raw(sql, args)
+        if res is not None:
+            cols = tuple(res.columns) if hasattr(res, "columns") else ()
+            self.description = tuple((col, None, None, None, None, None, None) for col in cols) if cols else None
+            self.lastrowid = getattr(res, "last_insert_rowid", None)
+            self.rowcount = getattr(res, "rows_affected", -1)
+            raw_rows = getattr(res, "rows", [])
+            self._result_rows = [TursoRow(cols, tuple(r)) for r in raw_rows]
+            self._row_idx = 0
+        else:
+            self._result_rows = []
+            self._row_idx = 0
+            self.lastrowid = None
+            self.rowcount = -1
+            self.description = None
+        return self
+
+    def executemany(self, sql: str, seq_of_parameters: Any):
+        batch_items = []
+        for params in seq_of_parameters:
+            args = list(params) if isinstance(params, (list, tuple)) else params
+            batch_items.append((sql, args))
+        if batch_items:
+            res_list = self.conn._batch_raw(batch_items)
+            self.rowcount = sum(getattr(r, "rows_affected", 0) for r in res_list)
+        else:
+            self.rowcount = 0
+        return self
+
+    def executescript(self, sql_script: str):
+        stmts = [s.strip() for s in sql_script.split(";") if s.strip()]
+        if stmts:
+            self.conn._batch_raw([(s, []) for s in stmts])
+        return self
+
+    def fetchone(self) -> Optional[TursoRow]:
+        if self._row_idx < len(self._result_rows):
+            row = self._result_rows[self._row_idx]
+            self._row_idx += 1
+            return row
+        return None
+
+    def fetchall(self) -> List[TursoRow]:
+        remaining = self._result_rows[self._row_idx:]
+        self._row_idx = len(self._result_rows)
+        return remaining
+
+    def fetchmany(self, size: Optional[int] = None) -> List[TursoRow]:
+        if size is None:
+            size = 1
+        end = min(self._row_idx + size, len(self._result_rows))
+        chunk = self._result_rows[self._row_idx:end]
+        self._row_idx = end
+        return chunk
+
+    def __iter__(self):
+        while self._row_idx < len(self._result_rows):
+            yield self.fetchone()
+
+    def close(self):
+        self._result_rows = []
+        self._row_idx = 0
+
+
+class TursoConnection:
+    """
+    Connection adapter that wraps a shared libsql_client.ClientSync connection.
+    Provides complete sqlite3.Connection API compatibility.
+    """
+    def __init__(self, client):
+        self._client = client
+        self.row_factory = None
+
+    def _execute_raw(self, sql: str, args: Any):
+        try:
+            return self._client.execute(sql, args)
+        except Exception as e:
+            err_str = str(e).upper()
+            if "WEBSOCKET" in err_str or "CONNECTION" in err_str or "CLOSED" in err_str:
+                logger.warning(f"[TURSO] Reconnecting dropped client connection: {e}")
+                global _TURSO_CLIENT
+                with _TURSO_LOCK:
+                    _TURSO_CLIENT = None
+                    self._client = get_turso_client()
+                return self._client.execute(sql, args)
+            raise e
+
+    def _batch_raw(self, batch_items: List[Tuple[str, Any]]):
+        try:
+            return self._client.batch(batch_items)
+        except Exception as e:
+            err_str = str(e).upper()
+            if "WEBSOCKET" in err_str or "CONNECTION" in err_str or "CLOSED" in err_str:
+                logger.warning(f"[TURSO] Reconnecting dropped client connection: {e}")
+                global _TURSO_CLIENT
+                with _TURSO_LOCK:
+                    _TURSO_CLIENT = None
+                    self._client = get_turso_client()
+                return self._client.batch(batch_items)
+            raise e
+
+    def cursor(self) -> TursoCursor:
+        return TursoCursor(self)
+
+    def execute(self, sql: str, parameters: Any = None) -> TursoCursor:
+        c = self.cursor()
+        c.execute(sql, parameters)
+        return c
+
+    def executemany(self, sql: str, seq_of_parameters: Any) -> TursoCursor:
+        c = self.cursor()
+        c.executemany(sql, seq_of_parameters)
+        return c
+
+    def executescript(self, sql_script: str) -> TursoCursor:
+        c = self.cursor()
+        c.executescript(sql_script)
+        return c
+
+    def commit(self):
+        pass
+
+    def rollback(self):
+        pass
+
+    def close(self):
+        pass
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if exc_type is not None:
+            self.rollback()
+        else:
+            self.commit()
+
+
+_TURSO_CLIENT = None
+_TURSO_LOCK = threading.Lock()
+
+
+def is_turso_enabled() -> bool:
+    """Returns True if Turso Cloud SQLite environment credentials are configured."""
+    return bool(TURSO_DATABASE_URL and TURSO_DATABASE_URL.strip())
+
+
+def get_turso_client():
+    """Returns a thread-safe persistent Turso client connection."""
+    global _TURSO_CLIENT
+    if _TURSO_CLIENT is None or getattr(_TURSO_CLIENT, "closed", False):
+        with _TURSO_LOCK:
+            if _TURSO_CLIENT is None or getattr(_TURSO_CLIENT, "closed", False):
+                import libsql_client
+                logger.info(f"[TURSO] Connecting to Turso Cloud SQLite: {TURSO_DATABASE_URL}")
+                _TURSO_CLIENT = libsql_client.create_client_sync(
+                    url=TURSO_DATABASE_URL,
+                    auth_token=TURSO_AUTH_TOKEN or None
+                )
+    return _TURSO_CLIENT
+
+
+def get_connection():
+    """
+    Returns an active database connection:
+    - If TURSO_DATABASE_URL is set: connects to Turso Cloud SQLite (libsql)
+    - Otherwise: falls back seamlessly to local SQLite (rivals.db)
+    """
+    if is_turso_enabled():
+        return TursoConnection(get_turso_client())
+
     conn = sqlite3.connect(str(DB_PATH))
     conn.row_factory = sqlite3.Row
     return conn

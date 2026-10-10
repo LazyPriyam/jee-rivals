@@ -5,3 +5,4 @@ websockets>=11.0
 python-multipart>=0.0.6
 pyjwt>=2.8.0
 requests>=2.31.0
+libsql-client>=0.3.0
