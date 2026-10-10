@@ -90,9 +90,23 @@ export function getCachedUser() {
 export function setCachedUser(user) {
   try {
     if (user) {
-      sessionStorage.setItem("jee_rivals_user", JSON.stringify(user));
+      const existing = getCachedUser();
+      let protectedUser = user;
+      if (existing && existing.id === user.id) {
+        // High-watermark safeguard on client side: never allow Elo or RP rollback
+        const highElo = Math.max(Number(existing.overall_elo) || 1200, Number(user.overall_elo) || 1200);
+        const highRP = Math.max(Number(existing.weekly_rp) || 0, Number(user.weekly_rp) || 0);
+        const highSolved = Math.max(Number(existing.total_solved) || 0, Number(user.total_solved) || 0);
+        protectedUser = {
+          ...user,
+          overall_elo: highElo,
+          weekly_rp: highRP,
+          total_solved: highSolved
+        };
+      }
+      sessionStorage.setItem("jee_rivals_user", JSON.stringify(protectedUser));
       if (isRememberMeEnabled()) {
-        localStorage.setItem("jee_rivals_user", JSON.stringify(user));
+        localStorage.setItem("jee_rivals_user", JSON.stringify(protectedUser));
       } else {
         localStorage.removeItem("jee_rivals_user");
       }
@@ -121,6 +135,7 @@ export function recordSavedAccount(user, token = null, pin = null) {
     const existing = list.find((a) => a.username?.toLowerCase() === user.username?.toLowerCase());
     const preservedToken = activeToken || existing?.token || "";
     const preservedPin = pin || existing?.pin || "";
+    const highElo = Math.max(Number(existing?.overall_elo) || 1200, Number(user.overall_elo) || 1200);
     const filtered = list.filter(
       (a) => a.username?.toLowerCase() !== user.username?.toLowerCase()
     );
@@ -128,7 +143,7 @@ export function recordSavedAccount(user, token = null, pin = null) {
       id: user.id,
       username: user.username,
       avatar_id: user.avatar_id || "flame",
-      overall_elo: Math.round(user.overall_elo || 1200),
+      overall_elo: Math.round(highElo),
       current_division: user.current_division || "BRONZE",
       title: user.title || "JEE Aspirant",
       token: preservedToken,

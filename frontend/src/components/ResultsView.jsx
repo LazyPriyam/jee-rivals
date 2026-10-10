@@ -331,12 +331,23 @@ export default function ResultsView({ roomCode, user, onReturnArena, onRematch, 
 
                 {/* Diagram */}
                 {q.has_diagram && q.diagram_urls && q.diagram_urls.length > 0 && (
-                  <div className="mb-4 bg-[#1e2433] border border-white/10 rounded-xl p-3 inline-block">
-                    <img
-                      src={q.diagram_urls[0]}
-                      alt="Question diagram"
-                      className="max-h-48 object-contain rounded bg-white p-2"
-                    />
+                  <div className="mb-4 bg-[#1e2433] border border-white/10 rounded-xl p-3 inline-block max-w-full">
+                    <div className="flex flex-wrap gap-2 items-center">
+                      {q.diagram_urls.map((url, dIdx) => (
+                        <div key={dIdx} className="flex flex-col items-center">
+                          <img
+                            src={url}
+                            alt={`Question diagram ${dIdx + 1}`}
+                            className="max-h-48 object-contain rounded bg-white p-2"
+                          />
+                          {q.diagram_urls.length > 1 && (
+                            <span className="text-[10px] text-slate-400 mt-1 font-mono">
+                              Figure {dIdx + 1}
+                            </span>
+                          )}
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 )}
 

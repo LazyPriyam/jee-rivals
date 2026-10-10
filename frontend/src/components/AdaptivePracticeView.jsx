@@ -170,17 +170,39 @@ export default function AdaptivePracticeView({ user, onOpenAuth, onNavigateTab, 
             } catch (_) {}
           }
         } else {
-          // Server says no active practice session for this user
-          setSession(null);
-          setQuestion(null);
-          setSubmitted(false);
-          setResult(null);
-          setSelectedAnswer('');
-          setTimeSpentSeconds(0);
+          // Server says no active practice session in memory for this user
+          // Check if user has an un-finalized local session draft before wiping
+          let hasRecentDraft = false;
           if (storageSessionKey) {
-            try { localStorage.removeItem(storageSessionKey); } catch (_) {}
+            try {
+              const raw = localStorage.getItem(storageSessionKey);
+              if (raw) {
+                const saved = JSON.parse(raw);
+                if (saved?.session && saved?.question && saved?.userId === user.id && Date.now() - (saved.timestamp || 0) < 3 * 3600 * 1000) {
+                  hasRecentDraft = true;
+                  setSession(saved.session);
+                  setQuestion(saved.question);
+                  setSubmitted(saved.submitted || false);
+                  setResult(saved.result || null);
+                  setSelectedAnswer(saved.selectedAnswer || '');
+                  setTimeSpentSeconds(saved.timeSpentSeconds || 0);
+                  setActionError('Connection re-established. Your active practice progress has been preserved.');
+                }
+              }
+            } catch (_) {}
           }
-          try { localStorage.removeItem('jee_active_adaptive_session'); } catch (_) {}
+          if (!hasRecentDraft) {
+            setSession(null);
+            setQuestion(null);
+            setSubmitted(false);
+            setResult(null);
+            setSelectedAnswer('');
+            setTimeSpentSeconds(0);
+            if (storageSessionKey) {
+              try { localStorage.removeItem(storageSessionKey); } catch (_) {}
+            }
+            try { localStorage.removeItem('jee_active_adaptive_session'); } catch (_) {}
+          }
         }
       })
       .catch((err) => {
@@ -382,13 +404,20 @@ export default function AdaptivePracticeView({ user, onOpenAuth, onNavigateTab, 
 
   const handleSessionError = (err, defaultMsg) => {
     const msg = err?.message || defaultMsg;
+    // Transient network, build or restart errors - NEVER wipe session
+    const isTransient = err?.status === 502 || err?.status === 503 || err?.status === 504 || (typeof navigator !== 'undefined' && !navigator.onLine);
+    if (isTransient) {
+      setActionError('The server is currently syncing updates. Your active challenge and answer are safe. Please retry in a few seconds.');
+      return;
+    }
+
     if (
       err?.status === 404 ||
       err?.status === 400 ||
       msg.toLowerCase().includes('not found') ||
       msg.toLowerCase().includes('already completed')
     ) {
-      // The session no longer exists on the server or belongs to another user
+      // The session was explicitly concluded on the server
       setSession(null);
       setQuestion(null);
       setResult(null);
@@ -398,7 +427,7 @@ export default function AdaptivePracticeView({ user, onOpenAuth, onNavigateTab, 
         try { localStorage.removeItem(storageSessionKey); } catch (_) {}
       }
       try { localStorage.removeItem('jee_active_adaptive_session'); } catch (_) {}
-      setActionError('The active practice session was concluded or belongs to another account. You can configure and start a fresh session below.');
+      setActionError('The practice session has concluded. You can configure and start a fresh session below.');
     } else {
       setActionError(msg);
     }

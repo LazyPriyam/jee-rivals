@@ -66,8 +66,9 @@ export default function MockTestView({ room, user, onMatchComplete, onExitToDash
   // Global server-synchronized deadline
   const getExamDeadline = () => {
     // 1. Prefer positive server-computed remaining seconds
-    if (room.time_remaining_seconds != null && room.time_remaining_seconds > 0) {
-      return Date.now() + room.time_remaining_seconds * 1000;
+    const parsedSec = Number(room.time_remaining_seconds);
+    if (!isNaN(parsedSec) && parsedSec > 0) {
+      return Date.now() + parsedSec * 1000;
     }
     // 2. Strict UTC parse of started_at
     if (room.started_at) {
@@ -212,11 +213,12 @@ export default function MockTestView({ room, user, onMatchComplete, onExitToDash
     return () => clearInterval(syncInterval);
   }, [room.code]);
 
-  // Format timer as HH:MM:SS
+  // Format timer as HH:MM:SS (defensive against NaN or negative)
   const formatTime = (seconds) => {
-    const h = Math.floor(seconds / 3600);
-    const m = Math.floor((seconds % 3600) / 60);
-    const s = seconds % 60;
+    const total = Math.max(0, Math.floor(Number(seconds) || 0));
+    const h = Math.floor(total / 3600);
+    const m = Math.floor((total % 3600) / 60);
+    const s = total % 60;
     return `${h < 10 ? '0' : ''}${h}:${m < 10 ? '0' : ''}${m}:${s < 10 ? '0' : ''}${s}`;
   };
 
@@ -368,38 +370,38 @@ export default function MockTestView({ room, user, onMatchComplete, onExitToDash
 
   return (
     <div className="bg-[#f1f5f9] text-[#0f172a] min-h-screen flex flex-col font-sans select-none">
-      {/* 1. Official NTA Exam Header Bar */}
-      <header className="bg-[#1e293b] text-white border-b-2 border-orange-500 shadow-md">
-        <div className="max-w-7xl mx-auto px-4 py-2 flex flex-wrap items-center justify-between gap-3">
-          <div className="flex items-center gap-3">
-            <div className="bg-orange-500 text-white font-black text-xs px-2.5 py-1 rounded">
+      {/* 1. Official NTA Exam Header Bar - Permanently Pinned Sticky */}
+      <header className="sticky top-0 z-40 bg-[#1e293b] text-white border-b-2 border-orange-500 shadow-md">
+        <div className="max-w-7xl mx-auto px-3 sm:px-4 py-2 flex items-center justify-between gap-2 sm:gap-3">
+          <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+            <div className="bg-orange-500 text-white font-black text-[11px] sm:text-xs px-2 sm:px-2.5 py-1 rounded shrink-0">
               NTA CBT
             </div>
-            <div>
-              <h1 className="text-sm sm:text-base font-bold text-white tracking-tight">
+            <div className="min-w-0">
+              <h1 className="text-xs sm:text-base font-bold text-white tracking-tight truncate">
                 JEE (Main) 2026 Examination - Computer Based Test
               </h1>
-              <p className="text-[10px] text-slate-300 font-mono">
+              <p className="text-[9px] sm:text-[10px] text-slate-300 font-mono truncate">
                 Room #{room.code} • Marking: +4.0 Correct, -1.0 Incorrect
               </p>
             </div>
           </div>
 
           {/* Candidate Details & Timer Box */}
-          <div className="flex items-center gap-4">
-            {/* Real NTA Time Left Box */}
-            <div className="flex items-center gap-2 bg-[#0f172a] border border-orange-500/80 px-3.5 py-1.5 rounded-lg text-white font-mono text-sm shadow-inner">
-              <Clock className="w-4 h-4 text-orange-400" />
+          <div className="flex items-center gap-2 sm:gap-4 shrink-0">
+            {/* Real NTA Time Left Box (Permanently Pinned) */}
+            <div className="flex items-center gap-1.5 sm:gap-2 bg-[#0f172a] border border-orange-500/90 px-2.5 sm:px-3.5 py-1.5 rounded-lg text-white font-mono shadow-inner shrink-0">
+              <Clock className="w-4 h-4 text-orange-400 shrink-0" />
               <div className="text-left">
-                <span className="text-[9px] uppercase tracking-wider block text-slate-400 font-bold">Time Left</span>
-                <span className={`font-black tracking-wider ${timeRemaining < 300 ? 'text-red-400 animate-pulse' : 'text-orange-400'}`}>
+                <span className="text-[8px] sm:text-[9px] uppercase tracking-wider block text-slate-400 font-bold leading-none mb-0.5">Time Left</span>
+                <span className={`text-xs sm:text-sm font-black tracking-wider block leading-none ${timeRemaining < 300 ? 'text-red-400 animate-pulse' : 'text-orange-400'}`}>
                   {formatTime(timeRemaining)}
                 </span>
               </div>
             </div>
 
             {/* Candidate Info Box */}
-            <div className="hidden sm:flex items-center gap-2 bg-[#0f172a] px-3 py-1.5 rounded-lg border border-slate-700 text-xs">
+            <div className="hidden md:flex items-center gap-2 bg-[#0f172a] px-3 py-1.5 rounded-lg border border-slate-700 text-xs">
               <div className="w-7 h-7 rounded-full bg-slate-700 flex items-center justify-center font-bold text-white">
                 <User className="w-4 h-4" />
               </div>
@@ -416,7 +418,7 @@ export default function MockTestView({ room, user, onMatchComplete, onExitToDash
                   sound.click();
                   onExitToDashboard();
                 }}
-                className="px-3 py-1.5 bg-[#0f172a] hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-700 hover:border-slate-500 rounded-lg text-xs font-bold transition cursor-pointer flex items-center gap-1.5"
+                className="px-2.5 sm:px-3 py-1.5 bg-[#0f172a] hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-700 hover:border-slate-500 rounded-lg text-[11px] sm:text-xs font-bold transition cursor-pointer flex items-center gap-1 shrink-0"
                 title="Pause screen and return to Dashboard (Match remains live on Dashboard)"
               >
                 <span>Dashboard</span>
@@ -556,16 +558,27 @@ export default function MockTestView({ room, user, onMatchComplete, onExitToDash
 
               {/* Diagram */}
               {currentQ.has_diagram && currentQ.diagram_urls && currentQ.diagram_urls.length > 0 && (
-                <div className="mb-6 p-3 bg-slate-50 border border-slate-200 rounded-lg inline-block">
-                  <div className="text-[11px] text-slate-500 font-semibold mb-1 flex items-center gap-1">
+                <div className="mb-6 p-3 bg-slate-50 border border-slate-200 rounded-lg inline-block max-w-full">
+                  <div className="text-[11px] text-slate-500 font-semibold mb-2 flex items-center gap-1">
                     <ImageIcon className="w-3.5 h-3.5 text-orange-500" />
-                    <span>Diagram</span>
+                    <span>Diagrams ({currentQ.diagram_urls.length})</span>
                   </div>
-                  <img
-                    src={currentQ.diagram_urls[0]}
-                    alt="Question Diagram"
-                    className="max-h-60 object-contain rounded border border-slate-200 bg-white"
-                  />
+                  <div className="flex flex-wrap gap-3 items-center">
+                    {currentQ.diagram_urls.map((url, dIdx) => (
+                      <div key={dIdx} className="flex flex-col items-center">
+                        <img
+                          src={url}
+                          alt={`Question Diagram ${dIdx + 1}`}
+                          className="max-h-60 object-contain rounded border border-slate-200 bg-white"
+                        />
+                        {currentQ.diagram_urls.length > 1 && (
+                          <span className="text-[10px] text-slate-400 mt-1 font-mono">
+                            {dIdx === 0 ? "Figure / Setup" : `Figure ${dIdx + 1} (Options / Details)`}
+                          </span>
+                        )}
+                      </div>
+                    ))}
+                  </div>
                 </div>
               )}
 
@@ -672,11 +685,37 @@ export default function MockTestView({ room, user, onMatchComplete, onExitToDash
         {/* Right Pane: Official NTA Question Palette & Legend (4 Cols) */}
         <div className="lg:col-span-4 flex flex-col justify-between bg-white border border-slate-300 rounded-lg shadow-sm p-4">
           <div>
+            {/* Authentic NTA Right Pane: Candidate Info & Countdown Clock */}
+            <div className="bg-[#0f172a] text-white p-3 rounded-lg border border-orange-500/40 mb-3 shadow-inner flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2.5 min-w-0">
+                <div className="w-9 h-9 rounded-md bg-slate-800 border border-slate-700 flex items-center justify-center font-bold text-orange-400 shrink-0">
+                  <User className="w-5 h-5" />
+                </div>
+                <div className="min-w-0">
+                  <span className="text-[8px] uppercase tracking-wider block text-slate-400 font-bold leading-none mb-0.5">Candidate</span>
+                  <div className="text-xs font-bold text-white truncate">{user?.username || 'Candidate'}</div>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 bg-[#1e293b] border border-orange-500/80 px-2.5 py-1.5 rounded-md font-mono shrink-0">
+                <Clock className="w-4 h-4 text-orange-400 shrink-0" />
+                <div className="text-right">
+                  <span className="text-[8px] uppercase tracking-wider block text-slate-400 font-bold leading-none mb-0.5">Time Left</span>
+                  <span className={`text-xs sm:text-sm font-black tracking-wider block leading-none ${timeRemaining < 300 ? 'text-red-400 animate-pulse' : 'text-orange-400'}`}>
+                    {formatTime(timeRemaining)}
+                  </span>
+                </div>
+              </div>
+            </div>
+
             {/* Palette Header */}
-            <div className="pb-3 mb-3 border-b border-slate-200">
+            <div className="pb-2.5 mb-3 border-b border-slate-200 flex items-center justify-between">
               <h3 className="font-bold text-xs text-slate-800 uppercase tracking-wider">
                 Question Palette - {selectedSubject}
               </h3>
+              <span className="text-[10px] text-slate-500 font-mono">
+                {questions.filter((q) => q.subject === selectedSubject).length} Questions
+              </span>
             </div>
 
             {/* Official NTA 5-Color Legend */}

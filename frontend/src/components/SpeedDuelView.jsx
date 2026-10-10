@@ -556,16 +556,27 @@ export default function SpeedDuelView({
           <div className="mb-6 bg-[#1e2433] border border-white/10 rounded-2xl p-3 flex flex-col items-center">
             <div className="text-[11px] text-slate-400 flex items-center gap-1.5 mb-2 self-start font-medium">
               <ImageIcon className="w-3.5 h-3.5 text-orange-400" />
-              <span>Problem Diagram Crop (Click to toggle zoom)</span>
+              <span>Problem Diagrams ({currentQ.diagram_urls.length})</span>
             </div>
-            <img
-              src={currentQ.diagram_urls[0]}
-              alt="Problem Diagram"
-              onClick={() => setDiagramZoom(!diagramZoom)}
-              className={`max-h-64 object-contain rounded-lg border border-slate-700/50 bg-white p-2 cursor-pointer transition ${
-                diagramZoom ? 'scale-125 z-20 shadow-2xl' : 'hover:opacity-95'
-              }`}
-            />
+            <div className="flex flex-wrap gap-3 justify-center items-center">
+              {currentQ.diagram_urls.map((url, dIdx) => (
+                <div key={dIdx} className="flex flex-col items-center">
+                  <img
+                    src={url}
+                    alt={`Problem Diagram ${dIdx + 1}`}
+                    onClick={() => setDiagramZoom(!diagramZoom)}
+                    className={`max-h-64 object-contain rounded-lg border border-slate-700/50 bg-white p-2 cursor-pointer transition ${
+                      diagramZoom ? 'scale-125 z-20 shadow-2xl' : 'hover:opacity-95'
+                    }`}
+                  />
+                  {currentQ.diagram_urls.length > 1 && (
+                    <span className="text-[10px] text-slate-400 mt-1 font-mono">
+                      {dIdx === 0 ? "Figure / Prompt" : `Figure ${dIdx + 1} (Options / Details)`}
+                    </span>
+                  )}
+                </div>
+              ))}
+            </div>
           </div>
         )}
 
