@@ -727,11 +727,13 @@ export default function AdaptivePracticeView({ user, onOpenAuth, onNavigateTab, 
                       <span>My Learnt Chapters Only</span>
                     </span>
                     <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 font-bold">
-                      {learntChapters.length > 0 ? `${learntChapters.length} Active` : 'Recommended'}
+                      {learntChapters.length > 0 ? `${learntChapters.length} Active` : '0 Marked'}
                     </span>
                   </div>
                   <p className="text-xs text-slate-400 leading-relaxed">
-                    Plucks questions strictly from the chapters you have marked as learnt in your Skill Tree.
+                    {learntChapters.length > 0
+                      ? `Plucks questions strictly from your ${learntChapters.length} marked chapters in the Skill Tree.`
+                      : 'No chapters marked yet in your Skill Tree. Adaptive tests will rotate all chapters until you mark your studied topics.'}
                   </p>
                 </button>
 
@@ -794,9 +796,31 @@ export default function AdaptivePracticeView({ user, onOpenAuth, onNavigateTab, 
               <div className="flex items-center justify-between">
                 <label className="text-xs font-bold text-slate-300 font-mono uppercase flex items-center gap-1.5">
                   <Layers className="w-3.5 h-3.5 text-orange-400" />
-                  <span>4. Chapter Selection ({selectedChapters.length > 0 ? `${selectedChapters.length} Selected` : 'All Chapters'})</span>
+                  <span>
+                    4. Chapter Selection ({selectedChapters.length > 0
+                      ? `${selectedChapters.length} Manually Selected`
+                      : (syllabusScope === 'LEARNT_ONLY' && learntChapters.length > 0
+                          ? `All ${learntChapters.length} Learnt Chapters Active`
+                          : 'Full Syllabus')})
+                  </span>
                 </label>
                 <div className="flex items-center gap-2">
+                  {learntChapters.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        sound.click();
+                        const matching = currentChapterList
+                          .filter((c) => learntChapters.includes(c.chapter))
+                          .map((c) => c.chapter);
+                        setSelectedChapters(matching);
+                      }}
+                      className="text-[11px] font-mono text-emerald-400 hover:text-emerald-300 transition cursor-pointer font-bold"
+                      title="Select all marked learnt chapters in this subject"
+                    >
+                      Select Learnt ({currentChapterList.filter((c) => learntChapters.includes(c.chapter)).length})
+                    </button>
+                  )}
                   {selectedChapters.length > 0 && (
                     <button
                       type="button"
@@ -902,10 +926,26 @@ export default function AdaptivePracticeView({ user, onOpenAuth, onNavigateTab, 
                   </div>
                 )}
               </div>
-              <p className="text-[11px] text-slate-400 font-mono">
-                {selectedChapters.length === 0
-                  ? '⚡ Leaving unselected activates full syllabus rotation with AI dynamic weak-topic prioritization.'
-                  : `🎯 Practice will rotate across the ${selectedChapters.length} selected chapters.`}
+              <p className="text-[11px] font-mono">
+                {selectedChapters.length > 0 ? (
+                  <span className="text-orange-300">
+                    🎯 <strong>Manual filter active:</strong> Practice will rotate strictly across your {selectedChapters.length} selected chapters.
+                  </span>
+                ) : syllabusScope === 'LEARNT_ONLY' ? (
+                  learntChapters.length > 0 ? (
+                    <span className="text-emerald-300">
+                      ⭐ <strong>Learnt Scope active:</strong> No specific chapter selected below — practice will rotate exclusively across your {learntChapters.length} marked learnt chapters.
+                    </span>
+                  ) : (
+                    <span className="text-amber-300">
+                      ⚠️ <strong>0 chapters marked in Skill Tree:</strong> Because no learnt chapters are marked, full syllabus rotation will be used until you mark your studied topics.
+                    </span>
+                  )
+                ) : (
+                  <span className="text-slate-300">
+                    🌐 <strong>Full Syllabus active:</strong> No specific chapter selected — all {subject === 'Full Syllabus' ? 'JEE' : subject} chapters will rotate dynamically with AI weak-topic prioritization.
+                  </span>
+                )}
               </p>
             </div>
 
@@ -954,7 +994,18 @@ export default function AdaptivePracticeView({ user, onOpenAuth, onNavigateTab, 
             </div>
 
             {/* Launch CTA */}
-            <div className="pt-4 border-t border-white/10">
+            <div className="pt-4 border-t border-white/10 space-y-2">
+              <div className="text-center text-xs text-slate-400 font-mono">
+                Active Circuit Scope:{' '}
+                <strong className="text-white">
+                  {selectedChapters.length > 0
+                    ? `${selectedChapters.length} Selected Chapters`
+                    : (syllabusScope === 'LEARNT_ONLY' && learntChapters.length > 0
+                        ? `${learntChapters.length} Learnt Chapters (${subject})`
+                        : `Complete Syllabus (${subject})`)}
+                </strong>
+                {' '}• Standard: <strong className="text-amber-400">{targetExam}</strong>
+              </div>
               <button
                 type="button"
                 onClick={handleStartSession}
