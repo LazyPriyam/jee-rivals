@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { api } from '../utils/api';
 import SphereGridSkillTree from './SphereGridSkillTree';
+import GrowthTriadRadar from './GrowthTriadRadar';
 import { formatIST, formatISTDate, formatISTTime, formatLastOnline } from '../utils/dateUtils';
 import {
   User, Trophy, Shield, Activity, Target, Zap, Clock, CheckCircle2,
@@ -669,6 +670,13 @@ export default function ProfileView({
           ========================================================================= */}
       {activeSubTab === 'overview' && (
         <div className="space-y-8 animate-fadeIn">
+          {/* Aspirant Growth Triad Matrix */}
+          <GrowthTriadRadar
+            growthTriad={p.growth_triad || data.user?.growth_triad}
+            user={p}
+            compact={false}
+          />
+
           {/* Quad Metric Stats Grid */}
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
             <div className="bg-[#161a24] border border-white/10 rounded-2xl p-5 shadow-lg relative overflow-hidden">
@@ -1268,7 +1276,7 @@ export default function ProfileView({
 
             {/* Category Filter Pills */}
             <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none">
-              {['ALL', 'ELO', 'SUBJECT', 'COMBAT', 'VOLUME'].map((cat) => (
+              {['ALL', 'TRIAD', 'ELO', 'SUBJECT', 'COMBAT', 'VOLUME'].map((cat) => (
                 <button
                   key={cat}
                   onClick={() => setSelectedAchFilter(cat)}

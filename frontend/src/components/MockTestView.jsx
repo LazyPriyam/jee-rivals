@@ -39,6 +39,8 @@ export default function MockTestView({ room, user, onMatchComplete, onExitToDash
   const [answers, setAnswers] = useState(() => savedProgress?.answers || {}); // q_id -> selected_option
   const [reviewMarks, setReviewMarks] = useState(() => savedProgress?.reviewMarks || {}); // q_id -> bool
   const [visited, setVisited] = useState(() => savedProgress?.visited || { 0: true });
+  const [questionTimes, setQuestionTimes] = useState(() => savedProgress?.questionTimes || {}); // q_id -> seconds
+  const [timelineEvents, setTimelineEvents] = useState(() => savedProgress?.timelineEvents || []);
   const [submitting, setSubmitting] = useState(false);
   const [submitModalOpen, setSubmitModalOpen] = useState(false);
   const [exitWarningModalOpen, setExitWarningModalOpen] = useState(false);
@@ -128,11 +130,13 @@ export default function MockTestView({ room, user, onMatchComplete, onExitToDash
       answers,
       reviewMarks,
       visited,
+      questionTimes,
+      timelineEvents,
       deadline: deadlineRef.current,
       timeRemaining,
       timestamp: Date.now()
     });
-  }, [currentIndex, answers, reviewMarks, visited, timeRemaining, room.code, user?.id]);
+  }, [currentIndex, answers, reviewMarks, visited, questionTimes, timelineEvents, timeRemaining, room.code, user?.id]);
 
   // Load questions if not loaded
   useEffect(() => {
@@ -164,6 +168,15 @@ export default function MockTestView({ room, user, onMatchComplete, onExitToDash
     const tick = () => {
       const rem = Math.max(0, Math.ceil((deadlineRef.current - Date.now()) / 1000));
       setTimeRemaining(rem);
+
+      const activeQ = questions[currentIndex];
+      if (activeQ?.id) {
+        setQuestionTimes((prev) => ({
+          ...prev,
+          [activeQ.id]: (prev[activeQ.id] || 0) + 1
+        }));
+      }
+
       if (rem <= 0 && Date.now() - startTimeRef.current > 3000) {
         clearInterval(timerRef.current);
         handleFinalSubmit();
@@ -314,7 +327,7 @@ export default function MockTestView({ room, user, onMatchComplete, onExitToDash
 
     const totalTime = Math.round((Date.now() - startTimeRef.current) / 1000);
     try {
-      await api.rooms.submitBulk(room.code, answers, totalTime);
+      await api.rooms.submitBulk(room.code, answers, totalTime, questionTimes, timelineEvents);
       onMatchComplete();
     } catch (err) {
       console.error(err);

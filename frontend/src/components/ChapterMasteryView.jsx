@@ -92,6 +92,7 @@ export default function ChapterMasteryView({
   const [tierFilter, setTierFilter] = useState('ALL');
   const [weightageFilter, setWeightageFilter] = useState('ALL');
   const [searchQuery, setSearchQuery] = useState('');
+  const [sortBy, setSortBy] = useState('DEFAULT'); // 'DEFAULT', 'ACCURACY_ASC', 'ACCURACY_DESC', 'SPEED_SLOW', 'SPEED_FAST'
 
   // Graveyard state
   const [graveyardFilter, setGraveyardFilter] = useState('ALL'); // 'ALL' or 'BOOKMARKED'
@@ -217,6 +218,26 @@ export default function ChapterMasteryView({
       }
     }
     return true;
+  });
+
+  const displayedChapters = [...filteredChapters].sort((a, b) => {
+    if (sortBy === 'ACCURACY_ASC') {
+      const accA = a.attempts > 0 ? a.accuracy : 999;
+      const accB = b.attempts > 0 ? b.accuracy : 999;
+      return accA - accB;
+    }
+    if (sortBy === 'ACCURACY_DESC') {
+      return (b.accuracy || 0) - (a.accuracy || 0);
+    }
+    if (sortBy === 'SPEED_SLOW') {
+      return (b.avg_time_seconds || 0) - (a.avg_time_seconds || 0);
+    }
+    if (sortBy === 'SPEED_FAST') {
+      const tA = a.avg_time_seconds || 9999;
+      const tB = b.avg_time_seconds || 9999;
+      return tA - tB;
+    }
+    return 0;
   });
 
   // Filter graveyard questions
@@ -445,12 +466,24 @@ export default function ChapterMasteryView({
                 <option value="MEDIUM">Medium Yield</option>
                 <option value="LOW">Low Yield</option>
               </select>
+
+              <select
+                value={sortBy}
+                onChange={(e) => setSortBy(e.target.value)}
+                className="px-2.5 py-1.5 bg-[#0a0d14] border border-white/15 rounded-xl text-white text-xs font-semibold focus:outline-none transition cursor-pointer"
+              >
+                <option value="DEFAULT">Sort: Default Syllabus</option>
+                <option value="ACCURACY_ASC">Accuracy: Lowest First (Fix Traps)</option>
+                <option value="ACCURACY_DESC">Accuracy: Highest First</option>
+                <option value="SPEED_SLOW">Speed: Slowest First (Time Traps)</option>
+                <option value="SPEED_FAST">Speed: Fastest First</option>
+              </select>
             </div>
           </div>
 
           {/* Chapters Grid */}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-            {filteredChapters.map((ch) => {
+            {displayedChapters.map((ch) => {
               const tierConf = TIER_COLORS[ch.mastery_tier] || TIER_COLORS.CRITICAL;
               const hasAttempts = ch.attempts > 0;
               return (
@@ -474,8 +507,8 @@ export default function ChapterMasteryView({
                       {ch.chapter}
                     </h3>
 
-                    {/* Elo & Accuracy Stats */}
-                    <div className="flex items-center justify-between mt-3 pt-3 border-t border-white/5">
+                    {/* Elo & Attempts */}
+                    <div className="flex items-center justify-between mt-3 pt-2.5 border-t border-white/5">
                       <div>
                         <div className="text-[10px] text-slate-500 uppercase font-mono">Chapter Elo</div>
                         <div className="text-base font-black font-mono text-white flex items-center gap-1.5">
@@ -485,17 +518,56 @@ export default function ChapterMasteryView({
                           </span>
                         </div>
                       </div>
-
                       <div className="text-right">
-                        <div className="text-[10px] text-slate-500 uppercase font-mono">Accuracy</div>
-                        <div className="text-xs font-mono font-bold text-slate-300">
-                          {hasAttempts ? `${ch.accuracy}% (${ch.correct}/${ch.attempts})` : 'Unattempted'}
+                        <span className="text-[10px] text-slate-500 font-mono">
+                          {hasAttempts ? `${ch.attempts} attempted` : '0 attempts'}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Chapter-Wise Accuracy & Speed Matrix */}
+                    <div className="grid grid-cols-2 gap-2 mt-2 pt-2 border-t border-white/5 font-mono">
+                      <div className="bg-[#0e121a] p-2 rounded-xl border border-white/5">
+                        <div className="text-[9px] text-slate-400 uppercase flex items-center gap-1 mb-0.5">
+                          <Target className="w-2.5 h-2.5 text-amber-400" />
+                          <span>Accuracy</span>
+                        </div>
+                        <div className={`text-xs font-black ${
+                          ch.accuracy >= 75 ? 'text-emerald-400' : ch.accuracy >= 50 ? 'text-blue-400' : hasAttempts ? 'text-red-400' : 'text-slate-500'
+                        }`}>
+                          {hasAttempts ? `${ch.accuracy}%` : 'Untested'}
+                        </div>
+                        <div className="text-[9px] text-slate-500">
+                          {hasAttempts ? `${ch.correct}/${ch.attempts} correct` : 'No data'}
+                        </div>
+                      </div>
+
+                      <div className="bg-[#0e121a] p-2 rounded-xl border border-white/5 text-right">
+                        <div className="text-[9px] text-slate-400 uppercase flex items-center justify-end gap-1 mb-0.5">
+                          <Clock className="w-2.5 h-2.5 text-cyan-400" />
+                          <span>Speed / Pace</span>
+                        </div>
+                        <div className="text-xs font-black">
+                          {ch.avg_time_seconds ? (
+                            <span className={
+                              ch.speed_rating === 'FAST' ? 'text-cyan-400' :
+                              ch.speed_rating === 'OPTIMAL' ? 'text-emerald-400' :
+                              'text-amber-400'
+                            }>
+                              ~{ch.avg_time_seconds}s/q
+                            </span>
+                          ) : (
+                            <span className="text-slate-500">Untested</span>
+                          )}
+                        </div>
+                        <div className="text-[9px] text-slate-500">
+                          {ch.ideal_time_seconds ? `Target: ${ch.ideal_time_seconds}s` : ''}
                         </div>
                       </div>
                     </div>
 
                     {/* Progress Bar */}
-                    <div className="w-full h-1.5 bg-slate-800 rounded-full mt-2 overflow-hidden">
+                    <div className="w-full h-1.5 bg-slate-800 rounded-full mt-2.5 overflow-hidden">
                       <div
                         className={`h-full rounded-full ${
                           ch.elo >= 1800

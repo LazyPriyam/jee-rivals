@@ -135,6 +135,9 @@ def format_user_profile(user: dict, cursor=None) -> UserProfile:
     from backend.app.tools.streaks_engine import get_user_streak_meta
     streak_meta = get_user_streak_meta(user, cursor)
 
+    from backend.app.tools.growth_triad_engine import calculate_growth_triad
+    triad_meta = calculate_growth_triad(user, cursor)
+
     return UserProfile(
         id=user["id"],
         username=user["username"],
@@ -186,7 +189,8 @@ def format_user_profile(user: dict, cursor=None) -> UserProfile:
         is_streak_active_today=streak_meta["is_active_today"],
         streak_meta=streak_meta,
         last_active=user.get("last_active"),
-        is_online=room_hub.is_user_online(user["id"], user.get("last_active"))
+        is_online=room_hub.is_user_online(user["id"], user.get("last_active")),
+        growth_triad=triad_meta
     )
 
 

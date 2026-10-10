@@ -62,6 +62,7 @@ class UserProfile(BaseModel):
     streak_meta: Optional[Dict[str, Any]] = None
     last_active: Optional[str] = None
     is_online: Optional[bool] = False
+    growth_triad: Optional[Dict[str, Any]] = None
 
 class ProfileUpdateRequest(BaseModel):
     target_college: Optional[str] = None

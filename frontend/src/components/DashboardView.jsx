@@ -5,6 +5,7 @@ import { sound } from '../utils/sound';
 import OngoingMatchCard from './OngoingMatchCard';
 import DivisionGuideModal from './DivisionGuideModal';
 import StreakModal from './StreakModal';
+import GrowthTriadRadar from './GrowthTriadRadar';
 import { clearActiveTestRoom } from '../utils/storageGuardian';
 
 export default function DashboardView({
@@ -370,6 +371,18 @@ export default function DashboardView({
               )}
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Aspirant Growth Triad Hero Card */}
+      {user && (
+        <div className="mb-10">
+          <GrowthTriadRadar
+            growthTriad={user.growth_triad}
+            user={user}
+            compact={true}
+            onNavigateTab={onNavigateTab}
+          />
         </div>
       )}
 

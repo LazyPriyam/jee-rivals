@@ -379,10 +379,10 @@ export const api = {
         method: "POST",
         body: JSON.stringify(data),
       }),
-    submitBulk: (code, answers, total_time_seconds) =>
+    submitBulk: (code, answers, total_time_seconds, question_times = null, timeline = null) =>
       request(`/api/rooms/${code}/submit_bulk`, {
         method: "POST",
-        body: JSON.stringify({ answers, total_time_seconds }),
+        body: JSON.stringify({ answers, total_time_seconds, question_times, timeline }),
       }),
     results: (code) => request(`/api/rooms/${code}/results`),
     getMyHistory: () => request("/api/rooms/my/history"),

@@ -1225,6 +1225,8 @@ async def start_room(code: str, user: dict = Depends(get_current_user)):
 class BulkSubmissionRequest(BaseModel):
     answers: Dict[str, str]  # question_id -> selected_option
     total_time_seconds: int
+    question_times: Optional[Dict[str, int]] = None
+    timeline: Optional[List[Dict[str, Any]]] = None
 
 @router.post("/{code}/submit_bulk")
 async def submit_bulk_mock(code: str, req: BulkSubmissionRequest, user: dict = Depends(get_current_user)):
@@ -1273,6 +1275,10 @@ async def submit_bulk_mock(code: str, req: BulkSubmissionRequest, user: dict = D
         correct_ans = q["correct_answer"]
         q_type = q.get("question_type", "MCQ")
 
+        q_time = (req.question_times.get(q_id) if req.question_times else None)
+        if q_time is None or q_time <= 0:
+            q_time = max(1, req.total_time_seconds // max(1, len(q_ids)))
+
         if user_choice in ("NONE", "SKIPPED", "", None):
             delta_score = 0
             delta_marks = 0.0
@@ -1288,21 +1294,20 @@ async def submit_bulk_mock(code: str, req: BulkSubmissionRequest, user: dict = D
                 delta_marks = -1.0
 
             # Record question attempt with anti-guess / anti-spam guardrails
-            time_per_item = max(1, req.total_time_seconds // max(1, len(q_ids)))
             from backend.app.tools.elo_engine import update_question_elo_from_attempt
             q_elo_delta, _ = update_question_elo_from_attempt(
                 c,
                 user["id"],
                 q["id"],
                 is_corr,
-                time_per_item,
+                q_time,
                 float(user.get("overall_elo", 1200.0)),
                 now
             )
             c.execute("""
                 INSERT INTO activity_log (user_id, question_id, subject, chapter, is_correct, time_spent_seconds, elo_delta, mode, created_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (user["id"], q["id"], q["subject"], q["chapter"], 1 if is_corr else 0, time_per_item, q_elo_delta, room["mode"], now))
+            """, (user["id"], q["id"], q["subject"], q["chapter"], 1 if is_corr else 0, q_time, q_elo_delta, room["mode"], now))
             from backend.app.tools.elo_engine import record_chapter_attempt
             record_chapter_attempt(c, user["id"], q["subject"], q["chapter"], is_corr)
             try:
@@ -1317,8 +1322,14 @@ async def submit_bulk_mock(code: str, req: BulkSubmissionRequest, user: dict = D
             "selected": user_choice,
             "correct": is_corr,
             "delta_score": delta_score,
-            "delta_marks": delta_marks
+            "delta_marks": delta_marks,
+            "time_spent": q_time,
+            "time_spent_seconds": q_time
         }
+
+    if req.timeline:
+        answers_dict["__meta_timeline"] = req.timeline
+
 
     c.execute("""
         UPDATE room_participants

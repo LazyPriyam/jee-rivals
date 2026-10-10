@@ -333,9 +333,13 @@ def get_public_profile(username: str):
     st_row = c.fetchone()
     best_streak = (st_row["max_streak"] if st_row and st_row["max_streak"] is not None else 0)
 
+    from backend.app.tools.growth_triad_engine import calculate_growth_triad
+    triad_meta = calculate_growth_triad(user, c)
+
     extra_stats = {
         "duel_wins": duel_wins,
-        "best_streak": max(best_streak, 1 if user.get("total_correct", 0) > 0 else 0)
+        "best_streak": max(best_streak, 1 if user.get("total_correct", 0) > 0 else 0),
+        "growth_triad": triad_meta
     }
     achievements_data = evaluate_user_achievements(user, extra_stats)
 

@@ -1,6 +1,7 @@
 import json
 import uuid
 import datetime
+import time
 from typing import Optional, List, Dict, Any
 from fastapi import APIRouter, HTTPException, Depends, status
 from pydantic import BaseModel
@@ -129,13 +130,37 @@ def get_chapters_mastery(user: dict = Depends(get_current_user)):
     """, (user_id,))
     records = {r["chapter"]: dict(r) for r in c.fetchall()}
 
+    # Also query activity_log for real pacing & speed metrics per chapter
+    c.execute("""
+        SELECT chapter, AVG(time_spent_seconds) as avg_time, COUNT(*) as cnt
+        FROM activity_log
+        WHERE user_id = ? AND time_spent_seconds > 0
+        GROUP BY chapter
+    """, (user_id,))
+    speed_records = {r["chapter"]: dict(r) for r in c.fetchall()}
+
     # Also check questions database to see available questions count per chapter (cached)
     db_counts = get_cached_chapter_q_counts(c)
     conn.close()
 
+    # Ideal benchmarks per subject
+    IDEAL_PACE_MAP = {
+        "Chemistry": 70,
+        "Physics": 120,
+        "Mathematics": 170
+    }
+
     # Build matrix from authoritative syllabus
     chapters_out = []
     tier_counts = {"MASTERED": 0, "PROFICIENT": 0, "EMERGING": 0, "CRITICAL": 0}
+
+    raw_stats = user.get("chapter_stats") or "{}"
+    try:
+        user_ch_stats = json.loads(raw_stats) if isinstance(raw_stats, str) else raw_stats
+        if not isinstance(user_ch_stats, dict):
+            user_ch_stats = {}
+    except Exception:
+        user_ch_stats = {}
 
     for subject, units in JEE_SYLLABUS.items():
         for unit_item in units:
@@ -150,9 +175,10 @@ def get_chapters_mastery(user: dict = Depends(get_current_user)):
                     correct = int(user_rec.get("correct") or 0)
                     last_updated = user_rec.get("last_updated")
                 else:
-                    elo = 1200.0
-                    attempts = 0
-                    correct = 0
+                    legacy = user_ch_stats.get(norm_ch) or user_ch_stats.get(ch) or {}
+                    elo = float(legacy.get("elo") or 1200.0)
+                    attempts = int(legacy.get("attempts") or 0)
+                    correct = int(legacy.get("correct") or 0)
                     last_updated = None
 
                 acc = round((correct / attempts * 100), 1) if attempts > 0 else 0.0
@@ -162,6 +188,21 @@ def get_chapters_mastery(user: dict = Depends(get_current_user)):
 
                 q_available = db_counts.get(norm_ch) or db_counts.get(ch) or 0
 
+                # Speed & Pacing calculation
+                ideal_t = IDEAL_PACE_MAP.get(subject, 110)
+                sp_rec = speed_records.get(norm_ch) or speed_records.get(ch)
+                if sp_rec and sp_rec.get("avg_time"):
+                    avg_t = round(float(sp_rec["avg_time"]))
+                    if avg_t < ideal_t * 0.8:
+                        sp_rating = "FAST"
+                    elif avg_t <= ideal_t * 1.25:
+                        sp_rating = "OPTIMAL"
+                    else:
+                        sp_rating = "SLOW"
+                else:
+                    avg_t = None
+                    sp_rating = "UNTESTED"
+
                 chapters_out.append({
                     "subject": subject,
                     "unit": unit_name,
@@ -170,11 +211,15 @@ def get_chapters_mastery(user: dict = Depends(get_current_user)):
                     "attempts": attempts,
                     "correct": correct,
                     "accuracy": acc,
+                    "avg_time_seconds": avg_t,
+                    "ideal_time_seconds": ideal_t,
+                    "speed_rating": sp_rating,
                     "weightage": weightage,
                     "mastery_tier": tier,
                     "questions_available": q_available,
                     "last_updated": last_updated
                 })
+
 
     return {
         "total_chapters": len(chapters_out),

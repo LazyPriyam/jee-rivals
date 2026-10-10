@@ -122,6 +122,11 @@ def invalidate_user_cache(user_id: Optional[str] = None):
     global _USER_CACHE
     if user_id:
         _USER_CACHE.pop(str(user_id), None)
+        try:
+            from backend.app.tools.growth_triad_engine import invalidate_user_triad_cache
+            invalidate_user_triad_cache(str(user_id))
+        except Exception:
+            pass
     else:
         _USER_CACHE.clear()
 
