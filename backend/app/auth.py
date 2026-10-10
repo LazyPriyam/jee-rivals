@@ -63,6 +63,16 @@ def restore_user_from_token_payload(payload: dict) -> Optional[dict]:
     if not user_id or not username:
         return None
     try:
+        # Check persistent backup first to preserve complete progress
+        try:
+            from backend.app.database import restore_users_from_backup, backup_all_users
+            restore_users_from_backup()
+            user = get_user_by_id(user_id) or get_user_by_username(username)
+            if user:
+                return user
+        except Exception:
+            pass
+
         conn = get_connection()
         c = conn.cursor()
         now = datetime.datetime.utcnow().isoformat()
@@ -78,6 +88,10 @@ def restore_user_from_token_payload(payload: dict) -> Optional[dict]:
         """, (user_id, username, phash, now, now))
         conn.commit()
         conn.close()
+        try:
+            backup_all_users()
+        except Exception:
+            pass
         user = get_user_by_id(user_id)
         if not user:
             user = get_user_by_username(username)

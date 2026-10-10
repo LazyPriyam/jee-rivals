@@ -133,7 +133,10 @@ class AdminDeleteUserPayload(BaseModel):
 
 
 @router.get("/users")
-def get_admin_users(x_sync_token: Optional[str] = Header(None, alias="X-Sync-Token")):
+def get_admin_users(
+    include_auth: bool = False,
+    x_sync_token: Optional[str] = Header(None, alias="X-Sync-Token")
+):
     if not x_sync_token or x_sync_token != ADMIN_SYNC_TOKEN:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -142,14 +145,7 @@ def get_admin_users(x_sync_token: Optional[str] = Header(None, alias="X-Sync-Tok
 
     conn = get_connection()
     c = conn.cursor()
-    c.execute("""
-        SELECT id, username, overall_elo, physics_elo, chemistry_elo, math_elo,
-               current_division, weekly_rp, total_solved, total_correct,
-               gold_medals, silver_medals, bronze_medals, created_at, last_active,
-               target_college, target_exam, current_streak, longest_streak, bio
-        FROM users
-        ORDER BY overall_elo DESC, created_at DESC
-    """)
+    c.execute("SELECT * FROM users ORDER BY overall_elo DESC, created_at DESC")
     rows = [dict(r) for r in c.fetchall()]
     conn.close()
 
@@ -158,7 +154,7 @@ def get_admin_users(x_sync_token: Optional[str] = Header(None, alias="X-Sync-Tok
         solved = r.get("total_solved") or 0
         correct = r.get("total_correct") or 0
         acc = round((correct / solved * 100), 1) if solved > 0 else 0.0
-        users.append({
+        u_dict = {
             "id": r["id"],
             "username": r["username"],
             "overall_elo": round(float(r.get("overall_elo") or 1200.0), 1),
@@ -182,9 +178,71 @@ def get_admin_users(x_sync_token: Optional[str] = Header(None, alias="X-Sync-Tok
             "streak": r.get("current_streak") or 0,
             "longest_streak": r.get("longest_streak") or 0,
             "bio": r.get("bio") or ""
-        })
+        }
+        if include_auth:
+            u_dict["pin_hash"] = r.get("pin_hash")
+            u_dict["avatar_id"] = r.get("avatar_id") or "flame"
+            u_dict["title"] = r.get("title") or "JEE Aspirant"
+            u_dict["chapter_stats"] = r.get("chapter_stats") or "{}"
+            u_dict["learnt_chapters"] = r.get("learnt_chapters") or "[]"
+            u_dict["chat_settings"] = r.get("chat_settings") or "{}"
+            u_dict["banner_theme"] = r.get("banner_theme") or "orange_cyber"
+            u_dict["pinned_badges"] = r.get("pinned_badges") or '["elo_bronze", "first_blood"]'
+            u_dict["target_exam_date"] = r.get("target_exam_date") or "JEE Main Jan 2026"
+            u_dict["streak_freezes"] = r.get("streak_freezes") or 1
+            u_dict["streak_history"] = r.get("streak_history") or "[]"
+
+        users.append(u_dict)
 
     return {"users": users, "total": len(users)}
+
+
+class UserUpsertPayload(BaseModel):
+    users: List[Dict[str, Any]]
+
+
+@router.post("/users/upsert")
+def upsert_admin_users(
+    payload: UserUpsertPayload,
+    x_sync_token: Optional[str] = Header(None, alias="X-Sync-Token")
+):
+    if not x_sync_token or x_sync_token != ADMIN_SYNC_TOKEN:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or missing sync authentication token."
+        )
+
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute("PRAGMA table_info(users)")
+    valid_cols = {row["name"] for row in c.fetchall()}
+
+    upserted = 0
+    for u in payload.users:
+        if not u.get("id") or not u.get("username"):
+            continue
+        record = {k: v for k, v in u.items() if k in valid_cols}
+        cols = list(record.keys())
+        placeholders = ", ".join(["?"] * len(cols))
+        update_clause = ", ".join([f"{col} = excluded.{col}" for col in cols if col != "id"])
+        sql = f"""
+            INSERT INTO users ({', '.join(cols)})
+            VALUES ({placeholders})
+            ON CONFLICT(id) DO UPDATE SET {update_clause}
+        """
+        c.execute(sql, list(record.values()))
+        upserted += 1
+
+    conn.commit()
+    conn.close()
+
+    try:
+        from backend.app.database import backup_all_users
+        backup_all_users()
+    except Exception:
+        pass
+
+    return {"success": True, "upserted_count": upserted}
 
 
 def _execute_admin_user_deletion(user_id: str, c):
@@ -238,6 +296,12 @@ def admin_delete_user(user_id: str, x_sync_token: Optional[str] = Header(None, a
     finally:
         conn.close()
 
+    try:
+        from backend.app.database import backup_all_users
+        backup_all_users()
+    except Exception:
+        pass
+
     return {
         "success": True,
         "message": f"Account '{uname}' ({user_id}) and all associated records permanently purged by admin.",
@@ -276,6 +340,12 @@ def admin_delete_user_post(payload: AdminDeleteUserPayload, x_sync_token: Option
         conn.commit()
     finally:
         conn.close()
+
+    try:
+        from backend.app.database import backup_all_users
+        backup_all_users()
+    except Exception:
+        pass
 
     return {
         "success": True,

@@ -219,6 +219,11 @@ def register(req: UserRegisterRequest):
 
     user = get_user_by_id(user_id)
     token = create_access_token(user_id, username, pin_hashed)
+    try:
+        from backend.app.database import backup_all_users
+        backup_all_users()
+    except Exception:
+        pass
     return AuthResponse(token=token, user=format_user_profile(user))
 
 
@@ -227,30 +232,21 @@ def login(req: UserLoginRequest):
     username = req.username.strip()
     user = get_user_by_username(username)
     if not user:
-        # Self-healing provision for container cold restarts / ephemeral wipes
-        user_id = str(uuid.uuid4())
-        pin_hashed = hash_pin(req.pin)
-        now = datetime.datetime.utcnow().isoformat()
-        conn = get_connection()
-        c = conn.cursor()
-        c.execute("""
-            INSERT INTO users (
-                id, username, pin_hash, avatar_id, title,
-                overall_elo, physics_elo, chemistry_elo, math_elo,
-                current_division, weekly_rp, total_solved, total_correct,
-                gold_medals, silver_medals, bronze_medals,
-                chapter_stats, created_at, last_active
-            ) VALUES (?, ?, ?, 'flame', 'JEE Aspirant', 1200.0, 1200.0, 1200.0, 1200.0, 'BRONZE', 0, 0, 0, 0, 0, 0, '{}', ?, ?)
-        """, (user_id, username, pin_hashed, now, now))
-        conn.commit()
-        conn.close()
+        # Check persistent backup first to prevent ephemeral wipes
         try:
-            from backend.app.tools.system_updates_engine import mark_all_updates_read
-            mark_all_updates_read(user_id)
+            from backend.app.database import restore_users_from_backup
+            restore_users_from_backup()
+            user = get_user_by_username(username)
         except Exception:
             pass
-        user = get_user_by_id(user_id)
-    elif not verify_pin(req.pin, user["pin_hash"]):
+
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=f"Account '{username}' not found. Please register first."
+        )
+
+    if not verify_pin(req.pin, user["pin_hash"]):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect username or PIN."

@@ -33,10 +33,11 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# Startup background cleaner for abandoned rooms
+# Startup background cleaner for abandoned rooms and accounts backup protection
 @app.on_event("startup")
-async def start_periodic_room_cleanup():
+async def start_background_tasks():
     asyncio.create_task(run_abandoned_room_cleaner())
+    asyncio.create_task(run_periodic_accounts_backup())
 
 async def run_abandoned_room_cleaner():
     while True:
@@ -45,6 +46,15 @@ async def run_abandoned_room_cleaner():
         except Exception:
             pass
         await asyncio.sleep(45)
+
+async def run_periodic_accounts_backup():
+    while True:
+        try:
+            from backend.app.database import backup_all_users
+            backup_all_users()
+        except Exception:
+            pass
+        await asyncio.sleep(60)
 
 # CORS Middleware (permits local dev, mobile access, and cloud deploys)
 app.add_middleware(
