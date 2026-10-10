@@ -390,46 +390,60 @@ export default function LeaderboardsView({ user, onViewProfile, onNavigateTab, i
 
                 {/* Right: Sub-tier Progression Bar & Dual-Gate Reqs */}
                 <div className="flex-1 max-w-xl bg-[#202738]/80 border border-white/5 rounded-2xl p-4 sm:p-5 space-y-3">
-                  <div className="flex items-center justify-between text-xs">
-                    <span className="font-bold text-slate-300">
-                      Progression toward <strong className="text-amber-300">{myDivisionData.division.next_full_name}</strong>
-                    </span>
-                    <span className="font-mono font-bold text-orange-400">
-                      {Math.round(myDivisionData.division.progress_percent)}%
-                    </span>
-                  </div>
+                  {(() => {
+                    const div = myDivisionData.division || {};
+                    const nextTargetName = div.next_full_name || (div.next_tier ? `${div.next_tier.tier_name} III` : 'Next Tier');
+                    const progressPercent = Math.min(100, Math.max(0, Math.round(div.progress_percent ?? 0)));
+                    const neededRp = div.needed_rp ?? (div.next_tier?.rp_needed ?? Math.max(0, (div.tier_target_rp || 0) - (div.current_rp || 0)));
+                    const neededElo = div.needed_elo ?? (div.next_tier?.elo_needed ?? 0);
+                    const minAcc = div.min_acc ?? (div.next_tier?.target_acc ?? 0);
+                    const neededAcc = div.needed_acc ?? (div.next_tier?.acc_needed ?? 0);
 
-                  {/* Progress Bar */}
-                  <div className="w-full bg-[#151923] h-2.5 rounded-full overflow-hidden border border-white/10 p-[1px]">
-                    <div
-                      className="bg-gradient-to-r from-orange-500 via-amber-400 to-emerald-400 h-full rounded-full transition-all duration-500 shadow-sm"
-                      style={{ width: `${Math.min(100, Math.max(0, myDivisionData.division.progress_percent))}%` }}
-                    />
-                  </div>
+                    return (
+                      <>
+                        <div className="flex items-center justify-between text-xs">
+                          <span className="font-bold text-slate-300">
+                            Progression toward <strong className="text-amber-300">{nextTargetName}</strong>
+                          </span>
+                          <span className="font-mono font-bold text-orange-400">
+                            {progressPercent}%
+                          </span>
+                        </div>
 
-                  {/* Dual Gate Badges */}
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-1 text-[11px]">
-                    <div className="bg-[#181d2a] p-2 rounded-xl border border-white/5 flex flex-col">
-                      <span className="text-slate-400 text-[10px] uppercase font-bold">1. Weekly RP Gate</span>
-                      <span className={`font-mono font-bold mt-0.5 ${myDivisionData.division.needed_rp <= 0 ? 'text-emerald-400' : 'text-amber-400'}`}>
-                        {myDivisionData.division.needed_rp <= 0 ? '✓ RP Target Met' : `+${myDivisionData.division.needed_rp} RP needed`}
-                      </span>
-                    </div>
+                        {/* Progress Bar */}
+                        <div className="w-full bg-[#151923] h-2.5 rounded-full overflow-hidden border border-white/10 p-[1px]">
+                          <div
+                            className="bg-gradient-to-r from-orange-500 via-amber-400 to-emerald-400 h-full rounded-full transition-all duration-500 shadow-sm"
+                            style={{ width: `${progressPercent}%` }}
+                          />
+                        </div>
 
-                    <div className="bg-[#181d2a] p-2 rounded-xl border border-white/5 flex flex-col">
-                      <span className="text-slate-400 text-[10px] uppercase font-bold">2. Overall Elo Gate</span>
-                      <span className={`font-mono font-bold mt-0.5 ${myDivisionData.division.needed_elo <= 0 ? 'text-emerald-400' : 'text-blue-400'}`}>
-                        {myDivisionData.division.needed_elo <= 0 ? '✓ Elo Target Met' : `+${myDivisionData.division.needed_elo} Elo needed`}
-                      </span>
-                    </div>
+                        {/* Dual Gate Badges */}
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-1 text-[11px]">
+                          <div className="bg-[#181d2a] p-2 rounded-xl border border-white/5 flex flex-col">
+                            <span className="text-slate-400 text-[10px] uppercase font-bold">1. Weekly RP Gate</span>
+                            <span className={`font-mono font-bold mt-0.5 ${neededRp <= 0 ? 'text-emerald-400' : 'text-amber-400'}`}>
+                              {neededRp <= 0 ? '✓ RP Target Met' : `+${neededRp} RP needed`}
+                            </span>
+                          </div>
 
-                    <div className="bg-[#181d2a] p-2 rounded-xl border border-white/5 flex flex-col">
-                      <span className="text-slate-400 text-[10px] uppercase font-bold">3. Min Accuracy Gate</span>
-                      <span className={`font-mono font-bold mt-0.5 ${myDivisionData.division.needed_acc <= 0 ? 'text-emerald-400' : 'text-purple-400'}`}>
-                        {myDivisionData.division.needed_acc <= 0 ? '✓ Accuracy Met' : `${myDivisionData.division.min_acc}% min required`}
-                      </span>
-                    </div>
-                  </div>
+                          <div className="bg-[#181d2a] p-2 rounded-xl border border-white/5 flex flex-col">
+                            <span className="text-slate-400 text-[10px] uppercase font-bold">2. Overall Elo Gate</span>
+                            <span className={`font-mono font-bold mt-0.5 ${neededElo <= 0 ? 'text-emerald-400' : 'text-blue-400'}`}>
+                              {neededElo <= 0 ? '✓ Elo Target Met' : `+${neededElo} Elo needed`}
+                            </span>
+                          </div>
+
+                          <div className="bg-[#181d2a] p-2 rounded-xl border border-white/5 flex flex-col">
+                            <span className="text-slate-400 text-[10px] uppercase font-bold">3. Min Accuracy Gate</span>
+                            <span className={`font-mono font-bold mt-0.5 ${neededAcc <= 0 ? 'text-emerald-400' : 'text-purple-400'}`}>
+                              {neededAcc <= 0 ? '✓ Accuracy Met' : `${minAcc}% min required`}
+                            </span>
+                          </div>
+                        </div>
+                      </>
+                    );
+                  })()}
                 </div>
               </div>
             </div>

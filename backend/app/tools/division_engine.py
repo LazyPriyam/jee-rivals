@@ -213,10 +213,13 @@ def evaluate_user_division(
     sub_min_rp = active_sub["min_rp"]
     if next_sub:
         sub_target_rp = next_sub["min_rp"]
+        next_target_name = next_sub["name"]
     elif qualified_tier_cfg["next_tier_rp"]:
         sub_target_rp = qualified_tier_cfg["next_tier_rp"]
+        next_target_name = f"{qualified_tier_cfg['next_tier_id'].title()} III"
     else:
         sub_target_rp = sub_min_rp + 500  # Grandmaster ceiling
+        next_target_name = "Grandmaster Apex"
 
     span = max(1, sub_target_rp - sub_min_rp)
     earned_in_span = max(0, weekly_rp - sub_min_rp)
@@ -285,6 +288,12 @@ def evaluate_user_division(
         "tier_min_rp": sub_min_rp,
         "tier_target_rp": sub_target_rp,
         "progress_percent": progress_percent,
+        "next_full_name": next_target_name,
+        "needed_rp": max(0, sub_target_rp - weekly_rp),
+        "needed_elo": next_tier_req["elo_needed"] if next_tier_req else 0,
+        "needed_acc": next_tier_req["acc_needed"] if next_tier_req else 0.0,
+        "min_acc": next_tier_req["target_acc"] if next_tier_req else 0.0,
+        "min_elo": next_tier_req["target_elo"] if next_tier_req else 0,
         "zone": zone,
         "zone_label": zone_label,
         "zone_color": zone_color,
