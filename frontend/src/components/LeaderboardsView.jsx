@@ -26,7 +26,7 @@ const DIVISION_COLORS = {
   BRONZE: 'text-orange-400 bg-orange-950/80 border-orange-700/50',
 };
 
-export default function LeaderboardsView({ user, onViewProfile, onNavigateTab }) {
+export default function LeaderboardsView({ user, onViewProfile, onNavigateTab, isActive = true }) {
   const [activeTab, setActiveTab] = useState('weekly'); // 'weekly', 'elo', 'friends'
   const [weeklyData, setWeeklyData] = useState(null);
   const [eloData, setEloData] = useState(null);
