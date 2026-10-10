@@ -258,14 +258,12 @@ def reseed_questions_gradient(cursor: sqlite3.Cursor) -> int:
     return updated_count
 
 
-def get_user_syllabus_coverage(cursor: sqlite3.Cursor, user_id: str) -> dict:
+def get_user_syllabus_coverage(cursor: sqlite3.Cursor, user_id: str, user_dict: Optional[dict] = None) -> dict:
     """
     Computes exact syllabus exploration and breadth metrics across the official 92 canonical chapters.
     Aggregates chapter exploration from:
-    1. activity_log (match and practice question attempts)
-    2. user_chapter_elo (chapter ratings where attempts > 0)
-    3. users.chapter_stats (user chapter analytics)
-    4. users.learnt_chapters (self-reported learnt skill tree nodes)
+    1. activity_log & user_chapter_elo (combined via fast single UNION query)
+    2. users.chapter_stats & users.learnt_chapters (reused from user_dict if provided)
     """
     import json
     from backend.app.tools.jee_syllabus import normalize_chapter_name, ALL_CANONICAL_CHAPTERS, JEE_SYLLABUS
@@ -298,42 +296,45 @@ def get_user_syllabus_coverage(cursor: sqlite3.Cursor, user_id: str) -> dict:
                 elif "math" in s_low:
                     active_subjs.add("Mathematics")
 
-    # 1. activity_log
+    # 1. Combined single UNION query for attempts across activity_log and user_chapter_elo
     try:
-        cursor.execute("SELECT DISTINCT chapter, subject FROM activity_log WHERE user_id = ?", (user_id,))
+        cursor.execute("""
+            SELECT DISTINCT chapter, subject FROM activity_log WHERE user_id = ?
+            UNION
+            SELECT DISTINCT chapter, subject FROM user_chapter_elo WHERE user_id = ? AND attempts > 0
+        """, (user_id, user_id))
         for r in cursor.fetchall():
             record_chap(r["chapter"], r["subject"])
     except Exception:
         pass
 
-    # 2. user_chapter_elo
+    # 2. Extract chapter_stats & learnt_chapters (reuse user_dict if passed to save a DB round trip)
     try:
-        cursor.execute("SELECT DISTINCT chapter, subject FROM user_chapter_elo WHERE user_id = ? AND attempts > 0", (user_id,))
-        for r in cursor.fetchall():
-            record_chap(r["chapter"], r["subject"])
-    except Exception:
-        pass
+        raw_cstats = None
+        raw_learnt = None
+        if user_dict is not None:
+            raw_cstats = user_dict.get("chapter_stats")
+            raw_learnt = user_dict.get("learnt_chapters")
+        else:
+            cursor.execute("SELECT chapter_stats, learnt_chapters FROM users WHERE id = ?", (user_id,))
+            u_row = cursor.fetchone()
+            if u_row:
+                raw_cstats = u_row["chapter_stats"]
+                raw_learnt = u_row["learnt_chapters"]
 
-    # 3. users table (chapter_stats & learnt_chapters)
-    try:
-        cursor.execute("SELECT chapter_stats, learnt_chapters FROM users WHERE id = ?", (user_id,))
-        u_row = cursor.fetchone()
-        if u_row:
-            raw_cstats = u_row["chapter_stats"]
-            if raw_cstats:
-                cstats = json.loads(raw_cstats) if isinstance(raw_cstats, str) else raw_cstats
-                if isinstance(cstats, dict):
-                    for ch_k, ch_v in cstats.items():
-                        if isinstance(ch_v, dict) and ch_v.get("attempts", 0) > 0:
-                            record_chap(ch_k, ch_v.get("subject"))
-                        elif isinstance(ch_v, (int, float)) and ch_v > 0:
-                            record_chap(ch_k)
-            raw_learnt = u_row["learnt_chapters"]
-            if raw_learnt:
-                learnt = json.loads(raw_learnt) if isinstance(raw_learnt, str) else raw_learnt
-                if isinstance(learnt, list):
-                    for ch_name in learnt:
-                        record_chap(ch_name)
+        if raw_cstats:
+            cstats = json.loads(raw_cstats) if isinstance(raw_cstats, str) else raw_cstats
+            if isinstance(cstats, dict):
+                for ch_k, ch_v in cstats.items():
+                    if isinstance(ch_v, dict) and ch_v.get("attempts", 0) > 0:
+                        record_chap(ch_k, ch_v.get("subject"))
+                    elif isinstance(ch_v, (int, float)) and ch_v > 0:
+                        record_chap(ch_k)
+        if raw_learnt:
+            learnt = json.loads(raw_learnt) if isinstance(raw_learnt, str) else raw_learnt
+            if isinstance(learnt, list):
+                for ch_name in learnt:
+                    record_chap(ch_name)
     except Exception:
         pass
 

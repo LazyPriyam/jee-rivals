@@ -1,7 +1,7 @@
 import json
 from fastapi import APIRouter, HTTPException, Depends, status
 from backend.app.database import get_connection
-from backend.app.auth import get_current_user
+from backend.app.auth import get_current_user, invalidate_user_cache
 from backend.app.tools.streaks_engine import get_user_streak_meta, record_daily_activity, buy_streak_freeze
 
 router = APIRouter(prefix="/api/streaks", tags=["Streaks & Daily Momentum"])
@@ -13,18 +13,7 @@ def get_my_streak(current_user: dict = Depends(get_current_user)):
     Returns the player's full streak dossier, rolling 7-day calendar,
     freeze shield count, and milestone progression.
     """
-    conn = get_connection()
-    c = conn.cursor()
-    c.execute("SELECT * FROM users WHERE id = ?", (current_user["id"],))
-    user_row = c.fetchone()
-    conn.close()
-
-    if not user_row:
-        raise HTTPException(status_code=404, detail="User not found")
-
-    user_dict = dict(user_row)
-    meta = get_user_streak_meta(user_dict)
-    return meta
+    return get_user_streak_meta(current_user)
 
 
 @router.post("/check-in")
@@ -44,6 +33,7 @@ def daily_streak_checkin(current_user: dict = Depends(get_current_user)):
         updated_user = dict(c.fetchone())
         meta = get_user_streak_meta(updated_user)
         result["streak_meta"] = meta
+        invalidate_user_cache(current_user["id"])
         return result
     except Exception as e:
         conn.rollback()
@@ -62,6 +52,7 @@ def purchase_streak_freeze(current_user: dict = Depends(get_current_user)):
     try:
         result = buy_streak_freeze(current_user["id"], c)
         conn.commit()
+        invalidate_user_cache(current_user["id"])
         return result
     except ValueError as ve:
         conn.rollback()

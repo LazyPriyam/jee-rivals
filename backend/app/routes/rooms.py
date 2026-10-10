@@ -20,7 +20,7 @@ from backend.app.models import (
     QuestionSolutionOut
 )
 from backend.app.database import get_connection, get_user_by_id
-from backend.app.auth import get_current_user, get_user_by_username
+from backend.app.auth import get_current_user, get_user_by_username, invalidate_user_cache
 from backend.app.websockets.room_hub import room_hub
 from backend.app.routes.questions import row_to_question_out
 from backend.app.tools.question_verifier import audit_and_heal_question
@@ -145,7 +145,6 @@ def calculate_elo_updates(
 @router.get("/public/open")
 def get_open_rooms():
     """Lists currently open public matches in LOBBY status that anyone can join."""
-    clean_abandoned_rooms()
     conn = get_connection()
     c = conn.cursor()
 
@@ -994,7 +993,6 @@ def get_user_active_room(user: dict = Depends(get_current_user)):
     Returns the user's current active IN_PROGRESS room if any, else null.
     Powers the Chess.com-style ongoing match banner on the Dashboard.
     """
-    clean_abandoned_rooms()
     conn = get_connection()
     c = conn.cursor()
     c.execute("""
@@ -1382,6 +1380,7 @@ async def submit_bulk_mock(code: str, req: BulkSubmissionRequest, user: dict = D
             elo_deltas = calculate_elo_updates(finished_parts, user_answers_map, q_elos)
             for uid, delta in elo_deltas.items():
                 apply_match_elo_to_user(c, uid, delta, r_subjs, r_chaps)
+                invalidate_user_cache(uid)
 
     conn.commit()
     conn.close()
@@ -1606,6 +1605,7 @@ async def submit_answer(code: str, submission: AnswerSubmissionRequest, user: di
             elo_deltas = calculate_elo_updates(finished_parts, user_answers_map, q_elos)
             for uid, delta in elo_deltas.items():
                 apply_match_elo_to_user(c, uid, delta, r_subjs, r_chaps)
+                invalidate_user_cache(uid)
 
             if room.get("tournament_id"):
                 try:

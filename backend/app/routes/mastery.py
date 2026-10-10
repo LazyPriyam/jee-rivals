@@ -88,6 +88,29 @@ class ReDuelRequest(BaseModel):
     count: int = 5
 
 
+_CHAPTER_Q_CACHE: tuple = (0.0, {})
+
+def get_cached_chapter_q_counts(cursor) -> dict:
+    global _CHAPTER_Q_CACHE
+    now = time.time()
+    last_time, counts = _CHAPTER_Q_CACHE
+    if (now - last_time < 600.0) and counts:
+        return counts
+    try:
+        cursor.execute("""
+            SELECT chapter, COUNT(*) as q_count
+            FROM questions
+            WHERE (validation_status IS NULL OR validation_status != 'QUARANTINED')
+              AND text IS NOT NULL AND text != ''
+            GROUP BY chapter
+        """)
+        new_counts = {r["chapter"]: r["q_count"] for r in cursor.fetchall()}
+        _CHAPTER_Q_CACHE = (now, new_counts)
+        return new_counts
+    except Exception:
+        return counts
+
+
 @router.get("/chapters")
 def get_chapters_mastery(user: dict = Depends(get_current_user)):
     """
@@ -106,15 +129,8 @@ def get_chapters_mastery(user: dict = Depends(get_current_user)):
     """, (user_id,))
     records = {r["chapter"]: dict(r) for r in c.fetchall()}
 
-    # Also check questions database to see available questions count per chapter
-    c.execute("""
-        SELECT chapter, COUNT(*) as q_count
-        FROM questions
-        WHERE (validation_status IS NULL OR validation_status != 'QUARANTINED')
-          AND text IS NOT NULL AND text != ''
-        GROUP BY chapter
-    """)
-    db_counts = {r["chapter"]: r["q_count"] for r in c.fetchall()}
+    # Also check questions database to see available questions count per chapter (cached)
+    db_counts = get_cached_chapter_q_counts(c)
     conn.close()
 
     # Build matrix from authoritative syllabus

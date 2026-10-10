@@ -45,7 +45,7 @@ async def run_abandoned_room_cleaner():
             clean_abandoned_rooms()
         except Exception:
             pass
-        await asyncio.sleep(45)
+        await asyncio.sleep(90)
 
 async def run_periodic_accounts_backup():
     while True:
@@ -54,7 +54,7 @@ async def run_periodic_accounts_backup():
             backup_all_users()
         except Exception:
             pass
-        await asyncio.sleep(60)
+        await asyncio.sleep(600)
 
 # CORS Middleware (permits local dev, mobile access, and cloud deploys)
 app.add_middleware(

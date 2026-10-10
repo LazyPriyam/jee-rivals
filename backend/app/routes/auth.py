@@ -10,38 +10,54 @@ from backend.app.models import (
     DeleteAccountRequest
 )
 from backend.app.database import get_connection, get_user_by_username, get_user_by_id
-from backend.app.auth import hash_pin, verify_pin, create_access_token, get_current_user
+from backend.app.auth import hash_pin, verify_pin, create_access_token, get_current_user, invalidate_user_cache
 from backend.app.websockets.room_hub import room_hub
+import time
 
 router = APIRouter(prefix="/api/auth", tags=["Authentication"])
+
+_COVERAGE_CACHE: dict = {}
+
+def invalidate_coverage_cache(user_id: str = None):
+    global _COVERAGE_CACHE
+    if user_id:
+        _COVERAGE_CACHE.pop(str(user_id), None)
+    else:
+        _COVERAGE_CACHE.clear()
 
 def format_user_profile(user: dict, cursor=None) -> UserProfile:
     solved = user.get("total_solved", 0)
     correct = user.get("total_correct", 0)
     acc = round((correct / solved * 100), 1) if solved > 0 else 0.0
 
-    conn = None
-    close_conn = False
-    if cursor is None:
-        conn = get_connection()
-        cursor = conn.cursor()
-        close_conn = True
+    user_id = str(user.get("id", ""))
+    now = time.time()
+    cached_cov = _COVERAGE_CACHE.get(user_id)
 
-    try:
-        from backend.app.tools.elo_engine import get_user_syllabus_coverage, compute_two_factor_air_bracket
-        cov = get_user_syllabus_coverage(cursor, user["id"])
-        active_count = cov["active_count"]
-        coverage_pct = cov["coverage_percent"]
-        active_subjs_count = cov["active_subjects_count"]
-        total_chaps = cov.get("total_chapters", 92)
-    except Exception:
-        active_count = 0
-        coverage_pct = 0.0
-        active_subjs_count = 0
-        total_chaps = 92
-    finally:
-        if close_conn and conn:
-            conn.close()
+    if cached_cov and (now - cached_cov[0] < 60.0):
+        cov = cached_cov[1]
+    else:
+        conn = None
+        close_conn = False
+        if cursor is None:
+            conn = get_connection()
+            cursor = conn.cursor()
+            close_conn = True
+
+        try:
+            from backend.app.tools.elo_engine import get_user_syllabus_coverage
+            cov = get_user_syllabus_coverage(cursor, user_id, user_dict=user)
+            _COVERAGE_CACHE[user_id] = (now, cov)
+        except Exception:
+            cov = {"active_count": 0, "coverage_percent": 0.0, "active_subjects_count": 0, "total_chapters": 92}
+        finally:
+            if close_conn and conn:
+                conn.close()
+
+    active_count = cov.get("active_count", 0)
+    coverage_pct = cov.get("coverage_percent", 0.0)
+    active_subjs_count = cov.get("active_subjects_count", 0)
+    total_chaps = cov.get("total_chapters", 92)
 
     target_exam = user.get("target_exam") or "MIXED"
 
@@ -332,6 +348,8 @@ def update_profile(data: dict, user: dict = Depends(get_current_user)):
         conn.commit()
     conn.close()
 
+    invalidate_user_cache(user["id"])
+    invalidate_coverage_cache(user["id"])
     updated = get_user_by_id(user["id"])
     return format_user_profile(updated)
 
@@ -352,6 +370,8 @@ def update_learnt_chapters(data: dict, user: dict = Depends(get_current_user)):
     conn.commit()
     conn.close()
 
+    invalidate_user_cache(user["id"])
+    invalidate_coverage_cache(user["id"])
     updated = get_user_by_id(user["id"])
     return format_user_profile(updated)
 
@@ -384,6 +404,8 @@ def change_username(req: ChangeUsernameRequest, user: dict = Depends(get_current
     conn.commit()
     conn.close()
 
+    invalidate_user_cache(user["id"])
+    invalidate_coverage_cache(user["id"])
     updated = get_user_by_id(user["id"])
     new_token = create_access_token(user["id"], new_username, user.get("pin_hash"))
     return {
@@ -417,6 +439,7 @@ def change_pin(req: ChangePinRequest, user: dict = Depends(get_current_user)):
     conn.commit()
     conn.close()
 
+    invalidate_user_cache(user["id"])
     updated = get_user_by_id(user["id"])
     new_token = create_access_token(user["id"], user["username"], pin_hashed)
     return {

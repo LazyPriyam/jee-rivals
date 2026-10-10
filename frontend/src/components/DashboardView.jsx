@@ -54,7 +54,7 @@ export default function DashboardView({
     };
 
     fetchActive();
-    const activeInterval = setInterval(fetchActive, 4000);
+    const activeInterval = setInterval(fetchActive, 8000);
     return () => {
       isMounted = false;
       clearInterval(activeInterval);
@@ -63,7 +63,7 @@ export default function DashboardView({
 
   useEffect(() => {
     fetchOpenRooms();
-    const interval = setInterval(fetchOpenRooms, 5000);
+    const interval = setInterval(fetchOpenRooms, 10000);
     return () => clearInterval(interval);
   }, []);
 
