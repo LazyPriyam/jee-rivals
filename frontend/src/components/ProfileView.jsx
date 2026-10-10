@@ -187,7 +187,17 @@ export default function ProfileView({
   };
 
   useEffect(() => {
-    fetchProfile();
+    if (isActive !== false) {
+      fetchProfile();
+    }
+  }, [targetUsername, isActive, currentUser?.overall_elo, currentUser?.total_solved]);
+
+  useEffect(() => {
+    const handleUserUpdated = () => {
+      fetchProfile();
+    };
+    window.addEventListener('jee_user_updated', handleUserUpdated);
+    return () => window.removeEventListener('jee_user_updated', handleUserUpdated);
   }, [targetUsername]);
 
   if (loading || !data) {

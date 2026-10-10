@@ -75,6 +75,7 @@ export default function ChapterMasteryView({
   onNavigateTab,
   onStartPreset,
   onJoinRoomCode,
+  onUpdateUser,
   isActive
 }) {
   const [activeTab, setActiveTab] = useState('chapters'); // 'chapters', 'radar', 'graveyard'
@@ -123,6 +124,17 @@ export default function ChapterMasteryView({
     if (user && isActive) {
       fetchData();
     }
+  }, [user?.id, user?.total_solved, user?.overall_elo, isActive]);
+
+  // Global dynamic synchronization listener
+  useEffect(() => {
+    const handleDynamicSync = () => {
+      if (user && isActive) {
+        fetchData();
+      }
+    };
+    window.addEventListener('jee_user_updated', handleDynamicSync);
+    return () => window.removeEventListener('jee_user_updated', handleDynamicSync);
   }, [user?.id, isActive]);
 
   const handleToggleBookmark = async (qId, currentNotes = '') => {
@@ -178,7 +190,7 @@ export default function ChapterMasteryView({
         <Crosshair className="w-16 h-16 text-slate-600 mb-4 animate-pulse" />
         <h2 className="text-xl font-bold text-slate-200">Aspirant Telemetry Locked</h2>
         <p className="text-sm text-slate-400 mt-2 mb-6">
-          Sign in to analyze your 59-chapter mastery matrix, discover high-yield failure traps, and redeem questions from your personal Graveyard.
+          Sign in to analyze your canonical chapter mastery matrix, discover high-yield failure traps, and redeem questions from your personal Graveyard.
         </p>
         <button
           onClick={onOpenAuth}
@@ -189,6 +201,9 @@ export default function ChapterMasteryView({
       </div>
     );
   }
+
+  // Canonical total chapters count from backend
+  const totalChaptersCount = chaptersData?.total_chapters || chaptersData?.chapters?.length || 92;
 
   // Filter chapters list
   const filteredChapters = (chaptersData?.chapters || []).filter((ch) => {
@@ -223,7 +238,7 @@ export default function ChapterMasteryView({
               <h1 className="text-2xl font-black text-white tracking-wide flex items-center gap-2">
                 CHAPTER MASTERY & GRAVEYARD
                 <span className="text-xs font-mono font-normal px-2 py-0.5 rounded-full bg-slate-800 text-slate-400 border border-slate-700">
-                  59 Chapters
+                  {totalChaptersCount} Chapters
                 </span>
               </h1>
               <p className="text-xs text-slate-400 mt-0.5">
@@ -248,7 +263,7 @@ export default function ChapterMasteryView({
             }`}
           >
             <BookOpen className="w-3.5 h-3.5" />
-            <span>59-Chapter Matrix</span>
+            <span>{totalChaptersCount}-Chapter Matrix</span>
             {chaptersData && (
               <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-black/40 font-mono">
                 {chaptersData.tier_summary?.MASTERED || 0}
@@ -308,7 +323,7 @@ export default function ChapterMasteryView({
       )}
 
       {/* ========================================================================= */}
-      {/* TAB 1: 59-CHAPTER MATRIX & HEATMAP */}
+      {/* TAB 1: CHAPTER MATRIX & HEATMAP */}
       {/* ========================================================================= */}
       {activeTab === 'chapters' && !loading && chaptersData && (
         <div className="space-y-6">
@@ -319,7 +334,7 @@ export default function ChapterMasteryView({
                 <div className="text-[10px] font-bold text-emerald-400 uppercase tracking-wider">Mastered (1800+)</div>
                 <div className="text-2xl font-black text-white mt-1">
                   {chaptersData.tier_summary?.MASTERED || 0}
-                  <span className="text-xs text-slate-500 font-normal"> / 59</span>
+                  <span className="text-xs text-slate-500 font-normal"> / {totalChaptersCount}</span>
                 </div>
               </div>
               <div className="p-2.5 rounded-xl bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
@@ -332,7 +347,7 @@ export default function ChapterMasteryView({
                 <div className="text-[10px] font-bold text-blue-400 uppercase tracking-wider">Proficient (1500-1799)</div>
                 <div className="text-2xl font-black text-white mt-1">
                   {chaptersData.tier_summary?.PROFICIENT || 0}
-                  <span className="text-xs text-slate-500 font-normal"> / 59</span>
+                  <span className="text-xs text-slate-500 font-normal"> / {totalChaptersCount}</span>
                 </div>
               </div>
               <div className="p-2.5 rounded-xl bg-blue-500/10 text-blue-400 border border-blue-500/20">
@@ -345,7 +360,7 @@ export default function ChapterMasteryView({
                 <div className="text-[10px] font-bold text-amber-400 uppercase tracking-wider">Emerging (1300-1499)</div>
                 <div className="text-2xl font-black text-white mt-1">
                   {chaptersData.tier_summary?.EMERGING || 0}
-                  <span className="text-xs text-slate-500 font-normal"> / 59</span>
+                  <span className="text-xs text-slate-500 font-normal"> / {totalChaptersCount}</span>
                 </div>
               </div>
               <div className="p-2.5 rounded-xl bg-amber-500/10 text-amber-400 border border-amber-500/20">
@@ -358,7 +373,7 @@ export default function ChapterMasteryView({
                 <div className="text-[10px] font-bold text-red-400 uppercase tracking-wider">Critical (&lt;1300)</div>
                 <div className="text-2xl font-black text-white mt-1">
                   {chaptersData.tier_summary?.CRITICAL || 0}
-                  <span className="text-xs text-slate-500 font-normal"> / 59</span>
+                  <span className="text-xs text-slate-500 font-normal"> / {totalChaptersCount}</span>
                 </div>
               </div>
               <div className="p-2.5 rounded-xl bg-red-500/10 text-red-400 border border-red-500/20">

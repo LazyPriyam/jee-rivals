@@ -271,6 +271,9 @@ export default function SphereGridSkillTree({
       setSavingLearnt(true);
       try {
         await api.auth.updateLearntChapters(arr);
+        window.dispatchEvent(new CustomEvent('jee_user_updated', {
+          detail: { ...currentUser, learnt_chapters: arr }
+        }));
       } catch (_) {}
       finally {
         setSavingLearnt(false);
@@ -475,10 +478,10 @@ export default function SphereGridSkillTree({
             <button
               onClick={handleSelectAll}
               className="px-3 py-1.5 rounded-xl bg-white/5 hover:bg-white/10 text-slate-300 hover:text-white border border-white/10 text-xs font-semibold transition cursor-pointer flex items-center gap-1.5"
-              title="Mark all 59 chapters as learnt"
+              title={`Mark all ${totalChaptersCount} chapters as learnt`}
             >
               <Check className="w-3.5 h-3.5 text-emerald-400" />
-              <span>Select All (59)</span>
+              <span>Select All ({totalChaptersCount})</span>
             </button>
             <button
               onClick={handleClearAll}

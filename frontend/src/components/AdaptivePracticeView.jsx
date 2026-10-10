@@ -50,7 +50,7 @@ const TIER_LABELS = {
   OLYMPIAD_APEX: '🔴 Olympiad Apex',
 };
 
-export default function AdaptivePracticeView({ user, onOpenAuth, onNavigateTab, isActive = true }) {
+export default function AdaptivePracticeView({ user, onOpenAuth, onNavigateTab, isActive = true, onUpdateUser }) {
   // Session lifecycle
   const [session, setSession] = useState(null);
   const [question, setQuestion] = useState(null);
@@ -249,10 +249,22 @@ export default function AdaptivePracticeView({ user, onOpenAuth, onNavigateTab, 
   }, [Boolean(session), Boolean(summary)]);
 
   useEffect(() => {
-    fetchAdaptiveStats();
-    fetchChapters();
-    return () => clearInterval(timerRef.current);
-  }, [user?.id]);
+    if (isActive) {
+      fetchAdaptiveStats();
+      fetchChapters();
+    }
+  }, [user?.id, isActive]);
+
+  useEffect(() => {
+    const handleUserUpdated = () => {
+      fetchAdaptiveStats();
+    };
+    window.addEventListener('jee_user_updated', handleUserUpdated);
+    return () => {
+      window.removeEventListener('jee_user_updated', handleUserUpdated);
+      clearInterval(timerRef.current);
+    };
+  }, []);
 
   // Reset timer strictly when question changes
   useEffect(() => {
@@ -355,6 +367,12 @@ export default function AdaptivePracticeView({ user, onOpenAuth, onNavigateTab, 
         total_attempted: resp.total_attempted,
         total_correct: resp.total_correct,
       }));
+
+      // Dynamically sync updated user profile across all views & Navbar without refresh
+      api.auth.getMe().then((freshUser) => {
+        if (onUpdateUser) onUpdateUser(freshUser);
+        window.dispatchEvent(new CustomEvent('jee_user_updated', { detail: freshUser }));
+      }).catch(() => {});
     } catch (err) {
       handleSessionError(err, 'Failed to submit answer.');
     } finally {
@@ -452,6 +470,12 @@ export default function AdaptivePracticeView({ user, onOpenAuth, onNavigateTab, 
       setSubmitted(false);
       setResult(null);
       fetchAdaptiveStats();
+
+      // Dynamically sync updated user profile across all views & Navbar without refresh
+      api.auth.getMe().then((freshUser) => {
+        if (onUpdateUser) onUpdateUser(freshUser);
+        window.dispatchEvent(new CustomEvent('jee_user_updated', { detail: freshUser }));
+      }).catch(() => {});
     } catch (err) {
       handleSessionError(err, 'Failed to conclude session.');
     } finally {

@@ -38,7 +38,17 @@ export default function LeaderboardsView({ user, onViewProfile, onNavigateTab })
   const [myDivisionData, setMyDivisionData] = useState(null);
 
   useEffect(() => {
-    fetchData();
+    if (isActive !== false) {
+      fetchData();
+    }
+  }, [activeTab, eloSubject, friendsSort, isActive, user?.overall_elo, user?.rp]);
+
+  useEffect(() => {
+    const handleUserUpdated = () => {
+      fetchData();
+    };
+    window.addEventListener('jee_user_updated', handleUserUpdated);
+    return () => window.removeEventListener('jee_user_updated', handleUserUpdated);
   }, [activeTab, eloSubject, friendsSort]);
 
   const fetchData = async () => {

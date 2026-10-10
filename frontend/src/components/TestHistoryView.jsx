@@ -20,7 +20,7 @@ import {
   ChevronRight
 } from 'lucide-react';
 
-export default function TestHistoryView({ user, inspectUsername, onSelectTest, onResumeTest, onNavigateTab, onOpenAuth, onClearInspect }) {
+export default function TestHistoryView({ user, inspectUsername, onSelectTest, onResumeTest, onNavigateTab, onOpenAuth, onClearInspect, isActive = true }) {
   const [history, setHistory] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -53,8 +53,18 @@ export default function TestHistoryView({ user, inspectUsername, onSelectTest, o
   };
 
   useEffect(() => {
-    fetchHistory();
-  }, [user?.id, inspectUsername]);
+    if (isActive !== false) {
+      fetchHistory();
+    }
+  }, [user?.id, inspectUsername, isActive]);
+
+  useEffect(() => {
+    const handleUserUpdated = () => {
+      fetchHistory();
+    };
+    window.addEventListener('jee_user_updated', handleUserUpdated);
+    return () => window.removeEventListener('jee_user_updated', handleUserUpdated);
+  }, [inspectUsername]);
 
   if (!user) {
     return (

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import Navbar from './components/Navbar';
 import DashboardView from './components/DashboardView';
 import MocksCenterView from './components/MocksCenterView';
@@ -149,6 +149,43 @@ export default function App() {
     }
   }, []);
 
+  const refreshUser = useCallback(() => {
+    if (!getToken()) return;
+    api.auth.getMe()
+      .then((u) => {
+        setUser(u);
+        setCachedUser(u);
+        recordSavedAccount(u);
+      })
+      .catch(() => {});
+  }, []);
+
+  // Global reactive state sync across tabs, windows, and visibility changes
+  useEffect(() => {
+    const handleUserUpdated = (e) => {
+      if (e?.detail) {
+        setUser(e.detail);
+        setCachedUser(e.detail);
+        recordSavedAccount(e.detail);
+      } else {
+        refreshUser();
+      }
+    };
+
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        refreshUser();
+      }
+    };
+
+    window.addEventListener('jee_user_updated', handleUserUpdated);
+    document.addEventListener('visibilitychange', handleVisibility);
+    return () => {
+      window.removeEventListener('jee_user_updated', handleUserUpdated);
+      document.removeEventListener('visibilitychange', handleVisibility);
+    };
+  }, [refreshUser]);
+
   // Handle direct link & browser deep link from URL query parameters (e.g. ?profile=username, ?test=CODE, ?join=ABC12, ?tab=...)
   useEffect(() => {
     const syncFromUrl = () => {
@@ -190,6 +227,7 @@ export default function App() {
   const switchTab = (tab, updateUrl = true) => {
     setActiveTab(tab);
     setVisitedTabs((prev) => (prev[tab] ? prev : { ...prev, [tab]: true }));
+    refreshUser();
     if (updateUrl) {
       try {
         const url = new URL(window.location.href);
@@ -364,10 +402,6 @@ export default function App() {
     refreshUser();
   };
 
-  const refreshUser = () => {
-    api.auth.getMe().then((u) => setUser(u)).catch(() => {});
-  };
-
   return (
     <div className="min-h-screen bg-[#1e222d] text-slate-100 flex flex-col lg:flex-row font-sans">
       {/* Hide navbar during authentic NTA mock test to ensure authentic exam immersion */}
@@ -525,6 +559,7 @@ export default function App() {
               onOpenAuth={() => setAuthModalOpen(true)}
               onNavigateTab={switchTab}
               isActive={activeTab === 'adaptive'}
+              onUpdateUser={setUser}
             />
           </div>
         )}
@@ -539,6 +574,7 @@ export default function App() {
               onStartPreset={handleStartPreset}
               onJoinRoomCode={handleJoinRoomCode}
               isActive={activeTab === 'mastery'}
+              onUpdateUser={setUser}
             />
           </div>
         )}
@@ -550,7 +586,7 @@ export default function App() {
               <SphereGridSkillTree
                 skillTreeData={skillTreePayload?.tree || {}}
                 totalMastered={skillTreePayload?.total_mastered || 0}
-                totalChapters={skillTreePayload?.total_chapters || 59}
+                totalChapters={skillTreePayload?.total_chapters || 92}
                 masteryPercentage={skillTreePayload?.mastery_percentage || 0}
                 onNavigateTab={switchTab}
                 onStartPreset={handleStartPreset}
@@ -605,6 +641,7 @@ export default function App() {
                 onNavigateTab={switchTab}
                 onOpenAuth={() => setAuthModalOpen(true)}
                 onClearInspect={() => setInspectTestUser(null)}
+                isActive={activeTab === 'history'}
               />
             )}
           </div>
