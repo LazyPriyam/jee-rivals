@@ -125,3 +125,162 @@ def sync_data(payload: SyncPayload, x_sync_token: Optional[str] = Header(None, a
         "synced_questions": saved_questions,
         "synced_diagrams": saved_diagrams
     }
+
+
+class AdminDeleteUserPayload(BaseModel):
+    user_id: Optional[str] = None
+    username: Optional[str] = None
+
+
+@router.get("/users")
+def get_admin_users(x_sync_token: Optional[str] = Header(None, alias="X-Sync-Token")):
+    if not x_sync_token or x_sync_token != ADMIN_SYNC_TOKEN:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or missing sync authentication token."
+        )
+
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute("""
+        SELECT id, username, overall_elo, physics_elo, chemistry_elo, math_elo,
+               current_division, weekly_rp, total_solved, total_correct,
+               gold_medals, silver_medals, bronze_medals, created_at, last_active,
+               target_college, target_exam, current_streak, longest_streak, bio
+        FROM users
+        ORDER BY overall_elo DESC, created_at DESC
+    """)
+    rows = [dict(r) for r in c.fetchall()]
+    conn.close()
+
+    users = []
+    for r in rows:
+        solved = r.get("total_solved") or 0
+        correct = r.get("total_correct") or 0
+        acc = round((correct / solved * 100), 1) if solved > 0 else 0.0
+        users.append({
+            "id": r["id"],
+            "username": r["username"],
+            "overall_elo": round(float(r.get("overall_elo") or 1200.0), 1),
+            "physics_elo": round(float(r.get("physics_elo") or 1200.0), 1),
+            "chemistry_elo": round(float(r.get("chemistry_elo") or 1200.0), 1),
+            "math_elo": round(float(r.get("math_elo") or 1200.0), 1),
+            "division": r.get("current_division") or "BRONZE",
+            "weekly_rp": r.get("weekly_rp") or 0,
+            "total_solved": solved,
+            "total_correct": correct,
+            "accuracy": acc,
+            "medals": {
+                "gold": r.get("gold_medals") or 0,
+                "silver": r.get("silver_medals") or 0,
+                "bronze": r.get("bronze_medals") or 0
+            },
+            "created_at": r.get("created_at"),
+            "last_active": r.get("last_active"),
+            "target_college": r.get("target_college") or "IIT Bombay",
+            "target_exam": r.get("target_exam") or "JEE_MAIN",
+            "streak": r.get("current_streak") or 0,
+            "longest_streak": r.get("longest_streak") or 0,
+            "bio": r.get("bio") or ""
+        })
+
+    return {"users": users, "total": len(users)}
+
+
+def _execute_admin_user_deletion(user_id: str, c):
+    # 1. Activity logs and sessions
+    c.execute("DELETE FROM activity_log WHERE user_id = ?", (user_id,))
+    c.execute("DELETE FROM adaptive_sessions WHERE user_id = ?", (user_id,))
+    c.execute("DELETE FROM user_rank_history WHERE user_id = ?", (user_id,))
+
+    # 2. Mastery and FSRS memory
+    c.execute("DELETE FROM user_chapter_elo WHERE user_id = ?", (user_id,))
+    c.execute("DELETE FROM user_fsrs_states WHERE user_id = ?", (user_id,))
+    c.execute("DELETE FROM question_bookmarks WHERE user_id = ?", (user_id,))
+
+    # 3. Multiplayer rooms & tournaments
+    c.execute("DELETE FROM room_participants WHERE user_id = ?", (user_id,))
+    c.execute("DELETE FROM tournament_participants WHERE user_id = ?", (user_id,))
+
+    # 4. Social graph: friendships, challenges, messages
+    c.execute("DELETE FROM friends WHERE user_id = ? OR friend_id = ?", (user_id, user_id))
+    c.execute("DELETE FROM direct_challenges WHERE sender_id = ? OR receiver_id = ?", (user_id, user_id))
+    c.execute("DELETE FROM direct_messages WHERE sender_id = ? OR receiver_id = ?", (user_id, user_id))
+
+    # 5. Notifications and update tracking
+    c.execute("DELETE FROM user_notifications WHERE user_id = ?", (user_id,))
+    c.execute("DELETE FROM user_update_reads WHERE user_id = ?", (user_id,))
+
+    # 6. Primary user record
+    c.execute("DELETE FROM users WHERE id = ?", (user_id,))
+
+
+@router.delete("/users/{user_id}")
+def admin_delete_user(user_id: str, x_sync_token: Optional[str] = Header(None, alias="X-Sync-Token")):
+    if not x_sync_token or x_sync_token != ADMIN_SYNC_TOKEN:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or missing sync authentication token."
+        )
+
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute("SELECT id, username FROM users WHERE id = ?", (user_id,))
+    row = c.fetchone()
+    if not row:
+        conn.close()
+        raise HTTPException(status_code=404, detail=f"User with ID '{user_id}' not found.")
+
+    uname = row["username"]
+    try:
+        _execute_admin_user_deletion(user_id, c)
+        conn.commit()
+    finally:
+        conn.close()
+
+    return {
+        "success": True,
+        "message": f"Account '{uname}' ({user_id}) and all associated records permanently purged by admin.",
+        "deleted_user_id": user_id,
+        "deleted_username": uname
+    }
+
+
+@router.post("/users/delete")
+def admin_delete_user_post(payload: AdminDeleteUserPayload, x_sync_token: Optional[str] = Header(None, alias="X-Sync-Token")):
+    if not x_sync_token or x_sync_token != ADMIN_SYNC_TOKEN:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or missing sync authentication token."
+        )
+
+    conn = get_connection()
+    c = conn.cursor()
+    if payload.user_id:
+        c.execute("SELECT id, username FROM users WHERE id = ?", (payload.user_id,))
+    elif payload.username:
+        c.execute("SELECT id, username FROM users WHERE username = ?", (payload.username,))
+    else:
+        conn.close()
+        raise HTTPException(status_code=400, detail="Must provide user_id or username.")
+
+    row = c.fetchone()
+    if not row:
+        conn.close()
+        raise HTTPException(status_code=404, detail="User not found.")
+
+    uid = row["id"]
+    uname = row["username"]
+    try:
+        _execute_admin_user_deletion(uid, c)
+        conn.commit()
+    finally:
+        conn.close()
+
+    return {
+        "success": True,
+        "message": f"Account '{uname}' ({uid}) and all associated records permanently purged by admin.",
+        "deleted_user_id": uid,
+        "deleted_username": uname
+    }
+
