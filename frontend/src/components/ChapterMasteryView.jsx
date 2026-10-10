@@ -29,6 +29,7 @@ import {
 import { api } from '../utils/api';
 import { sound } from '../utils/sound';
 import MathRenderer from './MathRenderer';
+import OnDemandDerivationBox from './OnDemandDerivationBox';
 
 const TIER_COLORS = {
   MASTERED: {
@@ -844,63 +845,15 @@ export default function ChapterMasteryView({
                       </div>
                     )}
 
-                    {/* Solution & Derivation Accordion Toggle */}
+                    {/* On-Demand Derivation & Key */}
                     <div className="pt-2">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          sound.click();
-                          setExpandedSolutions((prev) => ({ ...prev, [q.id]: !prev[q.id] }));
-                        }}
-                        className="text-xs text-orange-400 hover:text-orange-300 font-bold flex items-center gap-1.5 cursor-pointer"
-                      >
-                        {isSolOpen ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-                        <span>{isSolOpen ? 'Hide Solution & Formulas' : 'Reveal Solution & Formulas'}</span>
-                      </button>
-
-                      {isSolOpen && (
-                        <div className="mt-3 p-4 bg-[#0a0d14] border border-white/10 rounded-xl space-y-3 animate-fadeIn">
-                          <div className="flex items-center gap-2 text-xs font-mono">
-                            <span className="text-slate-400">Correct Key:</span>
-                            <span className="px-2 py-0.5 rounded bg-emerald-500 text-white font-bold">
-                              {q.correct_answer}
-                            </span>
-                          </div>
-
-                          {item.solution_text && (
-                            <div className="text-xs text-slate-300 leading-relaxed border-t border-white/5 pt-2">
-                              <div className="text-[10px] uppercase font-mono font-bold text-slate-500 mb-1">
-                                Complete Derivation
-                              </div>
-                              <MathRenderer text={item.solution_text} />
-                            </div>
-                          )}
-
-                          {item.common_pitfall && (
-                            <div className="p-2.5 rounded-lg bg-red-950/30 border border-red-500/20 text-xs text-red-200">
-                              <strong>Common Pitfall: </strong>{item.common_pitfall}
-                            </div>
-                          )}
-
-                          {Array.isArray(item.key_formulas) && item.key_formulas.length > 0 && (
-                            <div className="border-t border-white/5 pt-2">
-                              <div className="text-[10px] uppercase font-mono font-bold text-slate-500 mb-1">
-                                Key Formula
-                              </div>
-                              <div className="flex flex-wrap gap-1.5">
-                                {item.key_formulas.map((f, i) => (
-                                  <span
-                                    key={i}
-                                    className="px-2 py-1 rounded bg-[#181d28] border border-white/5 text-[11px] font-mono text-orange-300"
-                                  >
-                                    <MathRenderer text={f} />
-                                  </span>
-                                ))}
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                      )}
+                      <OnDemandDerivationBox
+                        questionId={q.id}
+                        officialKey={q.correct_answer}
+                        initialSolution={item}
+                        compact={true}
+                        defaultExpanded={false}
+                      />
                     </div>
                   </div>
                 );

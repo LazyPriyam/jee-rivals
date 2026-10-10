@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { api } from '../utils/api';
 import MathRenderer from './MathRenderer';
+import OnDemandDerivationBox from './OnDemandDerivationBox';
 import { sound } from '../utils/sound';
 import {
   ArrowLeft,
@@ -852,32 +853,17 @@ export default function TestAnalysisView({ roomCode, user, inspectUsername, onBa
                   </div>
                 )}
 
-                {/* Toggle Solution */}
-                <button
-                  type="button"
-                  onClick={() => toggleSolution(q.id)}
-                  className="w-full py-2 px-3 rounded-xl bg-white/5 hover:bg-white/10 text-slate-300 text-xs font-bold transition flex items-center justify-between border border-white/10 cursor-pointer"
-                >
-                  <span className="flex items-center gap-1.5">
-                    <Lightbulb className="w-3.5 h-3.5 text-amber-400" />
-                    <span>{isExpanded ? 'Hide Solution & Derivation' : 'View Step-by-Step Derivation'}</span>
-                  </span>
-                  {isExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-                </button>
-
-                {isExpanded && (
-                  <div className="mt-3 p-4 bg-[#0a0d14] border border-white/10 rounded-xl space-y-3 animate-fadeIn">
-                    <div className="text-xs text-slate-300 leading-relaxed">
-                      <MathRenderer text={sol.solution_text || 'Detailed derivation not available.'} />
-                    </div>
-
-                    {sol.common_pitfall && (
-                      <div className="p-2.5 rounded-lg bg-amber-950/30 border border-amber-500/20 text-xs text-amber-200">
-                        <strong>Common Pitfall: </strong>{sol.common_pitfall}
-                      </div>
-                    )}
-                  </div>
-                )}
+                {/* On-Demand Derivation & Key */}
+                <div className="mt-3">
+                  <OnDemandDerivationBox
+                    questionId={q.id}
+                    officialKey={sol.correct_answer}
+                    initialSolution={sol}
+                    onReportClick={() => setReportTarget({ id: q.id, text: q.text })}
+                    compact={true}
+                    defaultExpanded={isExpanded}
+                  />
+                </div>
               </div>
             );
           })}

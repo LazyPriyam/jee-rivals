@@ -122,6 +122,8 @@ class QuestionSolutionOut(BaseModel):
     solution_text: Optional[str] = None
     key_formulas: List[str] = []
     common_pitfall: Optional[str] = None
+    derived_on_demand: Optional[bool] = False
+    provider: Optional[str] = None
 
 class ScoringRules(BaseModel):
     base_correct: float = 100.0

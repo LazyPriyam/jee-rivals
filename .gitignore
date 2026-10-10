@@ -29,3 +29,5 @@ Thumbs.db
 backend/storage/jee.db
 backend/storage/jee_rivals.db
 backend/storage/backups/*.db
+backend/storage/*backup*.db
+backend/storage/rivals.db

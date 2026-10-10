@@ -233,7 +233,7 @@ def create_match_room_helper(cursor, tournament: dict, player1_id: str, player2_
     q_count = max(3, int(tournament.get("question_count", 5)))
     oversample = min(q_count * 3, 50)
 
-    base_where = "solution_text IS NOT NULL AND solution_text != '' AND (validation_status IS NULL OR validation_status != 'QUARANTINED')"
+    base_where = "(validation_status IS NULL OR validation_status != 'QUARANTINED') AND text IS NOT NULL AND text != ''"
     query = f"SELECT * FROM questions WHERE {base_where}"
     params = []
     if subj and subj != "Full Syllabus":

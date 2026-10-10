@@ -128,8 +128,8 @@ def select_next_adaptive_question(
     # 2. Query Candidate Questions
     base_query = """
         SELECT * FROM questions 
-        WHERE solution_text IS NOT NULL AND solution_text != ''
-          AND (validation_status IS NULL OR validation_status NOT IN ('QUARANTINED', 'SUPERSEDED_BY_SUBQUESTIONS'))
+        WHERE (validation_status IS NULL OR validation_status NOT IN ('QUARANTINED', 'SUPERSEDED_BY_SUBQUESTIONS'))
+          AND text IS NOT NULL AND text != ''
     """
     params = []
 
@@ -192,8 +192,8 @@ def select_next_adaptive_question(
     if not unseen_candidates and target_chapter and subject:
         fallback_query = """
             SELECT * FROM questions 
-            WHERE solution_text IS NOT NULL AND solution_text != ''
-              AND (validation_status IS NULL OR validation_status NOT IN ('QUARANTINED', 'SUPERSEDED_BY_SUBQUESTIONS'))
+            WHERE (validation_status IS NULL OR validation_status NOT IN ('QUARANTINED', 'SUPERSEDED_BY_SUBQUESTIONS'))
+              AND text IS NOT NULL AND text != ''
         """
         fb_params = []
         if subject != "Full Syllabus":

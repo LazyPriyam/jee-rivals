@@ -169,8 +169,8 @@ def get_daily_challenge():
     c = conn.cursor()
     c.execute("""
         SELECT * FROM questions 
-        WHERE solution_text IS NOT NULL AND solution_text != ''
-          AND (validation_status IS NULL OR validation_status NOT IN ('QUARANTINED', 'SUPERSEDED_BY_SUBQUESTIONS'))
+        WHERE (validation_status IS NULL OR validation_status NOT IN ('QUARANTINED', 'SUPERSEDED_BY_SUBQUESTIONS'))
+          AND text IS NOT NULL AND text != ''
     """)
     rows = [dict(r) for r in c.fetchall()]
     conn.close()
@@ -204,8 +204,8 @@ def get_random_questions(
 
     query = """
         SELECT * FROM questions 
-        WHERE solution_text IS NOT NULL AND solution_text != ''
-          AND (validation_status IS NULL OR validation_status NOT IN ('QUARANTINED', 'SUPERSEDED_BY_SUBQUESTIONS'))
+        WHERE (validation_status IS NULL OR validation_status NOT IN ('QUARANTINED', 'SUPERSEDED_BY_SUBQUESTIONS'))
+          AND text IS NOT NULL AND text != ''
     """
     params = []
 
@@ -281,13 +281,39 @@ def get_question_solution(question_id: str, user: dict = Depends(get_current_use
     except Exception:
         formulas = []
 
+    sol_text = r.get("solution_text")
     return QuestionSolutionOut(
         id=r["id"],
         correct_answer=r["correct_answer"],
-        solution_text=clean_escapes(r.get("solution_text")),
+        solution_text=clean_escapes(sol_text) if sol_text else None,
         key_formulas=formulas,
-        common_pitfall=clean_escapes(r.get("common_pitfall"))
+        common_pitfall=clean_escapes(r.get("common_pitfall")),
+        derived_on_demand=bool(sol_text and sol_text.strip())
     )
+
+
+@router.post("/{question_id}/derive", response_model=QuestionSolutionOut)
+def derive_question_solution(
+    question_id: str,
+    force: bool = Query(False),
+    user: dict = Depends(get_current_user)
+):
+    try:
+        from backend.app.tools.on_demand_derivation import derive_question_on_demand
+        result = derive_question_on_demand(question_id, force=force)
+        return QuestionSolutionOut(
+            id=result["id"],
+            correct_answer=result["correct_answer"],
+            solution_text=result.get("solution_text"),
+            key_formulas=result.get("key_formulas") or [],
+            common_pitfall=result.get("common_pitfall"),
+            derived_on_demand=True,
+            provider=result.get("provider")
+        )
+    except ValueError as ve:
+        raise HTTPException(status_code=404, detail=str(ve))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to derive solution on demand: {str(e)}")
 
 
 @router.post("/{question_id}/report")

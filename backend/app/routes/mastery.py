@@ -110,8 +110,8 @@ def get_chapters_mastery(user: dict = Depends(get_current_user)):
     c.execute("""
         SELECT chapter, COUNT(*) as q_count
         FROM questions
-        WHERE solution_text IS NOT NULL AND solution_text != ''
-          AND (validation_status IS NULL OR validation_status != 'QUARANTINED')
+        WHERE (validation_status IS NULL OR validation_status != 'QUARANTINED')
+          AND text IS NOT NULL AND text != ''
         GROUP BY chapter
     """)
     db_counts = {r["chapter"]: r["q_count"] for r in c.fetchall()}

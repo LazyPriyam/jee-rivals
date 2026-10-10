@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { api } from '../utils/api';
 import { sound } from '../utils/sound';
 import MathRenderer from './MathRenderer';
+import OnDemandDerivationBox from './OnDemandDerivationBox';
 import {
   Brain,
   Zap,
@@ -1252,56 +1253,17 @@ export default function AdaptivePracticeView({ user, onOpenAuth, onNavigateTab, 
                   </div>
                 </div>
 
-                {/* Key Formulas Section */}
-                {result?.key_formulas && result.key_formulas.length > 0 && (
-                  <div className="p-4 rounded-2xl bg-[#1e2433] border border-blue-500/30 space-y-2">
-                    <span className="text-[10px] font-mono font-black text-blue-400 uppercase tracking-wider block flex items-center gap-1.5">
-                      <BookOpen className="w-3.5 h-3.5" />
-                      <span>Key Concept Formulas & Theorems Applied</span>
-                    </span>
-                    <div className="flex flex-wrap gap-2 pt-1">
-                      {result.key_formulas.map((form, idx) => (
-                        <div key={idx} className="px-3 py-1.5 rounded-xl bg-black/30 border border-blue-400/20 text-xs text-blue-200 font-mono">
-                          <MathRenderer content={form} />
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {/* Common Pitfall / Trap Warning */}
-                {result?.common_pitfall && (
-                  <div className="p-4 rounded-2xl bg-amber-950/30 border border-amber-500/30 text-amber-200 text-xs space-y-1">
-                    <span className="font-mono font-black uppercase text-amber-400 block flex items-center gap-1.5 text-[10px]">
-                      <AlertTriangle className="w-3.5 h-3.5" />
-                      <span>Common Aspirant Trap / Distractor Analysis</span>
-                    </span>
-                    <p className="leading-relaxed opacity-90">{result.common_pitfall}</p>
-                  </div>
-                )}
-
-                {/* Complete Step-by-Step Solution */}
-                <div className="p-5 rounded-2xl bg-[#1e2433] border border-white/10 space-y-2">
-                  <div className="flex items-center justify-between pb-1">
-                    <span className="text-xs font-black text-white uppercase font-mono tracking-wider block">
-                      Step-by-Step Derivation & Solution
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        sound.click();
-                        setReportModalOpen(true);
-                      }}
-                      className="text-[11px] text-amber-400 hover:text-amber-300 font-bold flex items-center gap-1.5 px-2 py-0.5 rounded-lg bg-amber-950/40 border border-amber-500/40 transition cursor-pointer"
-                      title="Flag or Report Answer Key Discrepancy"
-                    >
-                      <Flag className="w-3 h-3 text-amber-400" />
-                      <span>Flag / Report Key</span>
-                    </button>
-                  </div>
-                  <div className="text-xs sm:text-sm text-slate-200 leading-relaxed pt-1">
-                    <MathRenderer content={result?.solution_text} />
-                  </div>
+                {/* On-Demand Verified Derivation & Answer Key */}
+                <div className="pt-1">
+                  <OnDemandDerivationBox
+                    questionId={question?.id}
+                    officialKey={result?.correct_answer || question?.correct_answer}
+                    initialSolution={result}
+                    onReportClick={() => {
+                      sound.click();
+                      setReportModalOpen(true);
+                    }}
+                  />
                 </div>
 
                 {/* Next Question CTA */}

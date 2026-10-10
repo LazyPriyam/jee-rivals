@@ -558,7 +558,8 @@ def challenge_friend(friend_id: str, req: ChallengeFriendModel, user: dict = Dep
     # Pick 5 questions for fast 1-on-1 duel
     q_query = """
         SELECT id FROM questions
-        WHERE solution_text IS NOT NULL AND solution_text != ''
+        WHERE (validation_status IS NULL OR validation_status NOT IN ('QUARANTINED', 'SUPERSEDED_BY_SUBQUESTIONS'))
+          AND text IS NOT NULL AND text != ''
         ORDER BY RANDOM() LIMIT ?
     """
     c.execute(q_query, (req.question_count or 5,))
@@ -912,7 +913,8 @@ def send_chat_challenge(friend_id: str, req: ChatChallengeModel, user: dict = De
     # Pick 5 questions for fast 1-on-1 duel
     q_query = """
         SELECT id FROM questions
-        WHERE solution_text IS NOT NULL AND solution_text != ''
+        WHERE (validation_status IS NULL OR validation_status NOT IN ('QUARANTINED', 'SUPERSEDED_BY_SUBQUESTIONS'))
+          AND text IS NOT NULL AND text != ''
         ORDER BY RANDOM() LIMIT ?
     """
     c.execute(q_query, (req.question_count or 5,))

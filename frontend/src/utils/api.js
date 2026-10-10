@@ -269,6 +269,10 @@ export const api = {
       return request(`/api/questions/random?${q}`);
     },
     getSolution: (id) => request(`/api/questions/${id}/solution`),
+    deriveSolution: (id, force = false) =>
+      request(`/api/questions/${id}/derive?force=${force}`, {
+        method: "POST",
+      }),
     report: (id, data) =>
       request(`/api/questions/${id}/report`, {
         method: "POST",

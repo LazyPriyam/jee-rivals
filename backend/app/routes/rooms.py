@@ -322,7 +322,7 @@ def create_room(req: RoomCreateRequest, user: dict = Depends(get_current_user)):
         filter_subjects = req.subjects or ([req.subject] if req.subject and req.subject.lower() not in ("all", "any") else [])
         filter_chapters = req.chapters or ([req.chapter] if req.chapter and req.chapter.lower() not in ("all", "any") else [])
 
-        base_where = "solution_text IS NOT NULL AND solution_text != '' AND (validation_status IS NULL OR validation_status NOT IN ('QUARANTINED', 'SUPERSEDED_BY_SUBQUESTIONS'))"
+        base_where = "(validation_status IS NULL OR validation_status NOT IN ('QUARANTINED', 'SUPERSEDED_BY_SUBQUESTIONS')) AND text IS NOT NULL AND text != ''"
         q_query = f"SELECT * FROM questions WHERE {base_where}"
         params = []
 

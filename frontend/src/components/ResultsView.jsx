@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import confetti from 'canvas-confetti';
 import { api } from '../utils/api';
 import MathRenderer from './MathRenderer';
+import OnDemandDerivationBox from './OnDemandDerivationBox';
 import { Trophy, Crown, ArrowLeft, RefreshCw, CheckCircle2, XCircle, BookOpen, AlertTriangle, Lightbulb, Image as ImageIcon, Flame } from 'lucide-react';
 
 export default function ResultsView({ roomCode, user, onReturnArena, onRematch, onViewProfile }) {
@@ -397,28 +398,14 @@ export default function ResultsView({ roomCode, user, onReturnArena, onRematch, 
                   </div>
                 </div>
 
-                {/* Full Solution Box */}
-                {sol.solution_text && (
-                  <div className="bg-[#202534] border border-orange-500/20 rounded-2xl p-4 sm:p-5">
-                    <div className="flex items-center gap-2 text-orange-400 text-xs font-bold uppercase tracking-wider mb-2">
-                      <BookOpen className="w-4 h-4" />
-                      <span>Step-by-Step Derivation</span>
-                    </div>
-                    <div className="text-xs sm:text-sm text-slate-200 leading-relaxed">
-                      <MathRenderer content={sol.solution_text} />
-                    </div>
-
-                    {sol.common_pitfall && (
-                      <div className="mt-3 p-3 bg-amber-950/40 border border-amber-500/30 rounded-xl flex items-start gap-2 text-amber-300 text-xs">
-                        <AlertTriangle className="w-4 h-4 shrink-0 text-amber-400 mt-0.5" />
-                        <div>
-                          <strong className="block font-semibold">Common Pitfall:</strong>
-                          <span>{sol.common_pitfall}</span>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                )}
+                {/* On-Demand Verified Derivation Box */}
+                <div className="mt-4">
+                  <OnDemandDerivationBox
+                    questionId={q.id}
+                    officialKey={sol.correct_answer}
+                    initialSolution={sol}
+                  />
+                </div>
               </div>
             );
           })}
