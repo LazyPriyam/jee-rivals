@@ -232,7 +232,8 @@ _TURSO_LOCK = threading.Lock()
 
 def is_turso_enabled() -> bool:
     """Returns True if Turso Cloud SQLite environment credentials are configured."""
-    return bool(TURSO_DATABASE_URL and TURSO_DATABASE_URL.strip())
+    url = os.environ.get("TURSO_DATABASE_URL", TURSO_DATABASE_URL).strip()
+    return bool(url)
 
 
 def get_turso_client():
@@ -242,13 +243,14 @@ def get_turso_client():
         with _TURSO_LOCK:
             if _TURSO_CLIENT is None or getattr(_TURSO_CLIENT, "closed", False):
                 import libsql_client
-                url = TURSO_DATABASE_URL.strip()
+                url = os.environ.get("TURSO_DATABASE_URL", TURSO_DATABASE_URL).strip()
+                token = os.environ.get("TURSO_AUTH_TOKEN", TURSO_AUTH_TOKEN).strip()
                 if url.startswith("libsql://"):
                     url = "https://" + url[len("libsql://"):]
                 logger.info(f"[TURSO] Connecting to Turso Cloud SQLite: {url}")
                 _TURSO_CLIENT = libsql_client.create_client_sync(
                     url=url,
-                    auth_token=TURSO_AUTH_TOKEN or None
+                    auth_token=token or None
                 )
     return _TURSO_CLIENT
 
