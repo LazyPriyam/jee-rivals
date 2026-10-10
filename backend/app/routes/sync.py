@@ -65,7 +65,7 @@ def sync_data(payload: SyncPayload, x_sync_token: Optional[str] = Header(None, a
 
             # Sanitize derivation and reconcile key if derivation concluded differently
             if sol_text:
-                from app.tools.sync_solution_keys import clean_derivation_text, extract_derived_key, normalize_to_options
+                from backend.app.tools.sync_solution_keys import clean_derivation_text, extract_derived_key, normalize_to_options
                 sol_text = clean_derivation_text(sol_text)
                 derived_key = extract_derived_key(sol_text, q_type, options_str)
                 if derived_key:
