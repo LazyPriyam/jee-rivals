@@ -148,6 +148,22 @@ def sync_data(payload: SyncPayload, x_sync_token: Optional[str] = Header(None, a
     }
 
 
+@router.get("/question-ids")
+def get_existing_question_ids(x_sync_token: Optional[str] = Header(None, alias="X-Sync-Token")):
+    """Returns all question IDs currently stored on the cloud server for fast delta synchronization."""
+    if not x_sync_token or x_sync_token != ADMIN_SYNC_TOKEN:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or missing sync authentication token."
+        )
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute("SELECT id FROM questions")
+    ids = [r[0] for r in c.fetchall()]
+    conn.close()
+    return {"total": len(ids), "ids": ids}
+
+
 class AdminDeleteUserPayload(BaseModel):
     user_id: Optional[str] = None
     username: Optional[str] = None
