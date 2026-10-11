@@ -256,7 +256,7 @@ export default function SpeedDuelView({
           setStartTime(Date.now());
           setSelectedOption('');
         }
-      }, 1200);
+      }, 750);
     } catch (err) {
       submittingRef.current = false;
       setSubmitting(false);

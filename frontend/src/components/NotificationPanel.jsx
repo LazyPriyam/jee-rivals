@@ -82,10 +82,11 @@ export default function NotificationPanel({
   useEffect(() => {
     if (user) {
       fetchNotifications();
-      const interval = setInterval(fetchNotifications, 4000);
+      const pollRate = isOpen ? 8000 : 25000;
+      const interval = setInterval(fetchNotifications, pollRate);
       return () => clearInterval(interval);
     }
-  }, [user, isOpen]);
+  }, [user?.id, isOpen]);
 
   useEffect(() => {
     if (isOpen && activeTab === 'messages' && user) {

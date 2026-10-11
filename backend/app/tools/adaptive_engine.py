@@ -2,7 +2,11 @@ import json
 import math
 import random
 import datetime
+import time
 from typing import Optional, List, Dict, Any, Tuple, Set
+
+_WEAK_CHAPTERS_CACHE: Dict[Tuple[str, str], Tuple[float, List[str]]] = {}
+_REVENGE_QIDS_CACHE: Dict[Tuple[str, str, str], Tuple[float, Set[str]]] = {}
 
 def get_user_subject_elo(user: dict, subject: str) -> float:
     """Returns the user's specific subject Elo rating or overall Elo as fallback."""
@@ -21,6 +25,11 @@ def get_user_weak_chapters(cursor, user_id: str, subject: Optional[str] = None) 
     Identifies chapters where the user's historical accuracy is under 60%
     or where they have incurred recent mistakes in activity_log.
     """
+    cache_key = (str(user_id), str(subject or "ALL"))
+    now_t = time.time()
+    if cache_key in _WEAK_CHAPTERS_CACHE and (now_t - _WEAK_CHAPTERS_CACHE[cache_key][0]) < 60:
+        return _WEAK_CHAPTERS_CACHE[cache_key][1]
+
     query = """
         SELECT chapter,
                COUNT(*) as total,
@@ -44,6 +53,7 @@ def get_user_weak_chapters(cursor, user_id: str, subject: Optional[str] = None) 
         acc = cor / tot if tot > 0 else 0
         if acc < 0.60:
             weak.append(r["chapter"])
+    _WEAK_CHAPTERS_CACHE[cache_key] = (now_t, weak)
     return weak
 
 
@@ -52,6 +62,11 @@ def get_user_revenge_question_ids(cursor, user_id: str, subject: Optional[str] =
     Finds question IDs that the user previously failed in Duels, Mocks, or Practice,
     which have not yet been answered correctly since.
     """
+    cache_key = (str(user_id), str(subject or "ALL"), str(chapter or "ALL"))
+    now_t = time.time()
+    if cache_key in _REVENGE_QIDS_CACHE and (now_t - _REVENGE_QIDS_CACHE[cache_key][0]) < 60:
+        return _REVENGE_QIDS_CACHE[cache_key][1]
+
     query = """
         SELECT question_id, is_correct, created_at
         FROM activity_log
@@ -75,6 +90,7 @@ def get_user_revenge_question_ids(cursor, user_id: str, subject: Optional[str] =
 
     # Revenge questions are those whose most recent attempt was incorrect
     revenge_ids = {qid for qid, is_cor in status_map.items() if not is_cor}
+    _REVENGE_QIDS_CACHE[cache_key] = (now_t, revenge_ids)
     return revenge_ids
 
 
@@ -125,25 +141,18 @@ def select_next_adaptive_question(
 
     target_elo = max(1000.0, min(2500.0, target_elo))
 
-    # 2. Query Candidate Questions
-    base_query = """
-        SELECT * FROM questions 
-        WHERE (validation_status IS NULL OR validation_status NOT IN ('QUARANTINED', 'SUPERSEDED_BY_SUBQUESTIONS'))
-          AND text IS NOT NULL AND text != ''
-    """
-    params = []
-
-    # If in remediation and we have a specific remediation chapter, try targeting it first
+    # 2. Select Candidate Questions via Fast Hot-Cache
     target_chapter = chapter or (remediation_chapter if is_remediation else None)
-
     from backend.app.tools.jee_syllabus import expand_allowed_chapters, normalize_chapter_name
-    effective_allowed = expand_allowed_chapters(allowed_chapters) if allowed_chapters else None
+    from backend.app.tools.question_cache import get_all_questions_cached
+    effective_allowed = set(expand_allowed_chapters(allowed_chapters)) if allowed_chapters else None
+    norm_ch = normalize_chapter_name(target_chapter) if target_chapter else None
 
     # Check for Due Spaced Repetition questions (interleaving spaced retrieval)
     if len(seen) > 0 and len(seen) % 3 == 0:
         try:
             from backend.app.tools.fsrs_engine import find_due_fsrs_question
-            due_q = find_due_fsrs_question(cursor, user_id, subject, effective_allowed)
+            due_q = find_due_fsrs_question(cursor, user_id, subject, list(effective_allowed) if effective_allowed else None)
             if due_q and due_q.get("id") not in seen:
                 metadata = {
                     "target_elo": round(float(due_q.get("elo_rating") or 1500), 1),
@@ -157,73 +166,53 @@ def select_next_adaptive_question(
         except Exception:
             pass
 
-    if subject and subject != "Full Syllabus":
-        base_query += " AND subject = ?"
-        params.append(subject)
-    if target_chapter:
-        norm_ch = normalize_chapter_name(target_chapter)
-        base_query += " AND (chapter = ? OR chapter = ?)"
-        params.extend([target_chapter, norm_ch])
-    elif effective_allowed:
-        placeholders = ",".join("?" for _ in effective_allowed)
-        base_query += f" AND chapter IN ({placeholders})"
-        params.extend(effective_allowed)
-    if target_exam and str(target_exam).upper() not in ("MIXED", "ALL"):
-        te_upper = str(target_exam).upper()
-        if "MAIN" in te_upper:
-            base_query += " AND (target_exam IN ('JEE_MAIN', 'MAIN') OR target_exam IS NULL)"
-            # Proper format of JEE NTA: Strictly Single Choice and Numericals only!
-            base_query += " AND UPPER(COALESCE(question_type, 'SINGLE_CHOICE')) IN ('SINGLE_CHOICE', 'MCQ', 'NUMERICAL', 'INTEGER')"
-        elif "ADVANCED" in te_upper:
-            base_query += " AND (target_exam IN ('JEE_ADVANCED', 'ADVANCED'))"
-        elif "OLYMPIAD" in te_upper:
-            base_query += " AND target_exam = 'OLYMPIAD'"
-        else:
-            base_query += " AND (UPPER(target_exam) = ? OR target_exam IS NULL)"
-            params.append(te_upper)
+    cached_bank = get_all_questions_cached(cursor)
 
-    cursor.execute(base_query, params)
-    candidates = [dict(r) for r in cursor.fetchall()]
+    def _matches_adaptive_filters(q, subj, ch_target, ch_norm, eff_allowed, t_exam):
+        if subj and subj != "Full Syllabus" and q.get("subject") != subj:
+            return False
+        if ch_target:
+            c_val = q.get("chapter")
+            if c_val != ch_target and c_val != ch_norm:
+                return False
+        elif eff_allowed:
+            if q.get("chapter") not in eff_allowed:
+                return False
+        if t_exam and str(t_exam).upper() not in ("MIXED", "ALL"):
+            te_upper = str(t_exam).upper()
+            q_exam = str(q.get("target_exam") or "").upper()
+            q_type = str(q.get("question_type") or "SINGLE_CHOICE").upper()
+            if "MAIN" in te_upper:
+                if q_exam not in ("JEE_MAIN", "MAIN", ""):
+                    return False
+                if q_type not in ("SINGLE_CHOICE", "MCQ", "NUMERICAL", "INTEGER"):
+                    return False
+            elif "ADVANCED" in te_upper:
+                if q_exam not in ("JEE_ADVANCED", "ADVANCED"):
+                    return False
+            elif "OLYMPIAD" in te_upper:
+                if q_exam != "OLYMPIAD":
+                    return False
+            else:
+                if q_exam and q_exam != te_upper:
+                    return False
+        return True
 
-    # Filter out already seen in this session
+    candidates = [q for q in cached_bank if _matches_adaptive_filters(q, subject, target_chapter, norm_ch, effective_allowed, target_exam)]
     unseen_candidates = [c for c in candidates if c["id"] not in seen]
 
     # Fallback 1: If remediation chapter exhausted unseen questions, widen to same subject (strictly respecting allowed_chapters)
     if not unseen_candidates and target_chapter and subject:
-        fallback_query = """
-            SELECT * FROM questions 
-            WHERE (validation_status IS NULL OR validation_status NOT IN ('QUARANTINED', 'SUPERSEDED_BY_SUBQUESTIONS'))
-              AND text IS NOT NULL AND text != ''
-        """
-        fb_params = []
-        if subject != "Full Syllabus":
-            fallback_query += " AND subject = ?"
-            fb_params.append(subject)
-        if effective_allowed:
-            placeholders = ",".join("?" for _ in effective_allowed)
-            fallback_query += f" AND chapter IN ({placeholders})"
-            fb_params.extend(effective_allowed)
-        cursor.execute(fallback_query, fb_params)
-        candidates = [dict(r) for r in cursor.fetchall()]
+        candidates = [q for q in cached_bank if _matches_adaptive_filters(q, subject, None, None, effective_allowed, target_exam)]
         unseen_candidates = [c for c in candidates if c["id"] not in seen]
         is_remediation = False
 
     # Fallback 2: If entire bank exhausted for current filter, reuse candidates
     pool = unseen_candidates if unseen_candidates else candidates
     if not pool:
-        # Ultimate fallback: Any unquarantined question in allowed syllabus
-        fb_ult = """
-            SELECT * FROM questions 
-            WHERE (validation_status IS NULL OR validation_status NOT IN ('QUARANTINED', 'SUPERSEDED_BY_SUBQUESTIONS'))
-        """
-        ult_params = []
-        if effective_allowed:
-            placeholders = ",".join("?" for _ in effective_allowed)
-            fb_ult += f" AND chapter IN ({placeholders})"
-            ult_params.extend(effective_allowed)
-        fb_ult += " ORDER BY RANDOM() LIMIT 25"
-        cursor.execute(fb_ult, ult_params)
-        pool = [dict(r) for r in cursor.fetchall()]
+        pool = [q for q in cached_bank if (not effective_allowed or q.get("chapter") in effective_allowed)]
+        if not pool and cached_bank:
+            pool = cached_bank[:30]
 
     if not pool:
         return None, {}
@@ -357,12 +346,13 @@ def apply_adaptive_result_to_profile(
         compute_two_factor_air_bracket
     )
 
-    cursor.execute("SELECT overall_elo, physics_elo, chemistry_elo, math_elo FROM users WHERE id = ?", (user_id,))
+    cursor.execute("SELECT overall_elo, physics_elo, chemistry_elo, math_elo, chapter_stats FROM users WHERE id = ?", (user_id,))
     u_row = cursor.fetchone()
     cur_overall = float(u_row["overall_elo"] or 1200.0) if u_row else 1200.0
     p_elo = float(u_row["physics_elo"] or 1200.0) if u_row else 1200.0
     c_elo = float(u_row["chemistry_elo"] or 1200.0) if u_row else 1200.0
     m_elo = float(u_row["math_elo"] or 1200.0) if u_row else 1200.0
+    raw_stats = u_row["chapter_stats"] if u_row else None
 
     chap_factor, _ = calculate_chapter_diminishing_factor(cursor, user_id, [chap], [subj])
     asym_factor, _ = calculate_subject_asymmetry_factor(p_elo, c_elo, m_elo, [subj], elo_delta)
@@ -377,30 +367,15 @@ def apply_adaptive_result_to_profile(
     else:
         overall_delta = round(elo_delta * chap_factor, 1)
 
-    # 1. Update user Elos and totals
-    rp_gain = 15 if is_correct else 5
-    correct_inc = 1 if is_correct else 0
-
-    cursor.execute(f"""
-        UPDATE users
-        SET overall_elo = MAX(100.0, overall_elo + ?),
-            {subj_col} = MAX(100.0, {subj_col} + ?),
-            total_solved = total_solved + 1,
-            total_correct = total_correct + ?,
-            weekly_rp = weekly_rp + ?,
-            last_active = ?
-        WHERE id = ?
-    """, (overall_delta, elo_delta, correct_inc, rp_gain, now, user_id))
-
-    # 2. Update chapter_stats JSON
-    cursor.execute("SELECT chapter_stats FROM users WHERE id = ?", (user_id,))
-    row = cursor.fetchone()
+    # 1. Update chapter_stats
     stats = {}
-    if row and row["chapter_stats"]:
+    if raw_stats:
         try:
-            stats = json.loads(row["chapter_stats"])
+            stats = json.loads(raw_stats) if isinstance(raw_stats, str) else raw_stats
         except Exception:
             stats = {}
+    if not isinstance(stats, dict):
+        stats = {}
 
     if chap not in stats:
         stats[chap] = {"attempts": 0, "correct": 0, "subject": subj}
@@ -408,7 +383,26 @@ def apply_adaptive_result_to_profile(
     if is_correct:
         stats[chap]["correct"] = stats[chap].get("correct", 0) + 1
 
-    cursor.execute("UPDATE users SET chapter_stats = ? WHERE id = ?", (json.dumps(stats), user_id))
+    # 2. Consolidated user profile update (single query)
+    rp_gain = 15 if is_correct else 5
+    correct_inc = 1 if is_correct else 0
+    new_ov = max(100.0, cur_overall + overall_delta)
+    new_p = max(100.0, p_elo + (elo_delta if subj_col == "physics_elo" else 0.0))
+    new_c = max(100.0, c_elo + (elo_delta if subj_col == "chemistry_elo" else 0.0))
+    new_m = max(100.0, m_elo + (elo_delta if subj_col == "math_elo" else 0.0))
+
+    cursor.execute(f"""
+        UPDATE users
+        SET overall_elo = ?,
+            {subj_col} = ?,
+            total_solved = total_solved + 1,
+            total_correct = total_correct + ?,
+            weekly_rp = weekly_rp + ?,
+            chapter_stats = ?,
+            last_active = ?
+        WHERE id = ?
+    """, (new_ov, max(100.0, (p_elo if subj_col == "physics_elo" else c_elo if subj_col == "chemistry_elo" else m_elo) + elo_delta),
+          correct_inc, rp_gain, json.dumps(stats), now, user_id))
 
     # 3. Log to activity_log
     cursor.execute("""
@@ -436,21 +430,21 @@ def apply_adaptive_result_to_profile(
         pass
 
     # 5. Log progression to user_rank_history
-    cursor.execute("SELECT overall_elo, physics_elo, chemistry_elo, math_elo FROM users WHERE id = ?", (user_id,))
-    u_row = cursor.fetchone()
-    if u_row:
-        new_ov = float(u_row["overall_elo"] or 1200.0)
+    try:
         cov = get_user_syllabus_coverage(cursor, user_id)
         air_b, _, _ = compute_two_factor_air_bracket(
             new_ov, cov["active_count"], cov["active_subjects_count"],
-            physics_elo=float(u_row["physics_elo"] or 1200.0),
-            chemistry_elo=float(u_row["chemistry_elo"] or 1200.0),
-            math_elo=float(u_row["math_elo"] or 1200.0)
+            physics_elo=new_p, chemistry_elo=new_c, math_elo=new_m
         )
         cursor.execute("""
             INSERT INTO user_rank_history (user_id, overall_elo, predicted_air_bracket, created_at)
             VALUES (?, ?, ?, ?)
         """, (user_id, round(new_ov, 1), air_b, now[:10]))
+    except Exception:
+        pass
+
+    from backend.app.auth import invalidate_user_cache
+    invalidate_user_cache(user_id)
 
     # 6. Record Daily Study Streak Activity
     try:

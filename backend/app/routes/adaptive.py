@@ -2,7 +2,7 @@ import json
 import uuid
 import datetime
 from typing import Optional, List, Dict, Any, Tuple
-from fastapi import APIRouter, HTTPException, Depends, Query
+from fastapi import APIRouter, HTTPException, Depends, Query, BackgroundTasks
 from pydantic import BaseModel
 
 from backend.app.database import get_connection
@@ -414,6 +414,7 @@ def skip_adaptive_question(session_id: str, user: dict = Depends(get_current_use
 def submit_adaptive_answer(
     session_id: str,
     req: AdaptiveSubmitRequest,
+    background_tasks: BackgroundTasks,
     user: dict = Depends(get_current_user)
 ):
     """
@@ -434,14 +435,17 @@ def submit_adaptive_answer(
         conn.close()
         raise HTTPException(status_code=400, detail="Adaptive session is already completed.")
 
-    # Fetch question submitted
-    c.execute("SELECT * FROM questions WHERE id = ?", (req.question_id,))
-    q_row = c.fetchone()
-    if not q_row:
-        conn.close()
-        raise HTTPException(status_code=404, detail="Question not found.")
+    # Fetch question submitted - first check fast in-memory hot cache
+    from backend.app.tools.question_cache import get_question_cached
+    q = get_question_cached(req.question_id, cursor=c)
+    if not q:
+        c.execute("SELECT * FROM questions WHERE id = ?", (req.question_id,))
+        q_row = c.fetchone()
+        if not q_row:
+            conn.close()
+            raise HTTPException(status_code=404, detail="Question not found.")
+        q = dict(q_row)
 
-    q = dict(q_row)
     q_elo = float(q.get("elo_rating") or 1500)
     current_session_elo = float(sess["current_elo"])
     curr_streak = int(sess["current_streak"])
@@ -457,15 +461,38 @@ def submit_adaptive_answer(
     elo_delta = calculate_adaptive_elo_delta(current_session_elo, q_elo, is_correct, curr_streak)
     new_session_elo = max(1000.0, min(2600.0, current_session_elo + elo_delta))
 
-    # 4. Apply permanent user profile updates
-    q["user_choice"] = req.submitted_answer
-    apply_adaptive_result_to_profile(
-        cursor=c,
-        user_id=user["id"],
-        question=q,
-        is_correct=is_correct,
-        time_spent=req.time_spent_seconds,
-        elo_delta=elo_delta
+    # 4. Offload permanent user profile and telemetry updates to background task
+    q_copy = dict(q)
+    q_copy["user_choice"] = req.submitted_answer
+
+    def _bg_apply_profile_updates(u_id, q_data, is_corr, t_spent, e_delta):
+        bg_conn = get_connection()
+        try:
+            bg_c = bg_conn.cursor()
+            apply_adaptive_result_to_profile(
+                cursor=bg_c,
+                user_id=u_id,
+                question=q_data,
+                is_correct=is_corr,
+                time_spent=t_spent,
+                elo_delta=e_delta
+            )
+            bg_conn.commit()
+        except Exception as e:
+            print(f"[ADAPTIVE_BG] Background telemetry sync note: {e}")
+        finally:
+            try:
+                bg_conn.close()
+            except Exception:
+                pass
+
+    background_tasks.add_task(
+        _bg_apply_profile_updates,
+        user["id"],
+        q_copy,
+        is_correct,
+        req.time_spent_seconds,
+        elo_delta
     )
 
     # 5. Record in session history

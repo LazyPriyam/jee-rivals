@@ -93,7 +93,7 @@ export default function InviteFriendsView({
         fetchChallenges();
         fetchIncomingRequests();
         fetchFriendsSilently();
-      }, 5000);
+      }, 15000);
       return () => clearInterval(interval);
     } else {
       setLoadingFriends(false);
@@ -111,7 +111,7 @@ export default function InviteFriendsView({
   useEffect(() => {
     if (activeTab === 'lobbies') {
       fetchOpenRooms();
-      const interval = setInterval(fetchOpenRooms, 6000);
+      const interval = setInterval(fetchOpenRooms, 15000);
       return () => clearInterval(interval);
     }
   }, [activeTab]);

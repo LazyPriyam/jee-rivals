@@ -5,7 +5,7 @@ import random
 import string
 import asyncio
 from typing import List, Optional, Dict, Any
-from fastapi import APIRouter, HTTPException, Depends, status
+from fastapi import APIRouter, HTTPException, Depends, status, BackgroundTasks
 from pydantic import BaseModel
 
 from backend.app.models import (
@@ -1414,7 +1414,12 @@ async def submit_bulk_mock(code: str, req: BulkSubmissionRequest, user: dict = D
 
 
 @router.post("/{code}/submit")
-async def submit_answer(code: str, submission: AnswerSubmissionRequest, user: dict = Depends(get_current_user)):
+async def submit_answer(
+    code: str,
+    submission: AnswerSubmissionRequest,
+    background_tasks: BackgroundTasks,
+    user: dict = Depends(get_current_user)
+):
     code = code.strip().upper()
     conn = get_connection()
     c = conn.cursor()
@@ -1439,13 +1444,17 @@ async def submit_answer(code: str, submission: AnswerSubmissionRequest, user: di
         conn.close()
         raise HTTPException(status_code=400, detail="You have already completed all questions.")
 
-    c.execute("SELECT * FROM questions WHERE id = ?", (submission.question_id,))
-    q_row = c.fetchone()
-    if not q_row:
-        conn.close()
-        raise HTTPException(status_code=404, detail="Question not found.")
+    # Hot-cache question lookup (0ms)
+    from backend.app.tools.question_cache import get_question_cached
+    q = get_question_cached(submission.question_id, cursor=c)
+    if not q:
+        c.execute("SELECT * FROM questions WHERE id = ?", (submission.question_id,))
+        q_row = c.fetchone()
+        if not q_row:
+            conn.close()
+            raise HTTPException(status_code=404, detail="Question not found.")
+        q = dict(q_row)
 
-    q = dict(q_row)
     correct_ans = str(q["correct_answer"]).strip()
     user_ans = str(submission.selected_option).strip()
     q_type = q.get("question_type", "MCQ")
@@ -1491,10 +1500,9 @@ async def submit_answer(code: str, submission: AnswerSubmissionRequest, user: di
         curr_idx = p["current_question_index"]
         next_q_data = None
         if curr_idx < len(q_ids):
-            c.execute("SELECT * FROM questions WHERE id = ?", (q_ids[curr_idx],))
-            nq = c.fetchone()
+            nq = get_question_cached(q_ids[curr_idx], cursor=c)
             if nq:
-                next_q_data = row_to_question_out(dict(nq)).dict()
+                next_q_data = row_to_question_out(nq).dict()
         conn.close()
         prev = answers_dict[submission.question_id]
         return {
@@ -1525,14 +1533,13 @@ async def submit_answer(code: str, submission: AnswerSubmissionRequest, user: di
     now = datetime.datetime.utcnow().isoformat()
     finished_at = now if is_finished else None
 
-    # Fetch next question directly for instant progression
+    # Fetch next question directly from hot cache
     next_question = None
     if not is_finished and new_idx < len(q_ids):
         next_qid = q_ids[new_idx]
-        c.execute("SELECT * FROM questions WHERE id = ?", (next_qid,))
-        nq_row = c.fetchone()
-        if nq_row:
-            next_question = row_to_question_out(dict(nq_row)).dict()
+        nq = get_question_cached(next_qid, cursor=c)
+        if nq:
+            next_question = row_to_question_out(nq).dict()
 
     c.execute("""
         UPDATE room_participants
@@ -1550,36 +1557,54 @@ async def submit_answer(code: str, submission: AnswerSubmissionRequest, user: di
         WHERE id = ?
     """, (1 if is_correct else 0, user_rp_gain, now, user["id"]))
 
-    from backend.app.tools.elo_engine import update_question_elo_from_attempt
-    q_elo_delta, _ = update_question_elo_from_attempt(
-        c,
+    # Offload secondary question Elo, activity logs, chapter attempts, and streaks to background task
+    def _bg_record_duel_telemetry(u_id, q_id, q_sub, q_ch, is_cor, t_spent, r_mode, overall_e, ts_now):
+        bg_conn = get_connection()
+        try:
+            bg_c = bg_conn.cursor()
+            from backend.app.tools.elo_engine import update_question_elo_from_attempt, record_chapter_attempt
+            q_delta, _ = update_question_elo_from_attempt(
+                bg_c, u_id, q_id, is_cor, t_spent, overall_e, ts_now
+            )
+            bg_c.execute("""
+                INSERT INTO activity_log (user_id, question_id, subject, chapter, is_correct, time_spent_seconds, elo_delta, mode, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (u_id, q_id, q_sub, q_ch, 1 if is_cor else 0, t_spent, q_delta, r_mode, ts_now))
+            record_chapter_attempt(bg_c, u_id, q_sub, q_ch, is_cor)
+            try:
+                from backend.app.tools.streaks_engine import record_daily_activity
+                record_daily_activity(u_id, bg_c)
+            except Exception:
+                pass
+            bg_conn.commit()
+        except Exception as e:
+            print(f"[DUEL_BG] Telemetry record note: {e}")
+        finally:
+            try:
+                bg_conn.close()
+            except Exception:
+                pass
+
+    background_tasks.add_task(
+        _bg_record_duel_telemetry,
         user["id"],
         q["id"],
+        q.get("subject"),
+        q.get("chapter"),
         is_correct,
         time_spent,
+        room["mode"],
         float(user.get("overall_elo", 1200.0)),
         now
     )
 
-    c.execute("""
-        INSERT INTO activity_log (user_id, question_id, subject, chapter, is_correct, time_spent_seconds, elo_delta, mode, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    """, (user["id"], q["id"], q["subject"], q["chapter"], 1 if is_correct else 0, time_spent, q_elo_delta, room["mode"], now))
-    from backend.app.tools.elo_engine import record_chapter_attempt
-    record_chapter_attempt(c, user["id"], q["subject"], q["chapter"], is_correct)
-    try:
-        from backend.app.tools.streaks_engine import record_daily_activity
-        record_daily_activity(user["id"], c)
-    except Exception:
-        pass
-
-    c.execute("SELECT COUNT(*) as unfinished FROM room_participants WHERE room_id = ? AND is_finished = 0", (room_id,))
-    unfinished_count = c.fetchone()["unfinished"]
-
     match_completed = False
-    if unfinished_count == 0:
-        c.execute("UPDATE rooms SET status = 'COMPLETED', completed_at = ? WHERE id = ?", (now, room_id))
-        match_completed = True
+    if is_finished:
+        c.execute("SELECT COUNT(*) as unfinished FROM room_participants WHERE room_id = ? AND is_finished = 0", (room_id,))
+        unfinished_count = c.fetchone()["unfinished"]
+        if unfinished_count == 0:
+            c.execute("UPDATE rooms SET status = 'COMPLETED', completed_at = ? WHERE id = ?", (now, room_id))
+            match_completed = True
 
         c.execute("""
             SELECT p.user_id, p.score, u.overall_elo, u.gold_medals

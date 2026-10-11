@@ -67,7 +67,7 @@ export default function TournamentsView({ user, onJoinRoomCode, onOpenAuth, onVi
 
   useEffect(() => {
     fetchTournaments();
-    const interval = setInterval(fetchTournaments, 5000);
+    const interval = setInterval(fetchTournaments, 15000);
     return () => clearInterval(interval);
   }, [filter]);
 

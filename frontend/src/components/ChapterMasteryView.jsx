@@ -104,7 +104,9 @@ export default function ChapterMasteryView({
 
   const fetchData = async () => {
     if (!user) return;
-    setLoading(true);
+    if (!chaptersData) {
+      setLoading(true);
+    }
     setError('');
     try {
       const [chaps, rad, grave] = await Promise.all([
@@ -116,7 +118,9 @@ export default function ChapterMasteryView({
       setRadarData(rad);
       setGraveyardData(grave);
     } catch (err) {
-      setError(err.message || 'Failed to load mastery telemetry.');
+      if (!chaptersData) {
+        setError(err.message || 'Failed to load mastery telemetry.');
+      }
     } finally {
       setLoading(false);
     }
@@ -337,7 +341,7 @@ export default function ChapterMasteryView({
         </div>
       </div>
 
-      {loading && (
+      {loading && !chaptersData && (
         <div className="flex items-center justify-center py-12 text-slate-400 gap-3">
           <RefreshCw className="w-5 h-5 animate-spin text-orange-400" />
           <span className="text-xs font-mono">Synthesizing chapter telemetry & error archives...</span>
@@ -363,7 +367,7 @@ export default function ChapterMasteryView({
       {/* ========================================================================= */}
       {/* TAB 1: CHAPTER MATRIX & HEATMAP */}
       {/* ========================================================================= */}
-      {activeTab === 'chapters' && !loading && chaptersData && (
+      {activeTab === 'chapters' && chaptersData && (
         <div className="space-y-6">
           {/* Summary Quadrant Cards */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
@@ -637,7 +641,7 @@ export default function ChapterMasteryView({
       {/* ========================================================================= */}
       {/* TAB 2: WEAK-SPOTS RISK RADAR */}
       {/* ========================================================================= */}
-      {activeTab === 'radar' && !loading && radarData && (
+      {activeTab === 'radar' && radarData && (
         <div className="space-y-6">
           {/* Risk Formula Explanation Card */}
           <div className="p-4 bg-gradient-to-r from-red-950/40 via-[#181d28] to-orange-950/40 border border-red-500/30 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -722,7 +726,7 @@ export default function ChapterMasteryView({
       {/* ========================================================================= */}
       {/* TAB 3: THE GRAVEYARD & FAILED QUESTION BOOKMARKS */}
       {/* ========================================================================= */}
-      {activeTab === 'graveyard' && !loading && (
+      {activeTab === 'graveyard' && (graveyardData || !loading) && (
         <div className="space-y-6">
           {/* Graveyard Revenge Duel Banner */}
           <div className="bg-gradient-to-r from-red-950/60 via-[#181d28] to-purple-950/60 border border-red-500/40 rounded-3xl p-6 shadow-2xl relative overflow-hidden">
