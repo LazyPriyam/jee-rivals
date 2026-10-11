@@ -349,18 +349,6 @@ def get_user_notifications(user: dict = Depends(get_current_user)):
 
     # 3. Moderation & Compensation Updates
     c.execute("""
-        CREATE TABLE IF NOT EXISTS user_notifications (
-            id TEXT PRIMARY KEY,
-            user_id TEXT NOT NULL,
-            type TEXT NOT NULL,
-            title TEXT NOT NULL,
-            message TEXT NOT NULL,
-            details TEXT DEFAULT '{}',
-            is_read INTEGER DEFAULT 0,
-            created_at TEXT NOT NULL
-        );
-    """)
-    c.execute("""
         SELECT * FROM user_notifications
         WHERE user_id = ? AND is_read = 0
         ORDER BY created_at DESC
@@ -376,11 +364,16 @@ def get_user_notifications(user: dict = Depends(get_current_user)):
     dm_unread_row = c.fetchone()
     unread_messages_count = dm_unread_row[0] if dm_unread_row else 0
 
+    # 5. System & Content Updates (Fetch recent updates annotated with is_read on the same connection)
+    from backend.app.tools.system_updates_engine import get_user_system_updates
+    all_system_updates = get_user_system_updates(
+        user["id"],
+        limit=30,
+        cursor=c,
+        user_created_at=user.get("created_at")
+    )
     conn.close()
 
-    # 5. System & Content Updates (Fetch recent updates annotated with is_read)
-    from backend.app.tools.system_updates_engine import get_user_system_updates
-    all_system_updates = get_user_system_updates(user["id"], limit=30)
     unread_system_updates = [u for u in all_system_updates if not u.get("is_read")]
 
     return {

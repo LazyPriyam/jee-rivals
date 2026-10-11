@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import Navbar from './components/Navbar';
 import DashboardView from './components/DashboardView';
 import MocksCenterView from './components/MocksCenterView';
@@ -51,6 +51,7 @@ export default function App() {
   const [skillTreePayload, setSkillTreePayload] = useState(null);
   const [activeChatFriend, setActiveChatFriend] = useState(null);
   const [chatDrawerOpen, setChatDrawerOpen] = useState(false);
+  const lastUserRefreshRef = useRef(0);
 
   const handleOpenChat = (friend) => {
     setActiveChatFriend(friend);
@@ -82,10 +83,10 @@ export default function App() {
     // roomViewMode remains null so the user lands cleanly on the Dashboard.
   }, [user?.id]);
 
-  // Fetch skill tree data for standalone Skill Tree tab
+  // Fetch skill tree data only when standalone Skill Tree tab is opened
   useEffect(() => {
-    if (user) {
-      api.auth.updateProfile({})
+    if (user?.username && activeTab === 'skills') {
+      api.leaderboards.getProfile(user.username)
         .then((res) => {
           if (res?.skill_tree) {
             setSkillTreePayload(res.skill_tree);
@@ -93,7 +94,7 @@ export default function App() {
         })
         .catch(() => {});
     }
-  }, [user?.id, activeTab]);
+  }, [user?.username, activeTab]);
 
   // Check existing session with bulletproof auto-healing persistence
   useEffect(() => {
@@ -113,6 +114,7 @@ export default function App() {
           setUser(resp.user);
           setCachedUser(resp.user);
           recordSavedAccount(resp.user, resp.token, savedAcc.pin);
+          lastUserRefreshRef.current = Date.now();
           return true;
         } catch (_) {}
       }
@@ -125,6 +127,7 @@ export default function App() {
           setUser(u);
           setCachedUser(u);
           recordSavedAccount(u);
+          lastUserRefreshRef.current = Date.now();
         })
         .catch(async (err) => {
           // If server explicitly returned 401/403, attempt auto-heal before discarding
@@ -149,8 +152,13 @@ export default function App() {
     }
   }, []);
 
-  const refreshUser = useCallback(() => {
+  const refreshUser = useCallback((force = false) => {
     if (!getToken()) return;
+    const now = Date.now();
+    if (!force && now - lastUserRefreshRef.current < 25000) {
+      return;
+    }
+    lastUserRefreshRef.current = now;
     api.auth.getMe()
       .then((u) => {
         setUser(u);
@@ -167,14 +175,15 @@ export default function App() {
         setUser(e.detail);
         setCachedUser(e.detail);
         recordSavedAccount(e.detail);
+        lastUserRefreshRef.current = Date.now();
       } else {
-        refreshUser();
+        refreshUser(true);
       }
     };
 
     const handleVisibility = () => {
       if (document.visibilityState === 'visible') {
-        refreshUser();
+        refreshUser(false);
       }
     };
 

@@ -1,18 +1,32 @@
 import datetime
 import json
+import time
 from typing import List, Optional, Dict, Any
 from fastapi import APIRouter, HTTPException, Query, Depends
 
 from backend.app.database import get_connection, get_user_by_username
 from backend.app.models import UserProfile, ProfileUpdateRequest
 from backend.app.auth import get_current_user
-from backend.app.routes.auth import format_user_profile
+from backend.app.routes.auth import format_user_profile, invalidate_coverage_cache
 from backend.app.tools.jee_syllabus import build_user_skill_tree
 from backend.app.tools.achievements_engine import evaluate_user_achievements
 from backend.app.tools.division_engine import evaluate_user_division, DIVISION_TIERS_CONFIG
 from backend.app.websockets.room_hub import room_hub
 
 router = APIRouter(prefix="/api/leaderboards", tags=["Leaderboards & Ranks"])
+
+_WEEKLY_LB_CACHE: dict = {}
+_ELO_LB_CACHE: dict = {}
+_PUBLIC_PROFILE_CACHE: dict = {}
+
+def invalidate_leaderboard_caches(username: Optional[str] = None):
+    global _WEEKLY_LB_CACHE, _ELO_LB_CACHE, _PUBLIC_PROFILE_CACHE
+    _WEEKLY_LB_CACHE.clear()
+    _ELO_LB_CACHE.clear()
+    if username:
+        _PUBLIC_PROFILE_CACHE.pop(username.strip().lower(), None)
+    else:
+        _PUBLIC_PROFILE_CACHE.clear()
 
 def calculate_division(rank: int, total_users: int) -> str:
     # Retained as fast fallback; full evaluation is now performed by division_engine
@@ -81,6 +95,11 @@ def get_my_division_details(current_user: dict = Depends(get_current_user)):
 
 @router.get("/weekly")
 def get_weekly_leaderboard(limit: int = Query(50, ge=1, le=100)):
+    now = time.time()
+    cached = _WEEKLY_LB_CACHE.get(limit)
+    if cached and (now - cached[0] < 15.0):
+        return cached[1]
+
     conn = get_connection()
     c = conn.cursor()
 
@@ -146,17 +165,25 @@ def get_weekly_leaderboard(limit: int = Query(50, ge=1, le=100)):
             "is_online": room_hub.is_user_online(u["id"], u.get("last_active"))
         })
 
-    return {
+    res = {
         "reset_at": get_next_sunday_utc(),
         "total_active_aspirants": total_users,
         "leaderboard": leaderboard,
         "all_tiers": DIVISION_TIERS_CONFIG
     }
+    _WEEKLY_LB_CACHE[limit] = (now, res)
+    return res
 
 
 @router.get("/elo")
 def get_elo_leaderboard(subject: str = Query("overall"), limit: int = Query(50, ge=1, le=100)):
     subj = subject.strip().lower()
+    now = time.time()
+    cache_key = (subj, limit)
+    cached = _ELO_LB_CACHE.get(cache_key)
+    if cached and (now - cached[0] < 15.0):
+        return cached[1]
+
     elo_col = "overall_elo"
     if subj == "physics":
         elo_col = "physics_elo"
@@ -203,10 +230,12 @@ def get_elo_leaderboard(subject: str = Query("overall"), limit: int = Query(50, 
             "is_online": room_hub.is_user_online(u["id"], u.get("last_active"))
         })
 
-    return {
+    res = {
         "subject": subj,
         "ladder": ladder
     }
+    _ELO_LB_CACHE[cache_key] = (now, res)
+    return res
 
 
 @router.put("/profile/me", response_model=UserProfile)
@@ -272,13 +301,23 @@ def update_current_user_profile(
 
     from backend.app.routes.auth import invalidate_user_cache
     invalidate_user_cache(current_user["id"])
+    invalidate_coverage_cache(current_user["id"])
+    invalidate_leaderboard_caches(current_user.get("username"))
 
     return format_user_profile(updated_user)
 
 
 @router.get("/profile/{username}")
 def get_public_profile(username: str):
-    user = get_user_by_username(username.strip())
+    uname_clean = username.strip()
+    uname_key = uname_clean.lower()
+    now = time.time()
+
+    cached_pub = _PUBLIC_PROFILE_CACHE.get(uname_key)
+    if cached_pub and (now - cached_pub[0] < 20.0):
+        return cached_pub[1]
+
+    user = get_user_by_username(uname_clean)
     if not user:
         raise HTTPException(status_code=404, detail=f"User '{username}' not found.")
 
@@ -296,7 +335,7 @@ def get_public_profile(username: str):
 
     if not rank_history:
         from backend.app.tools.elo_engine import get_user_syllabus_coverage, compute_two_factor_air_bracket
-        cov = get_user_syllabus_coverage(c, user["id"])
+        cov = get_user_syllabus_coverage(c, user["id"], user_dict=user)
         cur_elo = round(user.get("overall_elo", 1200.0), 1)
         base_elo = max(1050.0, cur_elo - 150.0)
         p1 = round(base_elo, 1)
@@ -324,21 +363,22 @@ def get_public_profile(username: str):
         conn.commit()
         rank_history = [{"overall_elo": s[0], "predicted_air_bracket": s[1], "created_at": s[2]} for s in seeds]
 
-    # 2. Syllabus Skill Tree (Chapter-based, strictly NO topics)
+    # 2. Single unified activity_log fetch (reused for Skill Tree, Recent Activity, and Chapter Breakdown)
     c.execute("""
-        SELECT subject, chapter, is_correct, time_spent_seconds
+        SELECT subject, chapter, is_correct, time_spent_seconds, mode, created_at
         FROM activity_log
         WHERE user_id = ?
+        ORDER BY id DESC
     """, (user["id"],))
     activity_rows = [dict(r) for r in c.fetchall()]
 
-    c.execute("""
-        SELECT chapter, COUNT(*) as cnt
-        FROM questions
-        WHERE validation_status IS NULL OR validation_status != 'QUARANTINED'
-        GROUP BY chapter
-    """)
-    q_counts = {r["chapter"]: r["cnt"] for r in c.fetchall()}
+    # Compute chapter question counts from in-memory hot cache (0ms instead of remote SQL scan)
+    from backend.app.tools.question_cache import get_all_questions_cached
+    q_counts: Dict[str, int] = {}
+    for q in get_all_questions_cached(cursor=c):
+        ch = q.get("chapter")
+        if ch:
+            q_counts[ch] = q_counts.get(ch, 0) + 1
     skill_tree_data = build_user_skill_tree(activity_rows, q_counts)
 
     # 3. Achievements & Trophy Shelf
@@ -368,7 +408,7 @@ def get_public_profile(username: str):
     }
     achievements_data = evaluate_user_achievements(user, extra_stats)
 
-    # 4. Chess.com Style Battle Log / Match History
+    # 4. Chess.com Style Battle Log / Match History (Single batch opponent lookup instead of 15 N+1 queries)
     c.execute("""
         SELECT r.id as room_id, r.code, r.target_exam, r.status, r.created_at, r.completed_at,
                rp.score as my_score, rp.marks as my_marks
@@ -380,16 +420,24 @@ def get_public_profile(username: str):
     """, (user["id"],))
     recent_matches_raw = [dict(r) for r in c.fetchall()]
 
-    match_history = []
-    for m in recent_matches_raw:
-        c.execute("""
-            SELECT rp.score, rp.marks, u.id, u.username, u.avatar_id, u.overall_elo
+    opp_by_room: Dict[str, dict] = {}
+    if recent_matches_raw:
+        room_ids = [m["room_id"] for m in recent_matches_raw]
+        placeholders = ",".join("?" for _ in room_ids)
+        c.execute(f"""
+            SELECT rp.room_id, rp.score, rp.marks, u.id, u.username, u.avatar_id, u.overall_elo
             FROM room_participants rp
             JOIN users u ON rp.user_id = u.id
-            WHERE rp.room_id = ? AND rp.user_id != ?
-            LIMIT 1
-        """, (m["room_id"], user["id"]))
-        opp = c.fetchone()
+            WHERE rp.room_id IN ({placeholders}) AND rp.user_id != ?
+        """, (*room_ids, user["id"]))
+        for row in c.fetchall():
+            rid = row["room_id"]
+            if rid not in opp_by_room:
+                opp_by_room[rid] = dict(row)
+
+    match_history = []
+    for m in recent_matches_raw:
+        opp = opp_by_room.get(m["room_id"])
 
         my_score = m["my_score"] or 0
         opp_score = opp["score"] if opp else 0
@@ -423,48 +471,42 @@ def get_public_profile(username: str):
             }
         })
 
-    # 5. Recent Activity Attempts
-    c.execute("""
-        SELECT subject, chapter, is_correct, time_spent_seconds, mode, created_at
-        FROM activity_log
-        WHERE user_id = ?
-        ORDER BY id DESC
-        LIMIT 10
-    """, (user["id"],))
-    recent_acts = [dict(r) for r in c.fetchall()]
+    # 5. Recent Activity Attempts (derived in-memory from activity_rows)
+    recent_acts = activity_rows[:10]
 
-    # 6. Chapter Breakdown for Stats
-    c.execute("""
-        SELECT chapter, subject, COUNT(*) as total, SUM(is_correct) as correct, AVG(time_spent_seconds) as avg_time
-        FROM activity_log
-        WHERE user_id = ?
-        GROUP BY chapter, subject
-        ORDER BY total DESC
-        LIMIT 8
-    """, (user["id"],))
+    # 6. Chapter Breakdown for Stats (derived in-memory from activity_rows)
+    chap_agg: Dict[tuple, list] = {}
+    for r in activity_rows:
+        key = (r.get("chapter"), r.get("subject"))
+        if key not in chap_agg:
+            chap_agg[key] = [0, 0, 0.0]
+        chap_agg[key][0] += 1
+        if r.get("is_correct"):
+            chap_agg[key][1] += 1
+        chap_agg[key][2] += float(r.get("time_spent_seconds") or 0.0)
+
+    sorted_chaps = sorted(chap_agg.items(), key=lambda item: item[1][0], reverse=True)[:8]
     chap_perf = []
-    for r in c.fetchall():
-        tot = r["total"]
-        cor = r["correct"] or 0
+    for (ch_name, subj_name), (tot, cor, sum_time) in sorted_chaps:
         chap_perf.append({
-            "chapter": r["chapter"],
-            "subject": r["subject"],
+            "chapter": ch_name,
+            "subject": subj_name,
             "attempts": tot,
             "accuracy": round((cor / tot) * 100, 1) if tot > 0 else 0,
-            "avg_time": round(r["avg_time"] or 0, 1)
+            "avg_time": round((sum_time / tot) if tot > 0 else 0, 1)
         })
 
-    # 7. Completed Mock Tests & Practice Examination Papers
+    # 7. Completed Mock Tests & Practice Examination Papers (reusing cursor c)
     from backend.app.routes.rooms import get_user_test_history
     try:
-        test_history = get_user_test_history(user=user)
+        test_history = get_user_test_history(user=user, cursor=c)
     except Exception:
         test_history = []
 
     profile = format_user_profile(user, cursor=c)
     conn.close()
 
-    return {
+    result_payload = {
         "profile": profile.dict(),
         "rank_history": rank_history,
         "skill_tree": skill_tree_data,
@@ -474,3 +516,5 @@ def get_public_profile(username: str):
         "recent_activity": recent_acts,
         "chapter_breakdown": chap_perf
     }
+    _PUBLIC_PROFILE_CACHE[uname_key] = (time.time(), result_payload)
+    return result_payload

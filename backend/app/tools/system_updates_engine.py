@@ -136,17 +136,29 @@ def post_system_update(
     return uid
 
 
-def get_user_system_updates(user_id: str, limit: int = 30) -> List[Dict[str, Any]]:
+def get_user_system_updates(
+    user_id: str,
+    limit: int = 30,
+    cursor=None,
+    user_created_at: Optional[str] = None
+) -> List[Dict[str, Any]]:
     """
     Returns system updates ordered by recency, annotated with `is_read` for this specific user.
     Updates created before the user registered are automatically treated as read.
     """
-    conn = _get_db_connection()
-    c = conn.cursor()
+    conn = None
+    close_conn = False
+    if cursor is None:
+        conn = _get_db_connection()
+        c = conn.cursor()
+        close_conn = True
+    else:
+        c = cursor
 
-    c.execute("SELECT created_at FROM users WHERE id = ?", (user_id,))
-    u_row = c.fetchone()
-    user_created_at = u_row[0] if u_row and u_row[0] else None
+    if user_created_at is None:
+        c.execute("SELECT created_at FROM users WHERE id = ?", (user_id,))
+        u_row = c.fetchone()
+        user_created_at = u_row[0] if u_row and u_row[0] else None
 
     c.execute("""
         SELECT su.*, 
@@ -172,7 +184,8 @@ def get_user_system_updates(user_id: str, limit: int = 30) -> List[Dict[str, Any
         d["is_read"] = bool(d.get("is_read"))
         updates.append(d)
 
-    conn.close()
+    if close_conn and conn:
+        conn.close()
     return updates
 
 

@@ -92,28 +92,29 @@ def row_to_question_out(row: dict) -> QuestionOut:
     )
 
 
+_DAILY_CHALLENGE_CACHE: dict = {}
+
 @router.get("/chapters")
 def get_chapters():
-    conn = get_connection()
-    c = conn.cursor()
-    c.execute("""
-        SELECT subject, unit, chapter, COUNT(*) as count 
-        FROM questions 
-        GROUP BY subject, unit, chapter 
-        ORDER BY subject, unit, count DESC
-    """)
-    rows = c.fetchall()
-    conn.close()
+    from backend.app.tools.question_cache import get_all_questions_cached
+    all_qs = get_all_questions_cached()
+    agg = {}
+    for r in all_qs:
+        subj = r.get("subject") or "Unknown"
+        unit = r.get("unit") or "General"
+        chap = r.get("chapter") or "General"
+        key = (subj, unit, chap)
+        agg[key] = agg.get(key, 0) + 1
 
+    sorted_items = sorted(agg.items(), key=lambda x: (x[0][0], x[0][1], -x[1]))
     grouped = {}
-    for r in rows:
-        subj = r["subject"]
+    for (subj, unit, chap), cnt in sorted_items:
         if subj not in grouped:
             grouped[subj] = []
         grouped[subj].append({
-            "chapter": r["chapter"],
-            "unit": r["unit"] or "General",
-            "count": r["count"]
+            "chapter": chap,
+            "unit": unit,
+            "count": cnt
         })
     return grouped
 
@@ -122,18 +123,14 @@ def get_chapters():
 def get_master_syllabus():
     """
     Returns the full canonical syllabus tree (Subject -> Units -> Chapters)
-    augmented with live question counts from the question bank.
+    augmented with live question counts from the in-memory question bank cache.
     """
-    conn = get_connection()
-    c = conn.cursor()
-    c.execute("""
-        SELECT chapter, COUNT(*) as count 
-        FROM questions 
-        WHERE validation_status IS NULL OR validation_status != 'QUARANTINED'
-        GROUP BY chapter
-    """)
-    counts = {r["chapter"]: r["count"] for r in c.fetchall()}
-    conn.close()
+    from backend.app.tools.question_cache import get_all_questions_cached
+    counts = {}
+    for q in get_all_questions_cached():
+        ch = q.get("chapter")
+        if ch:
+            counts[ch] = counts.get(ch, 0) + 1
 
     from backend.app.tools.jee_syllabus import JEE_SYLLABUS
 
@@ -163,18 +160,13 @@ from backend.app.tools.question_verifier import audit_and_heal_question
 def get_daily_challenge():
     """Generates 5 synchronized daily challenge questions based on today's UTC date seed."""
     today_seed = datetime.datetime.utcnow().strftime("%Y%m%d")
+    cached_daily = _DAILY_CHALLENGE_CACHE.get(today_seed)
+    if cached_daily:
+        return cached_daily
+
     rnd = random.Random(today_seed)
-
-    conn = get_connection()
-    c = conn.cursor()
-    c.execute("""
-        SELECT * FROM questions 
-        WHERE (validation_status IS NULL OR validation_status NOT IN ('QUARANTINED', 'SUPERSEDED_BY_SUBQUESTIONS'))
-          AND text IS NOT NULL AND text != ''
-    """)
-    rows = [dict(r) for r in c.fetchall()]
-    conn.close()
-
+    from backend.app.tools.question_cache import get_all_questions_cached
+    rows = list(get_all_questions_cached())
     if not rows:
         return []
 
@@ -189,6 +181,8 @@ def get_daily_challenge():
             if len(verified_questions) >= 5:
                 break
 
+    _DAILY_CHALLENGE_CACHE.clear()
+    _DAILY_CHALLENGE_CACHE[today_seed] = verified_questions
     return verified_questions
 
 
@@ -199,36 +193,22 @@ def get_random_questions(
     difficulty: Optional[str] = Query(None),
     count: int = Query(5, ge=1, le=50)
 ):
-    conn = get_connection()
-    c = conn.cursor()
+    from backend.app.tools.question_cache import get_all_questions_cached
+    all_qs = get_all_questions_cached()
 
-    query = """
-        SELECT * FROM questions 
-        WHERE (validation_status IS NULL OR validation_status NOT IN ('QUARANTINED', 'SUPERSEDED_BY_SUBQUESTIONS'))
-          AND text IS NOT NULL AND text != ''
-    """
-    params = []
+    subj_f = subject.strip().lower() if subject and subject.lower() not in ("all", "any") else None
+    chap_f = chapter.strip().lower() if chapter and chapter.lower() not in ("all", "any") else None
+    diff_f = difficulty.strip().upper() if difficulty and difficulty.upper() not in ("ALL", "MIXED") else None
 
-    if subject and subject.lower() not in ("all", "any"):
-        query += " AND LOWER(subject) = LOWER(?)"
-        params.append(subject)
+    candidates = [
+        q for q in all_qs
+        if (not subj_f or (q.get("subject") or "").strip().lower() == subj_f)
+        and (not chap_f or (q.get("chapter") or "").strip().lower() == chap_f)
+        and (not diff_f or (q.get("difficulty_tier") or "MEDIUM").strip().upper() == diff_f)
+    ]
 
-    if chapter and chapter.lower() not in ("all", "any"):
-        query += " AND LOWER(chapter) = LOWER(?)"
-        params.append(chapter)
-
-    if difficulty and difficulty.upper() not in ("ALL", "MIXED"):
-        query += " AND UPPER(difficulty_tier) = UPPER(?)"
-        params.append(difficulty)
-
-    # Oversample to allow filtering/healing of defective candidates
-    query += " ORDER BY RANDOM() LIMIT ?"
-    fetch_limit = min(max(count * 3, 15), 150)
-    params.append(fetch_limit)
-
-    c.execute(query, params)
-    rows = [dict(r) for r in c.fetchall()]
-    conn.close()
+    fetch_limit = min(len(candidates), min(max(count * 3, 15), 150))
+    rows = random.sample(candidates, fetch_limit) if fetch_limit > 0 else []
 
     verified_questions = []
     for r in rows:
@@ -243,16 +223,18 @@ def get_random_questions(
 
 @router.get("/{question_id}", response_model=QuestionOut)
 def get_question(question_id: str):
-    conn = get_connection()
-    c = conn.cursor()
-    c.execute("SELECT * FROM questions WHERE id = ?", (question_id,))
-    row = c.fetchone()
-    conn.close()
+    from backend.app.tools.question_cache import get_question_cached
+    r = get_question_cached(question_id)
+    if not r:
+        conn = get_connection()
+        c = conn.cursor()
+        c.execute("SELECT * FROM questions WHERE id = ?", (question_id,))
+        row = c.fetchone()
+        conn.close()
+        if not row:
+            raise HTTPException(status_code=404, detail="Question not found.")
+        r = dict(row)
 
-    if not row:
-        raise HTTPException(status_code=404, detail="Question not found.")
-
-    r = dict(row)
     if r.get("validation_status") == "QUARANTINED":
         raise HTTPException(status_code=404, detail="Question is currently quarantined due to defects.")
 
@@ -265,16 +247,18 @@ def get_question(question_id: str):
 
 @router.get("/{question_id}/solution", response_model=QuestionSolutionOut)
 def get_question_solution(question_id: str, user: dict = Depends(get_current_user)):
-    conn = get_connection()
-    c = conn.cursor()
-    c.execute("SELECT id, correct_answer, solution_text, key_formulas, common_pitfall FROM questions WHERE id = ?", (question_id,))
-    row = c.fetchone()
-    conn.close()
+    from backend.app.tools.question_cache import get_question_cached
+    r = get_question_cached(question_id)
+    if not r:
+        conn = get_connection()
+        c = conn.cursor()
+        c.execute("SELECT id, correct_answer, solution_text, key_formulas, common_pitfall FROM questions WHERE id = ?", (question_id,))
+        row = c.fetchone()
+        conn.close()
+        if not row:
+            raise HTTPException(status_code=404, detail="Question not found.")
+        r = dict(row)
 
-    if not row:
-        raise HTTPException(status_code=404, detail="Question not found.")
-
-    r = dict(row)
     raw_formulas = r.get("key_formulas")
     try:
         formulas = json.loads(raw_formulas) if isinstance(raw_formulas, str) else (raw_formulas or [])

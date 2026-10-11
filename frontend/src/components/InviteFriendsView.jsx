@@ -46,7 +46,8 @@ export default function InviteFriendsView({
   onRoomCreated,
   onOpenAuth,
   onViewProfile,
-  onOpenChat
+  onOpenChat,
+  isActive
 }) {
   // Navigation Tabs: 'squad', 'leaderboard', 'requests', 'search', 'lobbies'
   const [activeTab, setActiveTab] = useState('squad');
@@ -85,7 +86,7 @@ export default function InviteFriendsView({
 
   // Fetch initial data & polling
   useEffect(() => {
-    if (user) {
+    if (user?.id && isActive !== false) {
       fetchFriends();
       fetchChallenges();
       fetchIncomingRequests();
@@ -95,30 +96,32 @@ export default function InviteFriendsView({
         fetchFriendsSilently();
       }, 15000);
       return () => clearInterval(interval);
-    } else {
+    } else if (!user?.id) {
       setLoadingFriends(false);
     }
-  }, [user]);
+  }, [user?.id, isActive]);
 
   // Fetch squad leaderboard whenever tab or sort changes
   useEffect(() => {
-    if (user && activeTab === 'leaderboard') {
+    if (user?.id && isActive !== false && activeTab === 'leaderboard') {
       fetchSquadLeaderboard();
     }
-  }, [user, activeTab, leaderboardSort]);
+  }, [user?.id, isActive, activeTab, leaderboardSort]);
 
   // Fetch open lobbies when on lobbies tab
   useEffect(() => {
-    if (activeTab === 'lobbies') {
+    if (isActive !== false && activeTab === 'lobbies') {
       fetchOpenRooms();
       const interval = setInterval(fetchOpenRooms, 15000);
       return () => clearInterval(interval);
     }
-  }, [activeTab]);
+  }, [isActive, activeTab]);
 
   const fetchFriends = async () => {
     try {
-      setLoadingFriends(true);
+      if (!friends || friends.length === 0) {
+        setLoadingFriends(true);
+      }
       const data = await api.friends.getAll();
       setFriends(data || []);
     } catch (_) {

@@ -35,7 +35,9 @@ export default function TestHistoryView({ user, inspectUsername, onSelectTest, o
       setLoading(false);
       return;
     }
-    setLoading(true);
+    if (!history || history.length === 0) {
+      setLoading(true);
+    }
     setError('');
     const req = inspectUsername && !isOwnHistory
       ? api.rooms.getUserHistory(inspectUsername)
@@ -60,11 +62,13 @@ export default function TestHistoryView({ user, inspectUsername, onSelectTest, o
 
   useEffect(() => {
     const handleUserUpdated = () => {
-      fetchHistory();
+      if (isActive !== false) {
+        fetchHistory();
+      }
     };
     window.addEventListener('jee_user_updated', handleUserUpdated);
     return () => window.removeEventListener('jee_user_updated', handleUserUpdated);
-  }, [inspectUsername]);
+  }, [inspectUsername, isActive]);
 
   if (!user) {
     return (

@@ -10,28 +10,62 @@ from backend.app.models import (
     DeleteAccountRequest
 )
 from backend.app.database import get_connection, get_user_by_username, get_user_by_id
-from backend.app.auth import hash_pin, verify_pin, create_access_token, get_current_user, invalidate_user_cache
+from backend.app.auth import (
+    hash_pin, verify_pin, create_access_token, get_current_user,
+    invalidate_user_cache, invalidate_tombstones_cache
+)
 from backend.app.websockets.room_hub import room_hub
 import time
 
 router = APIRouter(prefix="/api/auth", tags=["Authentication"])
 
 _COVERAGE_CACHE: dict = {}
+_PROFILE_OUT_CACHE: dict = {}
 
 def invalidate_coverage_cache(user_id: str = None):
-    global _COVERAGE_CACHE
+    global _COVERAGE_CACHE, _PROFILE_OUT_CACHE
     if user_id:
         _COVERAGE_CACHE.pop(str(user_id), None)
+        _PROFILE_OUT_CACHE.pop(str(user_id), None)
     else:
         _COVERAGE_CACHE.clear()
+        _PROFILE_OUT_CACHE.clear()
 
 def format_user_profile(user: dict, cursor=None) -> UserProfile:
+    user_id = str(user.get("id", ""))
+    now = time.time()
+
+    state_sig = (
+        user.get("username"),
+        user.get("total_solved"),
+        user.get("total_correct"),
+        user.get("overall_elo"),
+        user.get("physics_elo"),
+        user.get("chemistry_elo"),
+        user.get("math_elo"),
+        user.get("weekly_rp"),
+        user.get("avatar_id"),
+        user.get("title"),
+        user.get("banner_theme"),
+        user.get("banner_image_url"),
+        user.get("avatar_image_url"),
+        user.get("learnt_chapters"),
+        user.get("target_college"),
+        user.get("target_exam_date"),
+        user.get("target_exam"),
+        user.get("bio"),
+        user.get("pinned_badges"),
+        user.get("chat_settings"),
+        user.get("current_streak"),
+    )
+    cached_prof = _PROFILE_OUT_CACHE.get(user_id)
+    if cached_prof and (now - cached_prof[0] < 45.0) and cached_prof[1] == state_sig:
+        return cached_prof[2]
+
     solved = user.get("total_solved", 0)
     correct = user.get("total_correct", 0)
     acc = round((correct / solved * 100), 1) if solved > 0 else 0.0
 
-    user_id = str(user.get("id", ""))
-    now = time.time()
     cached_cov = _COVERAGE_CACHE.get(user_id)
 
     if cached_cov and (now - cached_cov[0] < 60.0):
@@ -126,7 +160,7 @@ def format_user_profile(user: dict, cursor=None) -> UserProfile:
         math_elo=user.get("math_elo", 1200.0)
     )
     evaluated_division = div_eval["full_name"]
-    if cursor:
+    if cursor and evaluated_division != user.get("current_division"):
         try:
             cursor.execute("UPDATE users SET current_division = ? WHERE id = ?", (evaluated_division, user["id"]))
         except Exception:
@@ -138,7 +172,7 @@ def format_user_profile(user: dict, cursor=None) -> UserProfile:
     from backend.app.tools.growth_triad_engine import calculate_growth_triad
     triad_meta = calculate_growth_triad(user, cursor)
 
-    return UserProfile(
+    prof_out = UserProfile(
         id=user["id"],
         username=user["username"],
         avatar_id=user.get("avatar_id", "default"),
@@ -194,6 +228,8 @@ def format_user_profile(user: dict, cursor=None) -> UserProfile:
         avatar_image_url=user.get("avatar_image_url"),
         banner_image_url=user.get("banner_image_url")
     )
+    _PROFILE_OUT_CACHE[user_id] = (now, state_sig, prof_out)
+    return prof_out
 
 
 @router.post("/register", response_model=AuthResponse)
@@ -311,9 +347,6 @@ def get_me(user: dict = Depends(get_current_user)):
 
 @router.post("/profile", response_model=UserProfile)
 def update_profile(data: dict, user: dict = Depends(get_current_user)):
-    conn = get_connection()
-    c = conn.cursor()
-
     fields = []
     values = []
 
@@ -352,7 +385,6 @@ def update_profile(data: dict, user: dict = Depends(get_current_user)):
         if raw_val is not None and isinstance(raw_val, str) and raw_val.strip():
             clean_val = raw_val.strip()
             if len(clean_val) > 120_000:
-                conn.close()
                 raise HTTPException(status_code=400, detail="Avatar image size is too large (max 100KB).")
             fields.append("avatar_image_url = ?")
             values.append(clean_val)
@@ -364,7 +396,6 @@ def update_profile(data: dict, user: dict = Depends(get_current_user)):
         if raw_val is not None and isinstance(raw_val, str) and raw_val.strip():
             clean_val = raw_val.strip()
             if len(clean_val) > 300_000:
-                conn.close()
                 raise HTTPException(status_code=400, detail="Banner image size is too large (max 250KB).")
             fields.append("banner_image_url = ?")
             values.append(clean_val)
@@ -372,16 +403,20 @@ def update_profile(data: dict, user: dict = Depends(get_current_user)):
             fields.append("banner_image_url = ?")
             values.append(None)
 
-    if fields:
-        values.append(user["id"])
-        c.execute(f"UPDATE users SET {', '.join(fields)} WHERE id = ?", tuple(values))
-        conn.commit()
-        # Immediate dual-layer vault backup to guarantee zero reset across server restarts
-        try:
-            from backend.app.database import backup_all_users
-            backup_all_users(conn)
-        except Exception as e:
-            logger.warning(f"[AUTH] Post-profile-update vault backup failed: {e}")
+    if not fields:
+        return format_user_profile(user)
+
+    conn = get_connection()
+    c = conn.cursor()
+    values.append(user["id"])
+    c.execute(f"UPDATE users SET {', '.join(fields)} WHERE id = ?", tuple(values))
+    conn.commit()
+    # Immediate dual-layer vault backup to guarantee zero reset across server restarts
+    try:
+        from backend.app.database import backup_all_users
+        backup_all_users(conn)
+    except Exception:
+        pass
     conn.close()
 
     invalidate_user_cache(user["id"])
@@ -493,6 +528,7 @@ def update_chat_settings(req: ChatSettingsUpdateRequest, user: dict = Depends(ge
     conn.commit()
     conn.close()
 
+    invalidate_user_cache(user["id"])
     updated = get_user_by_id(user["id"])
     return format_user_profile(updated)
 
@@ -526,6 +562,8 @@ def reset_user_data(user: dict = Depends(get_current_user)):
     conn.commit()
     conn.close()
 
+    invalidate_user_cache(user_id)
+    invalidate_coverage_cache(user_id)
     updated = get_user_by_id(user_id)
     return {
         "message": "Practice and drill stats successfully reset to baseline.",
@@ -589,6 +627,9 @@ def delete_account(req: DeleteAccountRequest, user: dict = Depends(get_current_u
         conn.commit()
     finally:
         conn.close()
+
+    invalidate_tombstones_cache()
+    invalidate_user_cache(user_id)
 
     # 8. Immediately purge from persistent JSON vaults
     try:

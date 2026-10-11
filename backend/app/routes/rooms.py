@@ -199,10 +199,16 @@ def get_open_rooms():
 
 
 @router.get("/my/history")
-def get_user_test_history(user: dict = Depends(get_current_user)):
+def get_user_test_history(user: dict = Depends(get_current_user), cursor=None):
     """Returns past completed mock tests, generated blueprints, and battle rooms with scores and analysis availability."""
-    conn = get_connection()
-    c = conn.cursor()
+    conn = None
+    close_conn = False
+    if cursor is None:
+        conn = get_connection()
+        c = conn.cursor()
+        close_conn = True
+    else:
+        c = cursor
     c.execute("""
         SELECT r.id, r.code, r.mode, r.preset_name, r.subject, r.subjects,
                r.chapter, r.chapters, r.target_exam, r.total_questions,
@@ -217,7 +223,8 @@ def get_user_test_history(user: dict = Depends(get_current_user)):
         LIMIT 60
     """, (user["id"],))
     rows = [dict(r) for r in c.fetchall()]
-    conn.close()
+    if close_conn and conn:
+        conn.close()
 
     history = []
     for r in rows:
@@ -750,12 +757,12 @@ def get_room_state(code: str, user: dict) -> RoomState:
     all_qs = []
 
     if is_mock or in_progress or room["status"] == "COMPLETED":
-        # Load questions
+        # Load questions from in-memory hot cache (0ms instead of N sequential Turso queries)
+        from backend.app.tools.question_cache import get_question_cached
         for q_id in q_ids:
-            c.execute("SELECT * FROM questions WHERE id = ?", (q_id,))
-            q_row = c.fetchone()
-            if q_row:
-                all_qs.append(row_to_question_out(dict(q_row)))
+            qd = get_question_cached(q_id, cursor=c)
+            if qd:
+                all_qs.append(row_to_question_out(qd))
 
         if is_mock and all_qs:
             subj_sort = {"physics": 1, "chemistry": 2, "mathematics": 3, "maths": 3}
@@ -1267,12 +1274,11 @@ async def submit_bulk_mock(code: str, req: BulkSubmissionRequest, user: dict = D
     base_score = room.get("base_correct_score", 100.0)
     neg_penalty = room.get("negative_marking", -25.0)
 
+    from backend.app.tools.question_cache import get_question_cached
     for q_id in q_ids:
-        c.execute("SELECT * FROM questions WHERE id = ?", (q_id,))
-        q_row = c.fetchone()
-        if not q_row:
+        q = get_question_cached(q_id, cursor=c)
+        if not q:
             continue
-        q = dict(q_row)
         user_choice = req.answers.get(q_id, "NONE")
         correct_ans = q["correct_answer"]
         q_type = q.get("question_type", "MCQ")
@@ -1735,11 +1741,10 @@ def get_room_results(code: str, user: dict = Depends(get_current_user)):
 
     q_ids = json.loads(room["question_ids"])
     questions_data = []
+    from backend.app.tools.question_cache import get_question_cached
     for q_id in q_ids:
-        c.execute("SELECT * FROM questions WHERE id = ?", (q_id,))
-        q_row = c.fetchone()
-        if q_row:
-            qd = dict(q_row)
+        qd = get_question_cached(q_id, cursor=c)
+        if qd:
             raw_formulas = qd.get("key_formulas")
             try:
                 formulas = json.loads(raw_formulas) if isinstance(raw_formulas, str) else (raw_formulas or [])

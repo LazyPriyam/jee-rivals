@@ -121,21 +121,56 @@ def invalidate_user_cache(user_id: Optional[str] = None):
     """Invalidates the in-memory user cache so subsequent requests load fresh database state."""
     global _USER_CACHE
     if user_id:
-        _USER_CACHE.pop(str(user_id), None)
+        u_entry = _USER_CACHE.pop(str(user_id), None)
+        uname = u_entry[1].get("username") if u_entry and isinstance(u_entry[1], dict) else None
         try:
             from backend.app.tools.growth_triad_engine import invalidate_user_triad_cache
             invalidate_user_triad_cache(str(user_id))
         except Exception:
             pass
+        try:
+            from backend.app.routes.auth import invalidate_coverage_cache
+            invalidate_coverage_cache(str(user_id))
+        except Exception:
+            pass
+        try:
+            from backend.app.routes.leaderboards import invalidate_leaderboard_caches
+            invalidate_leaderboard_caches(uname)
+        except Exception:
+            pass
+        try:
+            from backend.app.routes.mastery import invalidate_mastery_cache
+            invalidate_mastery_cache(str(user_id))
+        except Exception:
+            pass
     else:
         _USER_CACHE.clear()
+        try:
+            from backend.app.routes.auth import invalidate_coverage_cache
+            invalidate_coverage_cache()
+        except Exception:
+            pass
+        try:
+            from backend.app.routes.leaderboards import invalidate_leaderboard_caches
+            invalidate_leaderboard_caches()
+        except Exception:
+            pass
+        try:
+            from backend.app.routes.mastery import invalidate_mastery_cache
+            invalidate_mastery_cache()
+        except Exception:
+            pass
+
+def invalidate_tombstones_cache():
+    global _TOMBSTONES_CACHE
+    _TOMBSTONES_CACHE = (0.0, set())
 
 def get_cached_tombstones() -> set:
-    """Returns the set of deleted user IDs and lowercase usernames, cached for 60 seconds."""
+    """Returns the set of deleted user IDs and lowercase usernames, cached for 300 seconds."""
     global _TOMBSTONES_CACHE
     now = time.time()
     last_time, tombstones = _TOMBSTONES_CACHE
-    if (now - last_time < 60.0) and tombstones:
+    if last_time > 0.0 and (now - last_time < 300.0):
         return tombstones
     try:
         conn = get_connection()
@@ -149,6 +184,7 @@ def get_cached_tombstones() -> set:
         _TOMBSTONES_CACHE = (now, new_set)
         return new_set
     except Exception:
+        _TOMBSTONES_CACHE = (now, tombstones)
         return tombstones
 
 def get_current_user(credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)) -> dict:
@@ -178,7 +214,7 @@ def get_current_user(credentials: Optional[HTTPAuthorizationCredentials] = Depen
     # 2. Fast In-Memory User Session Lookup (0.001ms - 1000x faster than remote HTTP)
     now = time.time()
     cached = _USER_CACHE.get(user_id)
-    if cached and (now - cached[0] < 30.0):
+    if cached and (now - cached[0] < 60.0):
         return cached[1]
 
     # 3. Database fetch on cache miss
@@ -191,7 +227,7 @@ def get_current_user(credentials: Optional[HTTPAuthorizationCredentials] = Depen
             detail="User account not found."
         )
 
-    # 4. Throttled Heartbeat: update last_active at most once every 90 seconds
+    # 4. Throttled Heartbeat: update last_active at most once every 120 seconds
     try:
         now_dt = datetime.datetime.now(datetime.timezone.utc)
         last_str = user.get("last_active")
@@ -201,7 +237,7 @@ def get_current_user(credentials: Optional[HTTPAuthorizationCredentials] = Depen
             last_dt = datetime.datetime.fromisoformat(clean_str)
             if last_dt.tzinfo is None:
                 last_dt = last_dt.replace(tzinfo=datetime.timezone.utc)
-            if (now_dt - last_dt).total_seconds() < 90:
+            if (now_dt - last_dt).total_seconds() < 120:
                 should_update = False
         if should_update:
             now_iso = now_dt.isoformat()
@@ -223,7 +259,14 @@ def get_optional_user(credentials: Optional[HTTPAuthorizationCredentials] = Depe
     payload = decode_token(credentials.credentials)
     if not payload or "sub" not in payload:
         return None
-    user = get_user_by_id(payload["sub"])
+    uid = str(payload["sub"])
+    now = time.time()
+    cached = _USER_CACHE.get(uid)
+    if cached and (now - cached[0] < 60.0):
+        return cached[1]
+    user = get_user_by_id(uid)
     if not user:
         user = restore_user_from_token_payload(payload)
+    if user:
+        _USER_CACHE[uid] = (now, user)
     return user

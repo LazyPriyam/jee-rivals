@@ -515,7 +515,9 @@ export default function ProfileView({
 
   const fetchProfile = () => {
     if (targetUsername) {
-      setLoading(true);
+      if (!data?.profile || data.profile.username?.toLowerCase() !== targetUsername.toLowerCase()) {
+        setLoading(true);
+      }
       api.leaderboards.getProfile(targetUsername)
         .then((res) => {
           setData(res);
@@ -548,11 +550,13 @@ export default function ProfileView({
 
   useEffect(() => {
     const handleUserUpdated = () => {
-      fetchProfile();
+      if (isActive !== false) {
+        fetchProfile();
+      }
     };
     window.addEventListener('jee_user_updated', handleUserUpdated);
     return () => window.removeEventListener('jee_user_updated', handleUserUpdated);
-  }, [targetUsername]);
+  }, [targetUsername, isActive]);
 
   useEffect(() => {
     let isMounted = true;

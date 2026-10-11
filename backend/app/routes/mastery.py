@@ -90,6 +90,17 @@ class ReDuelRequest(BaseModel):
 
 
 _CHAPTER_Q_CACHE: tuple = (0.0, {})
+_MASTERY_USER_CACHE: dict = {}
+
+def invalidate_mastery_cache(user_id: Optional[str] = None):
+    global _MASTERY_USER_CACHE
+    if user_id:
+        uid = str(user_id)
+        for k in list(_MASTERY_USER_CACHE.keys()):
+            if k[0] == uid:
+                _MASTERY_USER_CACHE.pop(k, None)
+    else:
+        _MASTERY_USER_CACHE.clear()
 
 def get_cached_chapter_q_counts(cursor) -> dict:
     global _CHAPTER_Q_CACHE
@@ -98,14 +109,12 @@ def get_cached_chapter_q_counts(cursor) -> dict:
     if (now - last_time < 600.0) and counts:
         return counts
     try:
-        cursor.execute("""
-            SELECT chapter, COUNT(*) as q_count
-            FROM questions
-            WHERE (validation_status IS NULL OR validation_status != 'QUARANTINED')
-              AND text IS NOT NULL AND text != ''
-            GROUP BY chapter
-        """)
-        new_counts = {r["chapter"]: r["q_count"] for r in cursor.fetchall()}
+        from backend.app.tools.question_cache import get_all_questions_cached
+        new_counts = {}
+        for q in get_all_questions_cached(cursor=cursor):
+            ch = q.get("chapter")
+            if ch:
+                new_counts[ch] = new_counts.get(ch, 0) + 1
         _CHAPTER_Q_CACHE = (now, new_counts)
         return new_counts
     except Exception:
@@ -118,9 +127,16 @@ def get_chapters_mastery(user: dict = Depends(get_current_user)):
     Returns the comprehensive 92-chapter mastery matrix with independent Elo,
     attempt counts, accuracy, weightage, and mastery tier.
     """
+    user_id = str(user["id"])
+    now = time.time()
+    state_sig = (user.get("total_solved"), user.get("overall_elo"))
+    cache_key = (user_id, "chapters")
+    cached = _MASTERY_USER_CACHE.get(cache_key)
+    if cached and (now - cached[0] < 20.0) and cached[1] == state_sig:
+        return cached[2]
+
     conn = get_connection()
     c = conn.cursor()
-    user_id = user["id"]
 
     # Fetch recorded chapter Elos
     c.execute("""
@@ -129,6 +145,7 @@ def get_chapters_mastery(user: dict = Depends(get_current_user)):
         WHERE user_id = ?
     """, (user_id,))
     records = {r["chapter"]: dict(r) for r in c.fetchall()}
+    _MASTERY_USER_CACHE[(user_id, "elo_rows")] = (now, state_sig, records)
 
     # Also query activity_log for real pacing & speed metrics per chapter
     c.execute("""
@@ -221,12 +238,14 @@ def get_chapters_mastery(user: dict = Depends(get_current_user)):
                 })
 
 
-    return {
+    res = {
         "total_chapters": len(chapters_out),
         "tier_summary": tier_counts,
         "overall_elo": round(user.get("overall_elo", 1200.0), 1),
         "chapters": chapters_out
     }
+    _MASTERY_USER_CACHE[cache_key] = (now, state_sig, res)
+    return res
 
 
 @router.get("/radar")
@@ -236,17 +255,28 @@ def get_weak_spots_radar(user: dict = Depends(get_current_user)):
     Risk = Weightage Multiplier * (2000 - Elo) + (100 - Accuracy) * Attempts Penalty
     High-yield chapters with low user rating generate the highest critical risk warnings.
     """
-    conn = get_connection()
-    c = conn.cursor()
-    user_id = user["id"]
+    user_id = str(user["id"])
+    now = time.time()
+    state_sig = (user.get("total_solved"), user.get("overall_elo"))
+    cache_key = (user_id, "radar")
+    cached = _MASTERY_USER_CACHE.get(cache_key)
+    if cached and (now - cached[0] < 20.0) and cached[1] == state_sig:
+        return cached[2]
 
-    c.execute("""
-        SELECT subject, chapter, elo, attempts, correct
-        FROM user_chapter_elo
-        WHERE user_id = ?
-    """, (user_id,))
-    records = {r["chapter"]: dict(r) for r in c.fetchall()}
-    conn.close()
+    cached_rows = _MASTERY_USER_CACHE.get((user_id, "elo_rows"))
+    if cached_rows and (now - cached_rows[0] < 20.0) and cached_rows[1] == state_sig:
+        records = cached_rows[2]
+    else:
+        conn = get_connection()
+        c = conn.cursor()
+        c.execute("""
+            SELECT subject, chapter, elo, attempts, correct
+            FROM user_chapter_elo
+            WHERE user_id = ?
+        """, (user_id,))
+        records = {r["chapter"]: dict(r) for r in c.fetchall()}
+        conn.close()
+        _MASTERY_USER_CACHE[(user_id, "elo_rows")] = (now, state_sig, records)
 
     weak_list = []
 
@@ -305,11 +335,13 @@ def get_weak_spots_radar(user: dict = Depends(get_current_user)):
     # Sort descending by risk score
     weak_list.sort(key=lambda x: (x["risk_score"], -x["elo"]), reverse=True)
 
-    return {
+    res = {
         "critical_count": sum(1 for w in weak_list if w["risk_level"] == "CRITICAL"),
         "high_count": sum(1 for w in weak_list if w["risk_level"] == "HIGH"),
         "top_weak_spots": weak_list[:12]
     }
+    _MASTERY_USER_CACHE[cache_key] = (now, state_sig, res)
+    return res
 
 
 @router.get("/graveyard")
@@ -320,9 +352,16 @@ def get_failure_graveyard(user: dict = Depends(get_current_user)):
     - Explicitly bookmarked questions
     - Joined with complete question text, options, formulas, and solution.
     """
+    user_id = str(user["id"])
+    now = time.time()
+    state_sig = (user.get("total_solved"), user.get("total_correct"))
+    cache_key = (user_id, "graveyard")
+    cached = _MASTERY_USER_CACHE.get(cache_key)
+    if cached and (now - cached[0] < 20.0) and cached[1] == state_sig:
+        return cached[2]
+
     conn = get_connection()
     c = conn.cursor()
-    user_id = user["id"]
 
     # 1. Fetch bookmarked questions
     c.execute("SELECT question_id, notes, created_at FROM question_bookmarks WHERE user_id = ?", (user_id,))
@@ -346,11 +385,16 @@ def get_failure_graveyard(user: dict = Depends(get_current_user)):
 
     if not target_qids:
         conn.close()
-        return {"total_count": 0, "questions": []}
+        res = {"total_count": 0, "questions": []}
+        _MASTERY_USER_CACHE[cache_key] = (now, state_sig, res)
+        return res
 
-    placeholders = ",".join("?" for _ in target_qids)
-    c.execute(f"SELECT * FROM questions WHERE id IN ({placeholders})", target_qids)
-    q_rows = [dict(r) for r in c.fetchall()]
+    from backend.app.tools.question_cache import get_question_cached
+    q_rows = []
+    for qid in target_qids:
+        qd = get_question_cached(qid, cursor=c)
+        if qd:
+            q_rows.append(qd)
     conn.close()
 
     graveyard_list = []
@@ -377,11 +421,13 @@ def get_failure_graveyard(user: dict = Depends(get_current_user)):
     # Sort: Bookmarked first, then highest failure count, then most recent
     graveyard_list.sort(key=lambda x: (x["is_bookmarked"], x["failure_count"], x["last_failed_at"] or ""), reverse=True)
 
-    return {
+    res = {
         "total_count": len(graveyard_list),
         "bookmarked_count": len(bookmarks),
         "questions": graveyard_list
     }
+    _MASTERY_USER_CACHE[cache_key] = (now, state_sig, res)
+    return res
 
 
 @router.post("/bookmark")
@@ -413,6 +459,7 @@ def toggle_bookmark(req: BookmarkRequest, user: dict = Depends(get_current_user)
 
     conn.commit()
     conn.close()
+    invalidate_mastery_cache(user_id)
 
     return {"message": f"Question successfully {action} in bookmarks.", "action": action}
 
@@ -431,6 +478,7 @@ def remove_from_graveyard(question_id: str, user: dict = Depends(get_current_use
     c.execute("UPDATE activity_log SET is_correct = 1 WHERE user_id = ? AND question_id = ?", (user_id, question_id))
     conn.commit()
     conn.close()
+    invalidate_mastery_cache(user_id)
 
     return {"message": "Question redeemed and dismissed from graveyard."}
 

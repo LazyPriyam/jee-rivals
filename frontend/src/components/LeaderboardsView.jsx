@@ -58,14 +58,22 @@ export default function LeaderboardsView({ user, onViewProfile, onNavigateTab, i
 
   useEffect(() => {
     const handleUserUpdated = () => {
-      fetchData();
+      if (isActive !== false) {
+        fetchData();
+      }
     };
     window.addEventListener('jee_user_updated', handleUserUpdated);
     return () => window.removeEventListener('jee_user_updated', handleUserUpdated);
-  }, [activeTab, eloSubject, friendsSort]);
+  }, [activeTab, eloSubject, friendsSort, isActive]);
 
   const fetchData = async () => {
-    setLoading(true);
+    const hasCurrentData =
+      (activeTab === 'weekly' && weeklyData) ||
+      (activeTab === 'elo' && eloData && eloData.subject === eloSubject) ||
+      (activeTab === 'friends' && friendsData && friendsData.length > 0);
+    if (!hasCurrentData) {
+      setLoading(true);
+    }
     try {
       if (activeTab === 'weekly') {
         const [data, myDiv] = await Promise.all([
