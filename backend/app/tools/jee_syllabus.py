@@ -522,3 +522,182 @@ def build_user_skill_tree(activity_rows: List[Dict[str, Any]], chapter_question_
         "total_mastered": total_mastered,
         "mastery_percentage": round((total_mastered / total_chapters) * 100, 1) if total_chapters > 0 else 0.0
     }
+
+
+# Authoritative JEE (Main & Advanced) Chapter Weightage Map (92 Canonical Chapters)
+DEFAULT_CHAPTER_WEIGHTAGE: Dict[str, float] = {
+    # --- Physics (34 Chapters) ---
+    "Mathematical Tools": 1.0,
+    "Units and Dimensions": 2.0,
+    "Kinematics 1D & 2D": 3.0,
+    "Rectilinear Motion": 2.0,
+    "Projectile Motion": 2.0,
+    "Relative Motion": 2.0,
+    "Newton's Laws of Motion & Friction": 4.0,
+    "Work, Energy and Power": 3.0,
+    "Circular Motion": 2.0,
+    "Center of Mass and Collisions": 3.0,
+    "Rotational Dynamics": 5.0,
+    "Gravitation": 3.0,
+    "Fluid Mechanics": 3.0,
+    "Elasticity and Viscosity": 2.0,
+    "Thermal Properties of Matter & Calorimetry": 2.0,
+    "Kinetic Theory of Gases & Thermodynamics": 4.0,
+    "Heat Transfer": 2.0,
+    "Simple Harmonic Motion": 3.0,
+    "Waves and Sound": 3.0,
+    "Wave Optics": 3.0,
+    "Electrostatics": 4.0,
+    "Current Electricity": 5.0,
+    "Magnetic Effects of Current": 4.0,
+    "Classical Magnetism": 2.0,
+    "Electromagnetic Induction": 4.0,
+    "Alternating Current": 3.0,
+    "Electromagnetic Waves": 1.0,
+    "Geometrical Optics": 4.0,
+    "Optical Instruments": 1.0,
+    "Dual Nature of Radiation and Matter": 4.0,
+    "Atomic Physics": 4.0,
+    "Nuclear Physics": 3.0,
+    "Semiconductor Electronics": 3.0,
+    "Principles of Communication": 1.0,
+
+    # --- Chemistry (33 Chapters) ---
+    "Some Basic Concepts of Chemistry (Mole Concept)": 3.0,
+    "Structure of Atom": 3.0,
+    "States of Matter": 2.0,
+    "Chemical Thermodynamics & Thermochemistry": 5.0,
+    "Chemical Equilibrium": 3.0,
+    "Ionic Equilibrium": 4.0,
+    "Redox Reactions": 2.0,
+    "Solid State": 2.0,
+    "Solutions and Colligative Properties": 4.0,
+    "Electrochemistry": 5.0,
+    "Chemical Kinetics": 4.0,
+    "Surface Chemistry": 2.0,
+    "Classification of Elements & Periodicity": 3.0,
+    "Chemical Bonding and Molecular Structure": 5.0,
+    "Hydrogen and s-Block Elements": 2.0,
+    "p-Block Elements (Group 13 & 14)": 2.0,
+    "p-Block Elements (Group 15 to 18)": 4.0,
+    "d and f-Block Elements": 4.0,
+    "Coordination Compounds": 5.0,
+    "Metallurgy and Extraction of Metals": 2.0,
+    "Qualitative Inorganic Analysis (Salt Analysis)": 2.0,
+    "General Organic Chemistry & IUPAC Nomenclature": 5.0,
+    "Isomerism": 3.0,
+    "Hydrocarbons (Alkanes, Alkenes, Alkynes)": 4.0,
+    "Aromatic Compounds (Benzene)": 4.0,
+    "Haloalkanes and Haloarenes": 3.0,
+    "Alcohols, Phenols and Ethers": 4.0,
+    "Aldehydes, Ketones and Carboxylic Acids": 5.0,
+    "Amines and Nitrogen Containing Compounds": 3.0,
+    "Biomolecules": 3.0,
+    "Polymers": 1.0,
+    "Chemistry in Everyday Life": 1.0,
+    "Practical Organic Chemistry": 2.0,
+
+    # --- Mathematics (25 Chapters) ---
+    "Sets, Relations and Functions": 3.0,
+    "Complex Numbers and Quadratic Equations": 4.0,
+    "Matrices and Determinants": 5.0,
+    "Permutations and Combinations": 3.0,
+    "Mathematical Induction & Binomial Theorem": 3.0,
+    "Sequences and Series": 4.0,
+    "Probability": 4.0,
+    "Statistics": 2.0,
+    "Mathematical Reasoning": 1.0,
+    "Trigonometric Ratios and Identities": 2.0,
+    "Trigonometric Equations": 2.0,
+    "Inverse Trigonometric Functions": 2.0,
+    "Properties of Triangles & Heights and Distances": 1.0,
+    "Straight Lines and Pair of Straight Lines": 3.0,
+    "Circles": 4.0,
+    "Parabola": 3.0,
+    "Ellipse": 3.0,
+    "Hyperbola": 3.0,
+    "Limits, Continuity and Differentiability": 4.0,
+    "Differentiation and Applications of Derivatives": 5.0,
+    "Indefinite Integration": 2.0,
+    "Definite Integration and Area Under Curves": 5.0,
+    "Differential Equations": 4.0,
+    "Vector Algebra": 5.0,
+    "Three Dimensional Geometry": 5.0,
+}
+
+# Build fast chapter -> subject lookup map
+_CHAPTER_TO_SUBJECT: Dict[str, str] = {}
+for _subj_name, _unit_list in JEE_SYLLABUS.items():
+    for _u_obj in _unit_list:
+        for _ch_name in _u_obj["chapters"]:
+            _CHAPTER_TO_SUBJECT[_ch_name.lower()] = _subj_name
+
+
+def get_chapter_weightage(chapter: Optional[str]) -> float:
+    """Returns canonical JEE exam weightage (1.0 to 5.0) for a given chapter."""
+    if not chapter:
+        return 2.0
+    norm = normalize_chapter_name(chapter)
+    if norm in DEFAULT_CHAPTER_WEIGHTAGE:
+        return DEFAULT_CHAPTER_WEIGHTAGE[norm]
+    for k, v in DEFAULT_CHAPTER_WEIGHTAGE.items():
+        if k.lower() == norm.lower():
+            return v
+    return 2.0
+
+
+def get_chapter_subject(chapter: Optional[str]) -> Optional[str]:
+    """Returns canonical subject ('Physics', 'Chemistry', 'Mathematics') for a chapter."""
+    if not chapter:
+        return None
+    norm = normalize_chapter_name(chapter)
+    return _CHAPTER_TO_SUBJECT.get(norm.lower())
+
+
+def distribute_counts(total: int, keys: List[str]) -> Dict[str, int]:
+    """Distributes total count equally among keys (e.g. 75 across 3 subjects -> 25, 25, 25)."""
+    if not keys:
+        return {}
+    base = total // len(keys)
+    rem = total % len(keys)
+    return {k: base + (1 if idx < rem else 0) for idx, k in enumerate(keys)}
+
+
+def distribute_weighted_counts(total: int, chapter_weights: Dict[str, float]) -> Dict[str, int]:
+    """
+    Allocates `total` questions across chapters strictly proportional to their JEE weightage.
+    - Uses exact proportional ideals: ideal_i = total * (w_i / total_w).
+    - Assigns integer floor(ideal_i) to each chapter first.
+    - Distributes remaining slots via weighted randomized largest-remainder sampling so that
+      high-weight chapters (w=4, 5) are guaranteed representation while lower-weight chapters
+      (w=1, 2, 3) are sampled with probability strictly proportional to their weightage.
+    """
+    import random
+    if not chapter_weights:
+        return {}
+    if total <= 0:
+        return {k: 0 for k in chapter_weights}
+
+    valid_weights = {k: max(0.1, float(w)) for k, w in chapter_weights.items()}
+    total_w = sum(valid_weights.values())
+    if total_w <= 0:
+        return distribute_counts(total, list(chapter_weights.keys()))
+
+    ideals = {k: total * (w / total_w) for k, w in valid_weights.items()}
+    floors = {k: int(ideals[k]) for k in valid_weights}
+    rem_alloc = total - sum(floors.values())
+
+    if rem_alloc > 0:
+        # Weighted sampling without replacement based on fractional remainders
+        # (with small tie-breaking jitter so equal-weight chapters rotate fairly across mocks)
+        candidates = list(valid_weights.keys())
+        scored = sorted(
+            candidates,
+            key=lambda k: (ideals[k] - floors[k]) + random.uniform(0.0, 0.12 * (valid_weights[k] / 5.0)),
+            reverse=True
+        )
+        for i in range(min(rem_alloc, len(scored))):
+            floors[scored[i]] += 1
+
+    return floors
+

@@ -23,7 +23,7 @@ export default function MocksCenterView({ user, onRoomCreated, onJoinRoomCode, o
   const [mockMode, setMockMode] = useState('SOLO'); // 'SOLO' or 'GROUP'
   const [targetExam, setTargetExam] = useState('MAIN'); // 'MAIN' or 'ADVANCED'
   const [selectedSubjects, setSelectedSubjects] = useState(['Physics', 'Chemistry', 'Mathematics']);
-  const [questionCount, setQuestionCount] = useState(25);
+  const [questionCount, setQuestionCount] = useState(30);
   const [durationMinutes, setDurationMinutes] = useState(60);
   const [questionTypeFilter, setQuestionTypeFilter] = useState('ALL');
   const [isPublic, setIsPublic] = useState(true);
@@ -333,14 +333,18 @@ export default function MocksCenterView({ user, onRoomCreated, onJoinRoomCode, o
           {/* 1. Target Exam Pattern */}
           <div>
             <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider mb-2.5">
-              1. Target Exam Standard
+              1. Target Exam Standard & Paper Format
             </label>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <button
                 type="button"
                 onClick={() => {
                   sound.click();
                   setTargetExam('MAIN');
+                  if (![15, 30, 45, 75].includes(questionCount)) {
+                    setQuestionCount(questionCount >= 54 ? 75 : 30);
+                    setDurationMinutes(questionCount >= 54 ? 180 : 60);
+                  }
                 }}
                 className={`p-4 rounded-2xl border text-left transition cursor-pointer flex items-center justify-between ${
                   targetExam === 'MAIN'
@@ -349,11 +353,13 @@ export default function MocksCenterView({ user, onRoomCreated, onJoinRoomCode, o
                 }`}
               >
                 <div>
-                  <h4 className="font-bold text-sm text-white">JEE (Main) Standard</h4>
-                  <p className="text-xs text-slate-400 mt-0.5">Speed, formula recall & balanced difficulty</p>
+                  <h4 className="font-bold text-sm text-white">JEE (Main) Official Format</h4>
+                  <p className="text-xs text-slate-400 mt-0.5">
+                    Section A (80% Single Choice MCQ) + Section B (20% Numerical Value) per subject
+                  </p>
                 </div>
                 {targetExam === 'MAIN' && (
-                  <span className="w-6 h-6 rounded-full bg-orange-500 flex items-center justify-center text-white shrink-0">
+                  <span className="w-6 h-6 rounded-full bg-orange-500 flex items-center justify-center text-white shrink-0 ml-2">
                     <Check className="w-4 h-4 stroke-[3]" />
                   </span>
                 )}
@@ -364,6 +370,10 @@ export default function MocksCenterView({ user, onRoomCreated, onJoinRoomCode, o
                 onClick={() => {
                   sound.click();
                   setTargetExam('ADVANCED');
+                  if (![18, 36, 54, 72].includes(questionCount)) {
+                    setQuestionCount(questionCount >= 60 ? 54 : 36);
+                    setDurationMinutes(questionCount >= 60 ? 180 : 120);
+                  }
                 }}
                 className={`p-4 rounded-2xl border text-left transition cursor-pointer flex items-center justify-between ${
                   targetExam === 'ADVANCED'
@@ -372,11 +382,13 @@ export default function MocksCenterView({ user, onRoomCreated, onJoinRoomCode, o
                 }`}
               >
                 <div>
-                  <h4 className="font-bold text-sm text-white">JEE (Advanced) Benchmark</h4>
-                  <p className="text-xs text-slate-400 mt-0.5">Deep conceptual rigor & multi-concept synthesis</p>
+                  <h4 className="font-bold text-sm text-white">JEE (Advanced) Official Format</h4>
+                  <p className="text-xs text-slate-400 mt-0.5">
+                    Multi-Correct, Numerical Value, Comprehension Passages & Matrix Match per subject
+                  </p>
                 </div>
                 {targetExam === 'ADVANCED' && (
-                  <span className="w-6 h-6 rounded-full bg-orange-500 flex items-center justify-center text-white shrink-0">
+                  <span className="w-6 h-6 rounded-full bg-orange-500 flex items-center justify-center text-white shrink-0 ml-2">
                     <Check className="w-4 h-4 stroke-[3]" />
                   </span>
                 )}
@@ -386,16 +398,26 @@ export default function MocksCenterView({ user, onRoomCreated, onJoinRoomCode, o
 
           {/* 2. Subject Inclusion */}
           <div>
-            <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider mb-2.5">
-              2. Subjects Included in Examination
-            </label>
+            <div className="flex items-center justify-between mb-2.5">
+              <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider">
+                2. Subjects Included (Equal Question Distribution)
+              </label>
+              <span className="text-[11px] font-mono text-orange-400 font-bold">
+                Chapter-Weighted Syllabus Allocation
+              </span>
+            </div>
             <div className="grid grid-cols-3 gap-3">
               {[
                 { name: 'Physics', color: 'border-cyan-500/40' },
                 { name: 'Chemistry', color: 'border-emerald-500/40' },
                 { name: 'Mathematics', color: 'border-amber-500/40' }
-              ].map(({ name, color }) => {
+              ].map(({ name }, idx) => {
                 const isSelected = selectedSubjects.includes(name);
+                const activeIdx = selectedSubjects.indexOf(name);
+                const nSubj = Math.max(1, selectedSubjects.length);
+                const baseShare = Math.floor(questionCount / nSubj);
+                const remShare = questionCount % nSubj;
+                const subjCount = isSelected ? baseShare + (activeIdx < remShare ? 1 : 0) : 0;
                 return (
                   <button
                     key={name}
@@ -408,8 +430,8 @@ export default function MocksCenterView({ user, onRoomCreated, onJoinRoomCode, o
                     }`}
                   >
                     <span className="font-black text-sm block">{name}</span>
-                    <span className="text-[10px] text-slate-400 mt-0.5 block">
-                      {isSelected ? '✓ Included' : '+ Excluded'}
+                    <span className="text-[10px] text-slate-300 mt-0.5 block font-mono">
+                      {isSelected ? `✓ ${subjCount} Qs (Weighted)` : '+ Excluded'}
                     </span>
                   </button>
                 );
@@ -421,19 +443,19 @@ export default function MocksCenterView({ user, onRoomCreated, onJoinRoomCode, o
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider mb-2">
-                3. Total Question Items
+                3. Total Question Items ({targetExam === 'MAIN' ? 'JEE Main Scale' : 'JEE Advanced Scale'})
               </label>
               <div className="grid grid-cols-4 gap-2">
-                {[15, 25, 30, 75].map((cnt) => (
+                {(targetExam === 'MAIN' ? [15, 30, 45, 75] : [18, 36, 54, 72]).map((cnt) => (
                   <button
                     key={cnt}
                     type="button"
                     onClick={() => {
                       sound.click();
                       setQuestionCount(cnt);
-                      if (cnt === 75) setDurationMinutes(180);
-                      else if (cnt === 30) setDurationMinutes(60);
-                      else if (cnt === 25) setDurationMinutes(60);
+                      if (cnt >= 54) setDurationMinutes(180);
+                      else if (cnt >= 36) setDurationMinutes(90);
+                      else if (cnt >= 25) setDurationMinutes(60);
                       else setDurationMinutes(30);
                     }}
                     className={`py-2.5 rounded-xl border text-center font-mono font-bold text-xs transition cursor-pointer ${
@@ -480,7 +502,7 @@ export default function MocksCenterView({ user, onRoomCreated, onJoinRoomCode, o
               <div>
                 <span className="text-slate-500">Selected Blueprint: </span>
                 <span className="font-bold text-white">
-                  {targetExam === 'MAIN' ? 'JEE Main' : 'JEE Advanced'} • {selectedSubjects.join(' + ')}
+                  {targetExam === 'MAIN' ? 'JEE Main Format' : 'JEE Advanced Format'} • {selectedSubjects.join(' + ')}
                 </span>
                 {mockMode === 'GROUP' && (
                   <span className="ml-2 text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30">
@@ -489,7 +511,16 @@ export default function MocksCenterView({ user, onRoomCreated, onJoinRoomCode, o
                 )}
               </div>
               <div className="font-mono text-orange-400">
-                {questionCount} Questions across {durationMinutes} Minutes (+4 / -1 Marking)
+                {questionCount} Questions ({selectedSubjects.map((s, i) => {
+                  const n = selectedSubjects.length;
+                  const c = Math.floor(questionCount / n) + (i < (questionCount % n) ? 1 : 0);
+                  return `${c} ${s}`;
+                }).join(' • ')}) across {durationMinutes} Minutes
+              </div>
+              <div className="text-[11px] text-emerald-400/90 font-medium">
+                {targetExam === 'MAIN'
+                  ? '📐 JEE Main Pattern: Section A (80% Single Choice) + Section B (20% Numerical) per subject, distributed by JEE Chapter Weightage.'
+                  : '🔬 JEE Advanced Pattern: Multi-Correct, Numerical, Comprehension Passages & Matrix Match per subject, distributed by JEE Chapter Weightage.'}
               </div>
               {mockMode === 'GROUP' ? (
                 <div className="text-[11px] text-slate-400">

@@ -20,15 +20,18 @@ import {
     if (!raw || raw.length === 0) return [];
     const normalized = normalizeQuestionsWithComprehensions(raw);
     const order = { 'physics': 1, 'chemistry': 2, 'mathematics': 3, 'maths': 3 };
-    return [...normalized].sort((a, b) => {
-      const oA = order[(a.subject || '').toLowerCase()] || 99;
-      const oB = order[(b.subject || '').toLowerCase()] || 99;
-      if (oA !== oB) return oA - oB;
-      if (a.passage_id && b.passage_id && a.passage_id === b.passage_id) {
-        return (a.subquestion_index || 0) - (b.subquestion_index || 0);
-      }
-      return (a.id || '').localeCompare(b.id || '');
-    });
+    return normalized
+      .map((item, idx) => ({ item, idx }))
+      .sort((a, b) => {
+        const oA = order[(a.item.subject || '').toLowerCase()] || 99;
+        const oB = order[(b.item.subject || '').toLowerCase()] || 99;
+        if (oA !== oB) return oA - oB;
+        if (a.item.passage_id && b.item.passage_id && a.item.passage_id === b.item.passage_id) {
+          return (a.item.subquestion_index || 0) - (b.item.subquestion_index || 0);
+        }
+        return a.idx - b.idx;
+      })
+      .map(({ item }) => item);
   };
 
 export default function MockTestView({ room, user, onMatchComplete, onExitToDashboard }) {
@@ -263,6 +266,28 @@ export default function MockTestView({ room, user, onMatchComplete, onExitToDash
   const handleSelectOption = (key) => {
     if (!currentQ) return;
     sound.click();
+    const qType = (currentQ.question_type || '').toUpperCase();
+    const isMulti = qType === 'MULTIPLE_CHOICE' || qType === 'MULTI_CORRECT';
+    if (isMulti && currentQ.options && currentQ.options.length > 0) {
+      setAnswers((prev) => {
+        const existing = String(prev[currentQ.id] || '');
+        const parts = new Set(existing.split(',').map((s) => s.trim()).filter(Boolean));
+        if (parts.has(key)) {
+          parts.delete(key);
+        } else {
+          parts.add(key);
+        }
+        const sortedKeys = Array.from(parts).sort();
+        const copy = { ...prev };
+        if (sortedKeys.length === 0) {
+          delete copy[currentQ.id];
+        } else {
+          copy[currentQ.id] = sortedKeys.join(', ');
+        }
+        return copy;
+      });
+      return;
+    }
     setAnswers((prev) => ({
       ...prev,
       [currentQ.id]: key,
@@ -372,6 +397,7 @@ export default function MockTestView({ room, user, onMatchComplete, onExitToDash
   };
 
   const overallStats = getSectionStats(null);
+  const isAdvancedExam = (room.target_exam || '').toUpperCase().includes('ADV');
 
   if (!currentQ) {
     return (
@@ -392,10 +418,12 @@ export default function MockTestView({ room, user, onMatchComplete, onExitToDash
             </div>
             <div className="min-w-0">
               <h1 className="text-xs sm:text-base font-bold text-white tracking-tight truncate">
-                JEE (Main) 2026 Examination - Computer Based Test
+                {isAdvancedExam
+                  ? 'JEE (Advanced) 2026 Examination - Computer Based Test'
+                  : 'JEE (Main) 2026 Examination - Computer Based Test'}
               </h1>
               <p className="text-[9px] sm:text-[10px] text-slate-300 font-mono truncate">
-                Room #{room.code} • Marking: +4.0 Correct, -1.0 Incorrect
+                Room #{room.code} • Equal Subject Split • Chapter-Weighted Blueprint
               </p>
             </div>
           </div>
@@ -507,7 +535,15 @@ export default function MockTestView({ room, user, onMatchComplete, onExitToDash
                 <span className="text-slate-500 text-[11px] truncate max-w-[180px]">{currentQ.chapter}</span>
                 <span className="text-slate-400">|</span>
                 <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-orange-100 text-orange-800 font-bold uppercase">
-                  {currentCompGroup?.isPassage ? 'PARAGRAPH / COMPREHENSION' : (currentQ.question_type ? currentQ.question_type.replace('_', ' ') : 'MCQ')}
+                  {currentCompGroup?.isPassage
+                    ? 'SECTION: PARAGRAPH / COMPREHENSION'
+                    : (currentQ.question_type === 'MULTIPLE_CHOICE' || currentQ.question_type === 'MULTI_CORRECT')
+                    ? 'SECTION: MULTI-CORRECT (ONE OR MORE)'
+                    : currentQ.question_type === 'NUMERICAL'
+                    ? (isAdvancedExam ? 'SECTION: NUMERICAL VALUE' : 'SECTION B: NUMERICAL VALUE')
+                    : currentQ.question_type === 'MATRIX_MATCH'
+                    ? 'SECTION: MATRIX MATCH'
+                    : (isAdvancedExam ? 'SECTION: SINGLE CHOICE' : 'SECTION A: SINGLE CHOICE MCQ')}
                 </span>
               </div>
               <div className="flex items-center gap-2.5 font-mono text-[11px]">
@@ -595,13 +631,27 @@ export default function MockTestView({ room, user, onMatchComplete, onExitToDash
                 </div>
               )}
 
-              {/* Options Radio List */}
+              {/* Options List (Radio for Single/Comprehension/Matrix, Checkbox for Multi-Correct) */}
               <div className="space-y-3 mt-4">
+                {(currentQ.question_type === 'MULTIPLE_CHOICE' || currentQ.question_type === 'MULTI_CORRECT') &&
+                  currentQ.options &&
+                  currentQ.options.length > 0 && (
+                    <div className="px-3 py-1.5 rounded-lg bg-amber-50 border border-amber-200 text-[11px] font-bold text-amber-900 flex items-center justify-between">
+                      <span>JEE Advanced Multi-Correct Question: One or more than one option(s) may be correct.</span>
+                      {answers[currentQ.id] && (
+                        <span className="font-mono text-amber-800">Selected: {answers[currentQ.id]}</span>
+                      )}
+                    </div>
+                  )}
                 {currentQ.options && currentQ.options.length > 0 ? (
                   currentQ.options.map((opt) => {
-                    const isSelected = answers[currentQ.id] === opt.key;
+                    const qType = (currentQ.question_type || '').toUpperCase();
+                    const isMulti = qType === 'MULTIPLE_CHOICE' || qType === 'MULTI_CORRECT';
+                    const rawAns = String(answers[currentQ.id] || '');
+                    const selectedSet = new Set(rawAns.split(',').map((s) => s.trim()).filter(Boolean));
+                    const isSelected = isMulti ? selectedSet.has(opt.key) : answers[currentQ.id] === opt.key;
                     return (
-                      <label
+                      <div
                         key={opt.key}
                         onClick={() => handleSelectOption(opt.key)}
                         className={`flex items-start gap-3 p-3 rounded-lg border text-sm transition cursor-pointer ${
@@ -611,17 +661,17 @@ export default function MockTestView({ room, user, onMatchComplete, onExitToDash
                         }`}
                       >
                         <input
-                          type="radio"
+                          type={isMulti ? 'checkbox' : 'radio'}
                           name={`q-${currentQ.id}`}
                           checked={isSelected}
-                          onChange={() => handleSelectOption(opt.key)}
-                          className="mt-1 accent-orange-600 w-4 h-4 cursor-pointer"
+                          readOnly
+                          className="mt-1 accent-orange-600 w-4 h-4 cursor-pointer pointer-events-none"
                         />
                         <span className="font-bold text-slate-700 shrink-0">({opt.key})</span>
                         <div className="flex-1">
                           <MathRenderer content={opt.text} />
                         </div>
-                      </label>
+                      </div>
                     );
                   })
                 ) : (
