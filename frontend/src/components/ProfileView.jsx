@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { api } from '../utils/api';
 import SphereGridSkillTree from './SphereGridSkillTree';
@@ -18,24 +18,191 @@ import {
   ZoomIn, ZoomOut, Move
 } from 'lucide-react';
 
+const SUBDIVISION_STYLES = {
+  // BRONZE SUB-TIERS
+  'BRONZE III': {
+    tier: 'Bronze',
+    ringStyle: 'ring-4 ring-amber-800/80 shadow-[0_0_15px_rgba(180,83,9,0.5)]',
+    divStyle: 'text-amber-500 bg-amber-950/90 border-amber-800/60',
+    glowColor: 'rgba(180, 83, 9, 0.45)',
+  },
+  'BRONZE II': {
+    tier: 'Bronze',
+    ringStyle: 'ring-4 ring-amber-600/90 shadow-[0_0_18px_rgba(217,119,6,0.6)]',
+    divStyle: 'text-amber-400 bg-amber-900/90 border-amber-600/70',
+    glowColor: 'rgba(217, 119, 6, 0.55)',
+  },
+  'BRONZE I': {
+    tier: 'Bronze',
+    ringStyle: 'ring-4 ring-amber-500 shadow-[0_0_22px_rgba(245,158,11,0.75)]',
+    divStyle: 'text-amber-300 bg-amber-800/90 border-amber-500/80',
+    glowColor: 'rgba(245, 158, 11, 0.65)',
+  },
+
+  // SILVER SUB-TIERS (Distinct shades of silver)
+  'SILVER III': {
+    tier: 'Silver',
+    ringStyle: 'ring-4 ring-slate-400/90 shadow-[0_0_16px_rgba(148,163,184,0.65)]',
+    divStyle: 'text-slate-300 bg-slate-800/90 border-slate-500/60',
+    glowColor: 'rgba(148, 163, 184, 0.45)',
+  },
+  'SILVER II': {
+    tier: 'Silver',
+    ringStyle: 'ring-4 ring-zinc-300 shadow-[0_0_22px_rgba(212,212,216,0.78)]',
+    divStyle: 'text-zinc-100 bg-zinc-800/90 border-zinc-400/70',
+    glowColor: 'rgba(212, 212, 216, 0.6)',
+  },
+  'SILVER I': {
+    tier: 'Silver',
+    ringStyle: 'ring-4 ring-white shadow-[0_0_28px_rgba(255,255,255,0.92)] animate-pulse',
+    divStyle: 'text-white bg-slate-700/90 border-white/80 shadow-[0_0_10px_rgba(255,255,255,0.3)]',
+    glowColor: 'rgba(255, 255, 255, 0.75)',
+  },
+
+  // GOLD SUB-TIERS
+  'GOLD III': {
+    tier: 'Gold',
+    ringStyle: 'ring-4 ring-yellow-600/90 shadow-[0_0_18px_rgba(202,138,4,0.6)]',
+    divStyle: 'text-yellow-400 bg-yellow-950/90 border-yellow-600/60',
+    glowColor: 'rgba(202, 138, 4, 0.5)',
+  },
+  'GOLD II': {
+    tier: 'Gold',
+    ringStyle: 'ring-4 ring-yellow-400 shadow-[0_0_24px_rgba(250,204,21,0.8)]',
+    divStyle: 'text-yellow-300 bg-yellow-900/90 border-yellow-400/75',
+    glowColor: 'rgba(250, 204, 21, 0.65)',
+  },
+  'GOLD I': {
+    tier: 'Gold',
+    ringStyle: 'ring-4 ring-amber-300 shadow-[0_0_30px_rgba(252,211,77,0.9)]',
+    divStyle: 'text-yellow-100 bg-yellow-800/90 border-yellow-300/80 shadow-[0_0_12px_rgba(250,204,21,0.4)]',
+    glowColor: 'rgba(252, 211, 77, 0.8)',
+  },
+
+  // PLATINUM SUB-TIERS
+  'PLATINUM III': {
+    tier: 'Platinum',
+    ringStyle: 'ring-4 ring-emerald-600/90 shadow-[0_0_18px_rgba(5,150,105,0.6)]',
+    divStyle: 'text-emerald-400 bg-emerald-950/90 border-emerald-600/60',
+    glowColor: 'rgba(5, 150, 105, 0.5)',
+  },
+  'PLATINUM II': {
+    tier: 'Platinum',
+    ringStyle: 'ring-4 ring-emerald-400 shadow-[0_0_24px_rgba(52,211,153,0.8)]',
+    divStyle: 'text-emerald-300 bg-emerald-900/90 border-emerald-400/75',
+    glowColor: 'rgba(52, 211, 153, 0.65)',
+  },
+  'PLATINUM I': {
+    tier: 'Platinum',
+    ringStyle: 'ring-4 ring-teal-300 shadow-[0_0_30px_rgba(94,234,212,0.9)]',
+    divStyle: 'text-teal-100 bg-emerald-800/90 border-teal-300/80 shadow-[0_0_12px_rgba(52,211,153,0.4)]',
+    glowColor: 'rgba(94, 234, 212, 0.8)',
+  },
+
+  // DIAMOND SUB-TIERS
+  'DIAMOND III': {
+    tier: 'Diamond',
+    ringStyle: 'ring-4 ring-blue-500/90 shadow-[0_0_20px_rgba(59,130,246,0.65)]',
+    divStyle: 'text-blue-400 bg-blue-950/90 border-blue-500/60',
+    glowColor: 'rgba(59, 130, 246, 0.55)',
+  },
+  'DIAMOND II': {
+    tier: 'Diamond',
+    ringStyle: 'ring-4 ring-cyan-400 shadow-[0_0_26px_rgba(34,211,238,0.85)]',
+    divStyle: 'text-cyan-300 bg-cyan-950/90 border-cyan-400/75',
+    glowColor: 'rgba(34, 211, 238, 0.7)',
+  },
+  'DIAMOND I': {
+    tier: 'Diamond',
+    ringStyle: 'ring-4 ring-sky-200 shadow-[0_0_32px_rgba(186,230,253,0.95)]',
+    divStyle: 'text-sky-100 bg-sky-900/90 border-sky-300/80 shadow-[0_0_14px_rgba(56,189,248,0.5)]',
+    glowColor: 'rgba(186, 230, 253, 0.85)',
+  },
+
+  // MASTER SUB-TIERS
+  'MASTER II': {
+    tier: 'Master',
+    ringStyle: 'ring-4 ring-purple-500 shadow-[0_0_26px_rgba(168,85,247,0.8)]',
+    divStyle: 'text-purple-300 bg-purple-950/90 border-purple-500/70',
+    glowColor: 'rgba(168, 85, 247, 0.65)',
+  },
+  'MASTER I': {
+    tier: 'Master',
+    ringStyle: 'ring-4 ring-fuchsia-400 shadow-[0_0_32px_rgba(232,121,249,0.95)] animate-pulse',
+    divStyle: 'text-fuchsia-100 bg-purple-900/90 border-fuchsia-400/85 shadow-[0_0_14px_rgba(192,38,211,0.5)]',
+    glowColor: 'rgba(232, 121, 249, 0.85)',
+  },
+
+  // GRANDMASTER APEX
+  'GRANDMASTER APEX': {
+    tier: 'Grandmaster',
+    ringStyle: 'ring-4 ring-red-500 shadow-[0_0_35px_rgba(239,68,68,0.95)] animate-pulse',
+    divStyle: 'text-red-200 bg-red-950/95 border-red-500/90 shadow-[0_0_16px_rgba(239,68,68,0.6)]',
+    glowColor: 'rgba(239, 68, 68, 0.9)',
+  },
+};
+
+export function getDivisionVisuals(rawDivision) {
+  if (!rawDivision) return SUBDIVISION_STYLES['BRONZE III'];
+  const norm = String(rawDivision).trim().toUpperCase().replace(/_/g, ' ');
+
+  if (SUBDIVISION_STYLES[norm]) {
+    return SUBDIVISION_STYLES[norm];
+  }
+
+  if (norm.includes('GRANDMASTER')) return SUBDIVISION_STYLES['GRANDMASTER APEX'];
+  if (norm.includes('MASTER')) {
+    if (norm.includes(' I') || norm.endsWith(' 1')) return SUBDIVISION_STYLES['MASTER I'];
+    return SUBDIVISION_STYLES['MASTER II'];
+  }
+  if (norm.includes('DIAMOND')) {
+    if (norm.includes(' I') || norm.endsWith(' 1')) return SUBDIVISION_STYLES['DIAMOND I'];
+    if (norm.includes(' II') || norm.endsWith(' 2')) return SUBDIVISION_STYLES['DIAMOND II'];
+    return SUBDIVISION_STYLES['DIAMOND III'];
+  }
+  if (norm.includes('PLATINUM')) {
+    if (norm.includes(' I') || norm.endsWith(' 1')) return SUBDIVISION_STYLES['PLATINUM I'];
+    if (norm.includes(' II') || norm.endsWith(' 2')) return SUBDIVISION_STYLES['PLATINUM II'];
+    return SUBDIVISION_STYLES['PLATINUM III'];
+  }
+  if (norm.includes('GOLD')) {
+    if (norm.includes(' I') || norm.endsWith(' 1')) return SUBDIVISION_STYLES['GOLD I'];
+    if (norm.includes(' II') || norm.endsWith(' 2')) return SUBDIVISION_STYLES['GOLD II'];
+    return SUBDIVISION_STYLES['GOLD III'];
+  }
+  if (norm.includes('SILVER')) {
+    if (norm.includes(' I') || norm.endsWith(' 1')) return SUBDIVISION_STYLES['SILVER I'];
+    if (norm.includes(' II') || norm.endsWith(' 2')) return SUBDIVISION_STYLES['SILVER II'];
+    return SUBDIVISION_STYLES['SILVER III'];
+  }
+  if (norm.includes('BRONZE')) {
+    if (norm.includes(' I') || norm.endsWith(' 1')) return SUBDIVISION_STYLES['BRONZE I'];
+    if (norm.includes(' II') || norm.endsWith(' 2')) return SUBDIVISION_STYLES['BRONZE II'];
+    return SUBDIVISION_STYLES['BRONZE III'];
+  }
+
+  return SUBDIVISION_STYLES['BRONZE III'];
+}
+
+// Fallback aliases for backward compatibility
 const DIVISION_COLORS = {
-  GRANDMASTER: 'text-red-400 bg-red-950/80 border-red-500/50',
-  MASTER: 'text-purple-300 bg-purple-950/80 border-purple-500/50',
-  DIAMOND: 'text-blue-300 bg-blue-950/80 border-blue-400/50',
-  PLATINUM: 'text-emerald-300 bg-emerald-950/80 border-emerald-500/50',
-  GOLD: 'text-amber-300 bg-amber-950/80 border-amber-500/50',
-  SILVER: 'text-slate-300 bg-slate-800 border-slate-600/50',
-  BRONZE: 'text-orange-400 bg-orange-950/80 border-orange-700/50',
+  GRANDMASTER: SUBDIVISION_STYLES['GRANDMASTER APEX'].divStyle,
+  MASTER: SUBDIVISION_STYLES['MASTER II'].divStyle,
+  DIAMOND: SUBDIVISION_STYLES['DIAMOND II'].divStyle,
+  PLATINUM: SUBDIVISION_STYLES['PLATINUM II'].divStyle,
+  GOLD: SUBDIVISION_STYLES['GOLD II'].divStyle,
+  SILVER: SUBDIVISION_STYLES['SILVER II'].divStyle,
+  BRONZE: SUBDIVISION_STYLES['BRONZE II'].divStyle,
 };
 
 const DIVISION_RINGS = {
-  GRANDMASTER: 'ring-4 ring-red-500/90 shadow-[0_0_25px_rgba(239,68,68,0.7)] animate-pulse',
-  MASTER: 'ring-4 ring-purple-500/90 shadow-[0_0_22px_rgba(168,85,247,0.7)]',
-  DIAMOND: 'ring-4 ring-blue-400/90 shadow-[0_0_20px_rgba(96,165,250,0.7)]',
-  PLATINUM: 'ring-4 ring-emerald-400/90 shadow-[0_0_18px_rgba(52,211,153,0.6)]',
-  GOLD: 'ring-4 ring-amber-400/90 shadow-[0_0_18px_rgba(251,191,36,0.6)]',
-  SILVER: 'ring-4 ring-slate-400/80 shadow-[0_0_14px_rgba(148,163,184,0.5)]',
-  BRONZE: 'ring-4 ring-orange-600/80 shadow-[0_0_14px_rgba(234,88,12,0.5)]',
+  GRANDMASTER: SUBDIVISION_STYLES['GRANDMASTER APEX'].ringStyle,
+  MASTER: SUBDIVISION_STYLES['MASTER II'].ringStyle,
+  DIAMOND: SUBDIVISION_STYLES['DIAMOND II'].ringStyle,
+  PLATINUM: SUBDIVISION_STYLES['PLATINUM II'].ringStyle,
+  GOLD: SUBDIVISION_STYLES['GOLD II'].ringStyle,
+  SILVER: SUBDIVISION_STYLES['SILVER II'].ringStyle,
+  BRONZE: SUBDIVISION_STYLES['BRONZE II'].ringStyle,
 };
 
 const BANNER_THEMES = {
@@ -45,9 +212,12 @@ const BANNER_THEMES = {
     bannerClasses: 'bg-gradient-to-r from-orange-950/90 via-[#141724] to-amber-950/90 border-orange-500/40 shadow-[0_0_40px_rgba(249,115,22,0.15)]',
     accentText: 'text-orange-400',
     accentBg: 'bg-orange-500',
-    accentBorder: 'border-orange-500/50',
+    accentBorder: 'border-orange-500/40 shadow-[0_12px_45px_-10px_rgba(249,115,22,0.3)]',
+    cardGradient: 'linear-gradient(180deg, rgba(249, 115, 22, 0.18) 0%, rgba(13, 16, 25, 0.96) 220px, #0b0e17 100%)',
+    surfaceStyle: { backgroundColor: 'rgba(249, 115, 22, 0.08)', borderColor: 'rgba(249, 115, 22, 0.25)' },
+    accentColor: 'rgb(249, 115, 22)',
     badgeBg: 'bg-orange-500/15 text-orange-400 border-orange-500/30',
-    glowColor: 'rgba(249,115,22,0.12)',
+    glowColor: 'rgba(249,115,22,0.22)',
     swatch: 'from-orange-500 to-amber-600',
   },
   quantum_neon: {
@@ -56,9 +226,12 @@ const BANNER_THEMES = {
     bannerClasses: 'bg-gradient-to-r from-cyan-950/90 via-[#0f172a] to-blue-950/90 border-cyan-500/40 shadow-[0_0_40px_rgba(6,182,212,0.15)]',
     accentText: 'text-cyan-400',
     accentBg: 'bg-cyan-500',
-    accentBorder: 'border-cyan-500/50',
+    accentBorder: 'border-cyan-500/40 shadow-[0_12px_45px_-10px_rgba(6,182,212,0.3)]',
+    cardGradient: 'linear-gradient(180deg, rgba(6, 182, 212, 0.18) 0%, rgba(13, 16, 25, 0.96) 220px, #0b0e17 100%)',
+    surfaceStyle: { backgroundColor: 'rgba(6, 182, 212, 0.08)', borderColor: 'rgba(6, 182, 212, 0.25)' },
+    accentColor: 'rgb(6, 182, 212)',
     badgeBg: 'bg-cyan-500/15 text-cyan-400 border-cyan-500/30',
-    glowColor: 'rgba(6,182,212,0.12)',
+    glowColor: 'rgba(6,182,212,0.22)',
     swatch: 'from-cyan-400 to-blue-600',
   },
   galaxy_navy: {
@@ -67,9 +240,12 @@ const BANNER_THEMES = {
     bannerClasses: 'bg-gradient-to-r from-indigo-950/90 via-[#18112e] to-purple-950/90 border-purple-500/40 shadow-[0_0_40px_rgba(168,85,247,0.15)]',
     accentText: 'text-purple-400',
     accentBg: 'bg-purple-500',
-    accentBorder: 'border-purple-500/50',
+    accentBorder: 'border-purple-500/40 shadow-[0_12px_45px_-10px_rgba(168,85,247,0.3)]',
+    cardGradient: 'linear-gradient(180deg, rgba(168, 85, 247, 0.18) 0%, rgba(13, 16, 25, 0.96) 220px, #0b0e17 100%)',
+    surfaceStyle: { backgroundColor: 'rgba(168, 85, 247, 0.08)', borderColor: 'rgba(168, 85, 247, 0.25)' },
+    accentColor: 'rgb(168, 85, 247)',
     badgeBg: 'bg-purple-500/15 text-purple-400 border-purple-500/30',
-    glowColor: 'rgba(168,85,247,0.12)',
+    glowColor: 'rgba(168,85,247,0.22)',
     swatch: 'from-purple-500 to-indigo-600',
   },
   golden_aureolin: {
@@ -78,9 +254,12 @@ const BANNER_THEMES = {
     bannerClasses: 'bg-gradient-to-r from-amber-950/90 via-[#1f1a10] to-yellow-950/90 border-yellow-500/40 shadow-[0_0_40px_rgba(234,179,8,0.15)]',
     accentText: 'text-yellow-400',
     accentBg: 'bg-yellow-500',
-    accentBorder: 'border-yellow-500/50',
+    accentBorder: 'border-yellow-500/40 shadow-[0_12px_45px_-10px_rgba(234,179,8,0.3)]',
+    cardGradient: 'linear-gradient(180deg, rgba(234, 179, 8, 0.18) 0%, rgba(13, 16, 25, 0.96) 220px, #0b0e17 100%)',
+    surfaceStyle: { backgroundColor: 'rgba(234, 179, 8, 0.08)', borderColor: 'rgba(234, 179, 8, 0.25)' },
+    accentColor: 'rgb(234, 179, 8)',
     badgeBg: 'bg-yellow-500/15 text-yellow-400 border-yellow-500/30',
-    glowColor: 'rgba(234,179,8,0.12)',
+    glowColor: 'rgba(234,179,8,0.22)',
     swatch: 'from-yellow-400 to-amber-600',
   },
 };
@@ -135,6 +314,94 @@ const TITLE_PRESETS = [
   '100 Percentiler',
 ];
 
+export function extractPaletteFromImageUrl(imgUrl) {
+  return new Promise((resolve) => {
+    if (!imgUrl) return resolve(null);
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => {
+      try {
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+        const w = 48;
+        const h = 24;
+        canvas.width = w;
+        canvas.height = h;
+        ctx.drawImage(img, 0, 0, w, h);
+        const imgData = ctx.getImageData(0, 0, w, h).data;
+
+        let totalR = 0, totalG = 0, totalB = 0, count = 0;
+        let vibrantR = 0, vibrantG = 0, vibrantB = 0, maxScore = -1;
+
+        // Sample pixels across image with priority on vibrant saturated tones
+        for (let y = 0; y < h; y++) {
+          for (let x = 0; x < w; x++) {
+            const idx = (y * w + x) * 4;
+            const r = imgData[idx];
+            const g = imgData[idx + 1];
+            const b = imgData[idx + 2];
+            const a = imgData[idx + 3];
+            if (a < 128) continue;
+
+            totalR += r;
+            totalG += g;
+            totalB += b;
+            count++;
+
+            const max = Math.max(r, g, b);
+            const min = Math.min(r, g, b);
+            const delta = max - min;
+            const sat = max === 0 ? 0 : delta / max;
+            const brightness = (r * 299 + g * 587 + b * 114) / 1000;
+
+            if (brightness > 30 && brightness < 240 && sat > 0.15) {
+              const posWeight = y >= h * 0.5 ? 1.25 : 1.0;
+              const score = sat * posWeight * (1 - Math.abs(brightness - 135) / 150);
+              if (score > maxScore) {
+                maxScore = score;
+                vibrantR = r;
+                vibrantG = g;
+                vibrantB = b;
+              }
+            }
+          }
+        }
+
+        if (count === 0) return resolve(null);
+
+        const r = maxScore > 0 ? vibrantR : Math.round(totalR / count);
+        const g = maxScore > 0 ? vibrantG : Math.round(totalG / count);
+        const b = maxScore > 0 ? vibrantB : Math.round(totalB / count);
+
+        resolve({
+          r,
+          g,
+          b,
+          rgb: `${r}, ${g}, ${b}`,
+          cardGradient: `linear-gradient(180deg, rgba(${r}, ${g}, ${b}, 0.22) 0%, rgba(13, 16, 25, 0.96) 240px, #0b0e17 100%)`,
+          containerStyle: {
+            background: `linear-gradient(180deg, rgba(${r}, ${g}, ${b}, 0.22) 0%, rgba(13, 16, 25, 0.96) 240px, #0b0e17 100%)`,
+            borderColor: `rgba(${r}, ${g}, ${b}, 0.45)`,
+            boxShadow: `0 16px 50px -10px rgba(${r}, ${g}, ${b}, 0.32)`,
+          },
+          surfaceStyle: {
+            backgroundColor: `rgba(${r}, ${g}, ${b}, 0.08)`,
+            borderColor: `rgba(${r}, ${g}, ${b}, 0.25)`,
+          },
+          accentColor: `rgb(${r}, ${g}, ${b})`,
+          glowColor: `rgba(${r}, ${g}, ${b}, 0.25)`,
+          bannerVignette: `linear-gradient(to bottom, transparent 30%, rgba(${r}, ${g}, ${b}, 0.25) 75%, rgba(13, 16, 25, 0.98) 100%)`,
+        });
+      } catch (err) {
+        console.warn('Canvas palette extraction error:', err);
+        resolve(null);
+      }
+    };
+    img.onerror = () => resolve(null);
+    img.src = imgUrl;
+  });
+}
+
 export default function ProfileView({
   username,
   currentUser,
@@ -166,6 +433,7 @@ export default function ProfileView({
   });
   const [saving, setSaving] = useState(false);
   const [hoveredPoint, setHoveredPoint] = useState(null);
+  const [extractedPalette, setExtractedPalette] = useState(null);
 
   // Secondary Crop / Pan / Zoom Modal state
   const [cropState, setCropState] = useState({
@@ -286,6 +554,20 @@ export default function ProfileView({
     return () => window.removeEventListener('jee_user_updated', handleUserUpdated);
   }, [targetUsername]);
 
+  useEffect(() => {
+    let isMounted = true;
+    if (data?.profile?.banner_image_url) {
+      extractPaletteFromImageUrl(data.profile.banner_image_url).then((pal) => {
+        if (isMounted) setExtractedPalette(pal);
+      });
+    } else {
+      setExtractedPalette(null);
+    }
+    return () => {
+      isMounted = false;
+    };
+  }, [data?.profile?.banner_image_url]);
+
   if (loading || !data) {
     return (
       <div className="max-w-6xl mx-auto px-4 py-24 text-center">
@@ -297,9 +579,30 @@ export default function ProfileView({
 
   const p = data.profile;
   const theme = BANNER_THEMES[p.banner_theme] || BANNER_THEMES.orange_cyber;
-  const divStyle = DIVISION_COLORS[p.current_division] || DIVISION_COLORS.BRONZE;
-  const ringStyle = DIVISION_RINGS[p.current_division] || DIVISION_RINGS.BRONZE;
+  const divVisuals = getDivisionVisuals(p.current_division);
+  const divStyle = divVisuals.divStyle;
+  const ringStyle = divVisuals.ringStyle;
   const presence = formatLastOnline(p.last_active, p.is_online);
+
+  const cardTheme = useMemo(() => {
+    if (p.banner_image_url && extractedPalette) {
+      return extractedPalette;
+    }
+    const t = BANNER_THEMES[p.banner_theme] || BANNER_THEMES.orange_cyber;
+    const rgb = t.accentColor?.replace(/[^\d,]/g, '') || '249, 115, 22';
+    return {
+      cardGradient: t.cardGradient,
+      containerStyle: {
+        background: t.cardGradient,
+        borderColor: `rgba(${rgb}, 0.45)`,
+        boxShadow: `0 16px 50px -10px rgba(${rgb}, 0.3)`,
+      },
+      surfaceStyle: t.surfaceStyle,
+      accentColor: t.accentColor,
+      glowColor: t.glowColor,
+      bannerVignette: `linear-gradient(to bottom, transparent 30%, rgba(${rgb}, 0.25) 75%, rgba(13, 16, 25, 0.98) 100%)`,
+    };
+  }, [p.banner_image_url, p.banner_theme, extractedPalette]);
 
   // Next Milestone Logic
   const currentElo = Math.round(p.overall_elo || 1200);
@@ -475,9 +778,10 @@ export default function ProfileView({
       {/* =========================================================================
           HERO ASPIRANT PASSPORT BANNER (THEMEABLE & CUSTOMIZABLE)
           ========================================================================= */}
-      <div className={`relative rounded-3xl border mb-8 overflow-hidden transition-all duration-300 shadow-2xl bg-[#0d1019] ${
-        p.banner_image_url ? 'border-orange-500/40' : (theme.accentBorder || 'border-white/10')
-      }`}>
+      <div
+        className={`relative rounded-3xl border mb-8 overflow-hidden transition-all duration-500 shadow-2xl ${cardTheme.containerClass || ''}`}
+        style={cardTheme.containerStyle}
+      >
         {/* Dedicated Panoramic Hero Banner Header */}
         <div className="relative h-44 sm:h-52 w-full overflow-hidden bg-[#141724]">
           {p.banner_image_url ? (
@@ -488,7 +792,10 @@ export default function ProfileView({
                 className="w-full h-full object-cover select-none"
               />
               {/* Subtle bottom vignette to blend smoothly into passport card */}
-              <div className="absolute inset-0 bg-gradient-to-t from-[#0d1019] via-black/20 to-black/30 pointer-events-none" />
+              <div
+                className="absolute inset-0 pointer-events-none transition-all duration-500"
+                style={{ background: cardTheme.bannerVignette }}
+              />
             </>
           ) : (
             <div className={`w-full h-full relative ${theme.bannerClasses}`}>
@@ -511,10 +818,10 @@ export default function ProfileView({
               <button
                 type="button"
                 onClick={() => setEditModalOpen(true)}
-                className="px-3 py-1.5 rounded-xl bg-black/60 hover:bg-black/85 backdrop-blur-md border border-white/20 hover:border-orange-400 text-white text-xs font-bold transition flex items-center gap-1.5 shadow-xl cursor-pointer group"
+                className="px-3 py-1.5 rounded-xl bg-black/60 hover:bg-black/85 backdrop-blur-md border border-white/20 hover:border-white/50 text-white text-xs font-bold transition flex items-center gap-1.5 shadow-xl cursor-pointer group"
                 title="Customize banner or upload panoramic photo"
               >
-                <ImageIcon className="w-3.5 h-3.5 text-orange-400 group-hover:scale-110 transition-transform" />
+                <ImageIcon className="w-3.5 h-3.5 group-hover:scale-110 transition-transform" style={{ color: cardTheme.accentColor }} />
                 <span>{p.banner_image_url ? 'Change Banner' : 'Customize Banner'}</span>
               </button>
             </div>
@@ -528,7 +835,7 @@ export default function ProfileView({
             <div className="flex flex-col sm:flex-row items-center sm:items-start gap-6 flex-1 text-center sm:text-left -mt-12 sm:-mt-14 relative z-10">
               {/* Avatar with Division Aura Ring */}
               <div className="relative group shrink-0">
-                <div className={`w-24 h-24 sm:w-28 sm:h-28 rounded-3xl bg-[#121622] overflow-hidden flex items-center justify-center text-5xl sm:text-6xl shadow-2xl transition-transform group-hover:scale-105 ${ringStyle} border-4 border-[#0d1019]`}>
+                <div className={`w-24 h-24 sm:w-28 sm:h-28 rounded-3xl bg-[#121622] overflow-hidden flex items-center justify-center text-5xl sm:text-6xl shadow-2xl transition-all duration-300 group-hover:scale-105 ${ringStyle} border-4 border-[#0b0e17]`}>
                   {p.avatar_image_url ? (
                     <img
                       src={p.avatar_image_url}
@@ -544,7 +851,7 @@ export default function ProfileView({
                   className={`absolute -top-1 -right-1 w-4 h-4 rounded-full border-2 border-[#121622] ${presence.isOnline ? 'bg-emerald-400 ring-2 ring-emerald-500/50 animate-pulse' : 'bg-slate-500'}`}
                   title={presence.detail}
                 />
-                <div className={`absolute -bottom-2.5 left-1/2 -translate-x-1/2 text-[9px] font-black uppercase px-2 py-0.5 rounded-full border shadow-md whitespace-nowrap ${divStyle}`}>
+                <div className={`absolute -bottom-2.5 left-1/2 -translate-x-1/2 text-[9px] font-black uppercase px-2.5 py-0.5 rounded-full border shadow-md whitespace-nowrap transition-all duration-300 ${divStyle}`}>
                   {p.current_division}
                 </div>
               </div>
@@ -578,7 +885,7 @@ export default function ProfileView({
                     className="inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-xl bg-white/10 hover:bg-white/20 text-slate-200 border border-white/20 transition cursor-pointer ml-1"
                     title="Customize Aspirant Passport"
                   >
-                    <Edit3 className="w-3.5 h-3.5 text-orange-400" />
+                    <Edit3 className="w-3.5 h-3.5" style={{ color: cardTheme.accentColor }} />
                     <span>Edit Passport</span>
                   </button>
                 )}
@@ -587,7 +894,7 @@ export default function ProfileView({
               {/* Target College & Target Exam Pills */}
               <div className="flex flex-wrap items-center justify-center sm:justify-start gap-2 mt-2">
                 <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl bg-black/40 border border-white/10 text-xs font-semibold text-slate-200">
-                  <GraduationCap className="w-3.5 h-3.5 text-orange-400 shrink-0" />
+                  <GraduationCap className="w-3.5 h-3.5 shrink-0" style={{ color: cardTheme.accentColor }} />
                   <span className="truncate max-w-[240px]">{p.target_college || 'IIT Bombay (Computer Science)'}</span>
                 </div>
                 <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl bg-black/40 border border-white/10 text-xs font-semibold text-slate-200">
@@ -625,7 +932,8 @@ export default function ProfileView({
                 {isOwnProfile && (
                   <button
                     onClick={() => setActiveSubTab('trophies')}
-                    className="text-[11px] text-orange-400 hover:text-orange-300 underline font-semibold ml-1 cursor-pointer"
+                    className="text-[11px] underline font-semibold ml-1 cursor-pointer transition-colors"
+                    style={{ color: cardTheme.accentColor }}
                   >
                     Manage Badges
                   </button>
@@ -637,13 +945,19 @@ export default function ProfileView({
           {/* Right Block: Predicted AIR & Medals Shelf */}
           <div className="flex flex-col sm:flex-row lg:flex-col items-center lg:items-end gap-3.5 shrink-0 w-full sm:w-auto">
             {/* Predicted AIR Pill & Data-Driven NTA Metrics */}
-            <div className="w-full sm:w-auto bg-[#131722]/90 border border-orange-500/30 rounded-2xl p-4 shadow-xl text-center sm:text-right max-w-md">
+            <div
+              className="w-full sm:w-auto rounded-2xl p-4 shadow-xl text-center sm:text-right max-w-md border transition-all duration-500"
+              style={cardTheme.surfaceStyle}
+            >
               <span className="text-[10px] uppercase font-bold text-slate-400 block mb-1 flex items-center justify-center sm:justify-end gap-1">
-                <Target className="w-3.5 h-3.5 text-orange-400" />
+                <Target className="w-3.5 h-3.5" style={{ color: cardTheme.accentColor }} />
                 <span>Predicted All India Rank (AIR)</span>
               </span>
               <div className="flex items-center justify-center sm:justify-end gap-2 flex-wrap">
-                <span className="text-base sm:text-lg font-black text-orange-400 font-mono tracking-tight block leading-snug">
+                <span
+                  className="text-base sm:text-lg font-black font-mono tracking-tight block leading-snug"
+                  style={{ color: cardTheme.accentColor }}
+                >
                   {p.predicted_air_formatted || (p.predicted_air ? `AIR ${p.predicted_air.toLocaleString()}` : (p.predicted_air_bracket || 'Foundation Aspirant'))}
                 </span>
                 {p.predicted_percentile && (

@@ -246,7 +246,7 @@ export default function LeaderboardsView({ user, onViewProfile, onNavigateTab, i
                   <tbody className="divide-y divide-white/5">
                     {friendsData.map((u) => {
                       const isMe = u.is_you;
-                      const divStyle = DIVISION_COLORS[u.current_division] || DIVISION_COLORS.BRONZE;
+                      const divStyle = DIVISION_COLORS[getDivisionBaseTier(u.current_division)] || DIVISION_COLORS.BRONZE;
 
                       return (
                         <tr
