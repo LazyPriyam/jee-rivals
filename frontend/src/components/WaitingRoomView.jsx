@@ -136,8 +136,12 @@ export default function WaitingRoomView({ room, user, onMatchCompleted, onEarlyR
                 >
                   {/* Driver Name & Status */}
                   <div className="w-28 sm:w-36 shrink-0 flex items-center gap-2">
-                    <div className="w-6 h-6 rounded-lg bg-[#1e2433] border border-white/10 flex items-center justify-center text-xs shrink-0">
-                      {p.avatar_id === 'atom' ? '⚛️' : p.avatar_id === 'rocket' ? '🚀' : p.avatar_id === 'brain' ? '🧠' : '🔥'}
+                    <div className="w-6 h-6 rounded-lg bg-[#1e2433] border border-white/10 flex items-center justify-center text-xs shrink-0 overflow-hidden">
+                      {p.avatar_image_url ? (
+                        <img src={p.avatar_image_url} alt={p.username} className="w-full h-full object-cover rounded-lg" />
+                      ) : (
+                        p.avatar_id === 'atom' ? '⚛️' : p.avatar_id === 'rocket' ? '🚀' : p.avatar_id === 'brain' ? '🧠' : '🔥'
+                      )}
                     </div>
                     <div className="overflow-hidden leading-tight flex-1">
                       <span className={`text-xs truncate block ${isMe ? 'text-orange-400 font-black' : 'text-slate-200 font-bold'}`}>

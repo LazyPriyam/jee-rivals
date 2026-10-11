@@ -190,7 +190,9 @@ def format_user_profile(user: dict, cursor=None) -> UserProfile:
         streak_meta=streak_meta,
         last_active=user.get("last_active"),
         is_online=room_hub.is_user_online(user["id"], user.get("last_active")),
-        growth_triad=triad_meta
+        growth_triad=triad_meta,
+        avatar_image_url=user.get("avatar_image_url"),
+        banner_image_url=user.get("banner_image_url")
     )
 
 
@@ -345,11 +347,41 @@ def update_profile(data: dict, user: dict = Depends(get_current_user)):
     if "chat_settings" in data and data["chat_settings"] is not None:
         fields.append("chat_settings = ?")
         values.append(json.dumps(data["chat_settings"]))
+    if "avatar_image_url" in data:
+        raw_val = data["avatar_image_url"]
+        if raw_val is not None and isinstance(raw_val, str) and raw_val.strip():
+            clean_val = raw_val.strip()
+            if len(clean_val) > 120_000:
+                conn.close()
+                raise HTTPException(status_code=400, detail="Avatar image size is too large (max 100KB).")
+            fields.append("avatar_image_url = ?")
+            values.append(clean_val)
+        else:
+            fields.append("avatar_image_url = ?")
+            values.append(None)
+    if "banner_image_url" in data:
+        raw_val = data["banner_image_url"]
+        if raw_val is not None and isinstance(raw_val, str) and raw_val.strip():
+            clean_val = raw_val.strip()
+            if len(clean_val) > 300_000:
+                conn.close()
+                raise HTTPException(status_code=400, detail="Banner image size is too large (max 250KB).")
+            fields.append("banner_image_url = ?")
+            values.append(clean_val)
+        else:
+            fields.append("banner_image_url = ?")
+            values.append(None)
 
     if fields:
         values.append(user["id"])
         c.execute(f"UPDATE users SET {', '.join(fields)} WHERE id = ?", tuple(values))
         conn.commit()
+        # Immediate dual-layer vault backup to guarantee zero reset across server restarts
+        try:
+            from backend.app.database import backup_all_users
+            backup_all_users(conn)
+        except Exception as e:
+            logger.warning(f"[AUTH] Post-profile-update vault backup failed: {e}")
     conn.close()
 
     invalidate_user_cache(user["id"])

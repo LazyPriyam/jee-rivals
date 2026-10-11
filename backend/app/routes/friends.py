@@ -62,7 +62,7 @@ def get_friends(user: dict = Depends(get_current_user)):
     c = conn.cursor()
 
     c.execute("""
-        SELECT u.id, u.username, u.avatar_id, u.title, u.overall_elo, u.current_division,
+        SELECT u.id, u.username, u.avatar_id, u.avatar_image_url, u.title, u.overall_elo, u.current_division,
                u.weekly_rp, u.total_solved, u.total_correct, u.gold_medals, u.silver_medals,
                u.bronze_medals, u.last_active, u.chat_settings, f.created_at as friendship_date
         FROM friends f
@@ -84,6 +84,7 @@ def get_friends(user: dict = Depends(get_current_user)):
             "id": r["id"],
             "username": r["username"],
             "avatar_id": r.get("avatar_id") or "default",
+            "avatar_image_url": r.get("avatar_image_url"),
             "title": r.get("title") or "JEE Aspirant",
             "overall_elo": round(r.get("overall_elo", 1200.0), 1),
             "current_division": r.get("current_division") or "BRONZE",
@@ -127,7 +128,7 @@ def get_friends_leaderboard(sort_by: str = "elo", user: dict = Depends(get_curre
         order_clause = "total_solved DESC"
 
     c.execute(f"""
-        SELECT id, username, avatar_id, title, overall_elo, current_division,
+        SELECT id, username, avatar_id, avatar_image_url, title, overall_elo, current_division,
                weekly_rp, total_solved, total_correct, gold_medals, silver_medals,
                bronze_medals, last_active
         FROM users
@@ -150,6 +151,7 @@ def get_friends_leaderboard(sort_by: str = "elo", user: dict = Depends(get_curre
             "id": r["id"],
             "username": r["username"],
             "avatar_id": r.get("avatar_id") or "default",
+            "avatar_image_url": r.get("avatar_image_url"),
             "title": r.get("title") or "JEE Aspirant",
             "overall_elo": round(r.get("overall_elo", 1200.0), 1),
             "current_division": r.get("current_division") or "BRONZE",
@@ -253,7 +255,7 @@ def get_incoming_friend_requests(user: dict = Depends(get_current_user)):
 
     c.execute("""
         SELECT f.user_id as sender_id, f.created_at,
-               u.username as sender_username, u.avatar_id as sender_avatar,
+               u.username as sender_username, u.avatar_id as sender_avatar, u.avatar_image_url as sender_avatar_url,
                u.title as sender_title, u.overall_elo as sender_elo, u.current_division as sender_division
         FROM friends f
         JOIN users u ON f.user_id = u.id
@@ -326,7 +328,7 @@ def get_user_notifications(user: dict = Depends(get_current_user)):
     # 1. Incoming friend requests
     c.execute("""
         SELECT f.user_id as sender_id, f.created_at,
-               u.username as sender_username, u.avatar_id as sender_avatar,
+               u.username as sender_username, u.avatar_id as sender_avatar, u.avatar_image_url as sender_avatar_url,
                u.title as sender_title, u.overall_elo as sender_elo, u.current_division as sender_division
         FROM friends f
         JOIN users u ON f.user_id = u.id
@@ -337,7 +339,7 @@ def get_user_notifications(user: dict = Depends(get_current_user)):
 
     # 2. Incoming duel challenges
     c.execute("""
-        SELECT dc.*, u.username as sender_username, u.avatar_id as sender_avatar, u.overall_elo as sender_elo
+        SELECT dc.*, u.username as sender_username, u.avatar_id as sender_avatar, u.avatar_image_url as sender_avatar_url, u.overall_elo as sender_elo
         FROM direct_challenges dc
         JOIN users u ON dc.sender_id = u.id
         WHERE dc.receiver_id = ? AND dc.status = 'PENDING'
@@ -455,7 +457,7 @@ def search_users(q: str, user: dict = Depends(get_current_user)):
     c = conn.cursor()
 
     c.execute("""
-        SELECT id, username, avatar_id, title, overall_elo, current_division, last_active
+        SELECT id, username, avatar_id, avatar_image_url, title, overall_elo, current_division, last_active
         FROM users
         WHERE LOWER(username) LIKE ? AND id != ?
         LIMIT 10
@@ -492,6 +494,7 @@ def search_users(q: str, user: dict = Depends(get_current_user)):
             "id": uid,
             "username": r["username"],
             "avatar_id": r.get("avatar_id") or "default",
+            "avatar_image_url": r.get("avatar_image_url"),
             "title": r.get("title") or "JEE Aspirant",
             "overall_elo": round(r.get("overall_elo", 1200.0), 1),
             "current_division": r.get("current_division") or "BRONZE",

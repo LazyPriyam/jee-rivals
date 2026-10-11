@@ -26,6 +26,19 @@ const DIVISION_COLORS = {
   BRONZE: 'text-orange-400 bg-orange-950/80 border-orange-700/50',
 };
 
+const AVATAR_MAP = {
+  atom: '⚛️',
+  zap: '⚡',
+  rocket: '🚀',
+  flame: '🔥',
+  shield: '🛡️',
+  target: '🎯',
+  compass: '🧭',
+  brain: '🧠',
+  crown: '👑',
+  swords: '⚔️',
+};
+
 export default function LeaderboardsView({ user, onViewProfile, onNavigateTab, isActive = true }) {
   const [activeTab, setActiveTab] = useState('weekly'); // 'weekly', 'elo', 'friends'
   const [weeklyData, setWeeklyData] = useState(null);
@@ -247,7 +260,14 @@ export default function LeaderboardsView({ user, onViewProfile, onNavigateTab, i
                             {u.rank === 1 ? '🥇 #1' : u.rank === 2 ? '🥈 #2' : u.rank === 3 ? '🥉 #3' : `#${u.rank}`}
                           </td>
                           <td className="py-3.5">
-                            <div className="flex items-center gap-2">
+                            <div className="flex items-center gap-2.5">
+                              <div className="w-6 h-6 rounded-lg bg-[#181d2a] border border-white/10 flex items-center justify-center text-xs overflow-hidden shrink-0">
+                                {u.avatar_image_url ? (
+                                  <img src={u.avatar_image_url} alt={u.username} className="w-full h-full object-cover" />
+                                ) : (
+                                  <span>{AVATAR_MAP[u.avatar_id] || '🔥'}</span>
+                                )}
+                              </div>
                               <span className={`font-bold ${isMe ? 'text-orange-400' : 'text-white'}`}>
                                 {u.username}
                               </span>
@@ -485,7 +505,14 @@ export default function LeaderboardsView({ user, onViewProfile, onNavigateTab, i
                           {u.rank > 3 && <span className="text-slate-400">#{u.rank}</span>}
                         </td>
                         <td className="py-3.5">
-                          <div className="flex items-center gap-2">
+                          <div className="flex items-center gap-2.5">
+                            <div className="w-6 h-6 rounded-lg bg-[#181d2a] border border-white/10 flex items-center justify-center text-xs overflow-hidden shrink-0">
+                              {u.avatar_image_url ? (
+                                <img src={u.avatar_image_url} alt={u.username} className="w-full h-full object-cover" />
+                              ) : (
+                                <span>{AVATAR_MAP[u.avatar_id] || '🔥'}</span>
+                              )}
+                            </div>
                             <span className="font-bold text-white">{u.username}</span>
                             {u.streak > 0 && (
                               <span
@@ -621,7 +648,14 @@ export default function LeaderboardsView({ user, onViewProfile, onNavigateTab, i
                           {u.rank > 3 && <span className="text-slate-400">#{u.rank}</span>}
                         </td>
                         <td className="py-3.5">
-                          <div className="flex items-center gap-2">
+                          <div className="flex items-center gap-2.5">
+                            <div className="w-6 h-6 rounded-lg bg-[#181d2a] border border-white/10 flex items-center justify-center text-xs overflow-hidden shrink-0">
+                              {u.avatar_image_url ? (
+                                <img src={u.avatar_image_url} alt={u.username} className="w-full h-full object-cover" />
+                              ) : (
+                                <span>{AVATAR_MAP[u.avatar_id] || '🔥'}</span>
+                              )}
+                            </div>
                             <span className="font-bold text-white">{u.username}</span>
                             {isMe && (
                               <span className="text-[10px] px-1.5 py-0.5 bg-orange-950 border border-orange-500/40 text-orange-400 rounded font-bold">

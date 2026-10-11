@@ -644,6 +644,7 @@ async def join_room(req: RoomJoinRequest, user: dict = Depends(get_current_user)
         "user_id": user["id"],
         "username": user["username"],
         "avatar_id": user.get("avatar_id", "default"),
+        "avatar_image_url": user.get("avatar_image_url"),
         "participants_count": len(state.participants)
     })
 
@@ -712,7 +713,7 @@ def get_room_state(code: str, user: dict) -> RoomState:
 
     # Fetch participants
     c.execute("""
-        SELECT p.*, u.username, u.avatar_id, u.title, u.overall_elo
+        SELECT p.*, u.username, u.avatar_id, u.avatar_image_url, u.title, u.overall_elo
         FROM room_participants p
         JOIN users u ON p.user_id = u.id
         WHERE p.room_id = ?
@@ -733,6 +734,7 @@ def get_room_state(code: str, user: dict) -> RoomState:
             user_id=p["user_id"],
             username=p["username"],
             avatar_id=p.get("avatar_id") or "default",
+            avatar_image_url=p.get("avatar_image_url"),
             title=p.get("title") or "JEE Aspirant",
             score=display_score,
             marks=display_marks,
@@ -1723,7 +1725,7 @@ def get_room_results(code: str, user: dict = Depends(get_current_user)):
 
     order_clause = "p.marks DESC, p.score DESC" if room.get("mode") == "MOCK_TEST" else "p.score DESC, p.marks DESC"
     c.execute(f"""
-        SELECT p.*, u.username, u.avatar_id, u.title, u.overall_elo
+        SELECT p.*, u.username, u.avatar_id, u.avatar_image_url, u.title, u.overall_elo
         FROM room_participants p
         JOIN users u ON p.user_id = u.id
         WHERE p.room_id = ?
@@ -1781,6 +1783,7 @@ def get_room_results(code: str, user: dict = Depends(get_current_user)):
             "user_id": p["user_id"],
             "username": p["username"],
             "avatar_id": p.get("avatar_id") or "default",
+            "avatar_image_url": p.get("avatar_image_url"),
             "title": p.get("title") or "JEE Aspirant",
             "score": p["score"],
             "marks": p["marks"],

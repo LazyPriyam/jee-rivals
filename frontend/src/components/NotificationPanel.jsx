@@ -448,8 +448,12 @@ export default function NotificationPanel({
                             >
                               <div className="flex items-center justify-between gap-2 mb-2">
                                 <div className="flex items-center gap-2.5">
-                                  <div className="w-8 h-8 rounded-xl bg-[#262e40] border border-white/10 flex items-center justify-center text-sm shrink-0">
-                                    {renderAvatarEmoji(r.sender_avatar)}
+                                  <div className="w-8 h-8 rounded-xl bg-[#262e40] border border-white/10 flex items-center justify-center text-sm shrink-0 overflow-hidden">
+                                    {r.sender_avatar_url ? (
+                                      <img src={r.sender_avatar_url} alt={r.sender_username} className="w-full h-full object-cover rounded-xl" />
+                                    ) : (
+                                      renderAvatarEmoji(r.sender_avatar)
+                                    )}
                                   </div>
                                   <div>
                                     <div className="flex items-center gap-1.5">

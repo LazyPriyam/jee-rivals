@@ -559,16 +559,22 @@ export default function InviteFriendsView({
                       <div className="flex items-start justify-between gap-3 mb-3">
                         <div className="flex items-center gap-3">
                           <div className="relative">
-                            <div className="w-12 h-12 rounded-2xl bg-[#1e2433] border border-white/10 flex items-center justify-center text-2xl shadow-inner">
-                              {friend.avatar_id === 'atom' && '⚛️'}
-                              {friend.avatar_id === 'zap' && '⚡'}
-                              {friend.avatar_id === 'rocket' && '🚀'}
-                              {friend.avatar_id === 'flame' && '🔥'}
-                              {friend.avatar_id === 'shield' && '🛡️'}
-                              {friend.avatar_id === 'target' && '🎯'}
-                              {friend.avatar_id === 'compass' && '🧭'}
-                              {friend.avatar_id === 'brain' && '🧠'}
-                              {!['atom', 'zap', 'rocket', 'flame', 'shield', 'target', 'compass', 'brain'].includes(friend.avatar_id) && '🔥'}
+                            <div className="w-12 h-12 rounded-2xl bg-[#1e2433] border border-white/10 flex items-center justify-center text-2xl shadow-inner overflow-hidden">
+                              {friend.avatar_image_url ? (
+                                <img src={friend.avatar_image_url} alt={friend.username} className="w-full h-full object-cover rounded-2xl" />
+                              ) : (
+                                <>
+                                  {friend.avatar_id === 'atom' && '⚛️'}
+                                  {friend.avatar_id === 'zap' && '⚡'}
+                                  {friend.avatar_id === 'rocket' && '🚀'}
+                                  {friend.avatar_id === 'flame' && '🔥'}
+                                  {friend.avatar_id === 'shield' && '🛡️'}
+                                  {friend.avatar_id === 'target' && '🎯'}
+                                  {friend.avatar_id === 'compass' && '🧭'}
+                                  {friend.avatar_id === 'brain' && '🧠'}
+                                  {!['atom', 'zap', 'rocket', 'flame', 'shield', 'target', 'compass', 'brain'].includes(friend.avatar_id) && '🔥'}
+                                </>
+                              )}
                             </div>
                             {/* Online / Offline status indicator dot */}
                             <span
@@ -802,16 +808,22 @@ export default function InviteFriendsView({
                         <td className="py-3.5">
                           <div className="flex items-center gap-2.5">
                             <div className="relative">
-                              <div className="w-8 h-8 rounded-xl bg-[#1e2433] border border-white/10 flex items-center justify-center text-base">
-                                {member.avatar_id === 'atom' && '⚛️'}
-                                {member.avatar_id === 'zap' && '⚡'}
-                                {member.avatar_id === 'rocket' && '🚀'}
-                                {member.avatar_id === 'flame' && '🔥'}
-                                {member.avatar_id === 'shield' && '🛡️'}
-                                {member.avatar_id === 'target' && '🎯'}
-                                {member.avatar_id === 'compass' && '🧭'}
-                                {member.avatar_id === 'brain' && '🧠'}
-                                {!['atom', 'zap', 'rocket', 'flame', 'shield', 'target', 'compass', 'brain'].includes(member.avatar_id) && '🔥'}
+                              <div className="w-8 h-8 rounded-xl bg-[#1e2433] border border-white/10 flex items-center justify-center text-base overflow-hidden">
+                                {member.avatar_image_url ? (
+                                  <img src={member.avatar_image_url} alt={member.username} className="w-full h-full object-cover rounded-xl" />
+                                ) : (
+                                  <>
+                                    {member.avatar_id === 'atom' && '⚛️'}
+                                    {member.avatar_id === 'zap' && '⚡'}
+                                    {member.avatar_id === 'rocket' && '🚀'}
+                                    {member.avatar_id === 'flame' && '🔥'}
+                                    {member.avatar_id === 'shield' && '🛡️'}
+                                    {member.avatar_id === 'target' && '🎯'}
+                                    {member.avatar_id === 'compass' && '🧭'}
+                                    {member.avatar_id === 'brain' && '🧠'}
+                                    {!['atom', 'zap', 'rocket', 'flame', 'shield', 'target', 'compass', 'brain'].includes(member.avatar_id) && '🔥'}
+                                  </>
+                                )}
                               </div>
                               <span
                                 className={`absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border border-[#262c3c] ${
@@ -1085,16 +1097,22 @@ export default function InviteFriendsView({
                       className="p-3.5 bg-[#1e2433] border border-white/10 rounded-2xl flex items-center justify-between gap-3 hover:border-orange-500/30 transition"
                     >
                       <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-xl bg-[#262c3c] border border-white/10 flex items-center justify-center text-lg">
-                          {aspirant.avatar_id === 'atom' && '⚛️'}
-                          {aspirant.avatar_id === 'zap' && '⚡'}
-                          {aspirant.avatar_id === 'rocket' && '🚀'}
-                          {aspirant.avatar_id === 'flame' && '🔥'}
-                          {aspirant.avatar_id === 'shield' && '🛡️'}
-                          {aspirant.avatar_id === 'target' && '🎯'}
-                          {aspirant.avatar_id === 'compass' && '🧭'}
-                          {aspirant.avatar_id === 'brain' && '🧠'}
-                          {!['atom', 'zap', 'rocket', 'flame', 'shield', 'target', 'compass', 'brain'].includes(aspirant.avatar_id) && '🔥'}
+                        <div className="w-10 h-10 rounded-xl bg-[#262c3c] border border-white/10 flex items-center justify-center text-lg overflow-hidden shrink-0">
+                          {aspirant.avatar_image_url ? (
+                            <img src={aspirant.avatar_image_url} alt={aspirant.username} className="w-full h-full object-cover rounded-xl" />
+                          ) : (
+                            <>
+                              {aspirant.avatar_id === 'atom' && '⚛️'}
+                              {aspirant.avatar_id === 'zap' && '⚡'}
+                              {aspirant.avatar_id === 'rocket' && '🚀'}
+                              {aspirant.avatar_id === 'flame' && '🔥'}
+                              {aspirant.avatar_id === 'shield' && '🛡️'}
+                              {aspirant.avatar_id === 'target' && '🎯'}
+                              {aspirant.avatar_id === 'compass' && '🧭'}
+                              {aspirant.avatar_id === 'brain' && '🧠'}
+                              {!['atom', 'zap', 'rocket', 'flame', 'shield', 'target', 'compass', 'brain'].includes(aspirant.avatar_id) && '🔥'}
+                            </>
+                          )}
                         </div>
                         <div>
                           <div className="flex items-center gap-2">

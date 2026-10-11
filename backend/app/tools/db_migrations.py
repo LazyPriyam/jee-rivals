@@ -525,6 +525,20 @@ def migration_006_deleted_accounts_tombstones(conn: sqlite3.Connection):
     c.execute("CREATE INDEX IF NOT EXISTS idx_deleted_accounts_username ON deleted_accounts(username);")
 
 
+def migration_007_custom_profile_media(conn: sqlite3.Connection):
+    """
+    Safely adds avatar_image_url and banner_image_url to the users table
+    for custom client-compressed profile image avatars and panoramic banner headers.
+    """
+    c = conn.cursor()
+    c.execute("PRAGMA table_info(users);")
+    existing_cols = {row[1] for row in c.fetchall()}
+    if "avatar_image_url" not in existing_cols:
+        c.execute("ALTER TABLE users ADD COLUMN avatar_image_url TEXT DEFAULT NULL;")
+    if "banner_image_url" not in existing_cols:
+        c.execute("ALTER TABLE users ADD COLUMN banner_image_url TEXT DEFAULT NULL;")
+
+
 # Master migration registry (ordered sequentially)
 MIGRATIONS: List[Dict[str, Any]] = [
     {
@@ -556,6 +570,11 @@ MIGRATIONS: List[Dict[str, Any]] = [
         "version": 6,
         "name": "deleted_accounts_tombstones",
         "func": migration_006_deleted_accounts_tombstones,
+    },
+    {
+        "version": 7,
+        "name": "custom_profile_media",
+        "func": migration_007_custom_profile_media,
     },
 ]
 

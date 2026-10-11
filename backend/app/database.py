@@ -415,8 +415,18 @@ def restore_users_from_backup(conn: Optional[sqlite3.Connection] = None) -> int:
                     pass
                 merged_learnt = list(curr_learnt | bak_learnt)
 
+                # Profile media & customization reconciliation (zero reset safeguard)
+                curr_avatar_img = curr.get("avatar_image_url") or u.get("avatar_image_url")
+                curr_banner_img = curr.get("banner_image_url") or u.get("banner_image_url")
+                media_or_profile_updated = False
+                if not curr.get("avatar_image_url") and u.get("avatar_image_url"):
+                    media_or_profile_updated = True
+                if not curr.get("banner_image_url") and u.get("banner_image_url"):
+                    media_or_profile_updated = True
+
                 if (high_elo > curr_elo or curr_solved > int(curr.get("total_solved") or 0) or
-                    curr_rp > int(curr.get("weekly_rp") or 0) or len(merged_learnt) > len(curr_learnt)):
+                    curr_rp > int(curr.get("weekly_rp") or 0) or len(merged_learnt) > len(curr_learnt) or
+                    media_or_profile_updated):
                     c.execute("""
                         UPDATE users SET
                             overall_elo = ?,
@@ -428,13 +438,18 @@ def restore_users_from_backup(conn: Optional[sqlite3.Connection] = None) -> int:
                             total_correct = ?,
                             longest_streak = ?,
                             streak_freezes = ?,
-                            learnt_chapters = ?
+                            learnt_chapters = ?,
+                            avatar_image_url = ?,
+                            banner_image_url = ?
                         WHERE id = ?
                     """, (
                         high_elo, curr_p_elo, curr_c_elo, curr_m_elo,
                         curr_rp, curr_solved, curr_correct,
                         curr_longest_streak, curr_streak_freezes,
-                        json.dumps(merged_learnt), u_id
+                        json.dumps(merged_learnt),
+                        curr_avatar_img,
+                        curr_banner_img,
+                        u_id
                     ))
                     reconciled_count += 1
             else:

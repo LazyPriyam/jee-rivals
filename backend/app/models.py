@@ -63,6 +63,8 @@ class UserProfile(BaseModel):
     last_active: Optional[str] = None
     is_online: Optional[bool] = False
     growth_triad: Optional[Dict[str, Any]] = None
+    avatar_image_url: Optional[str] = None
+    banner_image_url: Optional[str] = None
 
 class ProfileUpdateRequest(BaseModel):
     target_college: Optional[str] = None
@@ -73,6 +75,8 @@ class ProfileUpdateRequest(BaseModel):
     pinned_badges: Optional[List[str]] = None
     title: Optional[str] = None
     avatar_id: Optional[str] = None
+    avatar_image_url: Optional[str] = None
+    banner_image_url: Optional[str] = None
     learnt_chapters: Optional[List[str]] = None
     chat_settings: Optional[Dict[str, Any]] = None
 
@@ -179,6 +183,7 @@ class ParticipantScore(BaseModel):
     user_id: str
     username: str
     avatar_id: str
+    avatar_image_url: Optional[str] = None
     title: str
     score: int
     marks: float

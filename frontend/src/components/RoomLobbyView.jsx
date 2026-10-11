@@ -305,16 +305,22 @@ export default function RoomLobbyView({ room, user, onStartMatch, onLeaveRoom, o
                   } hover:border-orange-500/40 transition text-left`}
                 >
                   <div className="flex items-center gap-2.5">
-                    <div className="w-8 h-8 rounded-lg bg-orange-950/80 border border-orange-500/40 flex items-center justify-center text-base shrink-0">
-                      {p.avatar_id === 'atom' && '⚛️'}
-                      {p.avatar_id === 'zap' && '⚡'}
-                      {p.avatar_id === 'rocket' && '🚀'}
-                      {p.avatar_id === 'flame' && '🔥'}
-                      {p.avatar_id === 'shield' && '🛡️'}
-                      {p.avatar_id === 'target' && '🎯'}
-                      {p.avatar_id === 'compass' && '🧭'}
-                      {p.avatar_id === 'brain' && '🧠'}
-                      {!['atom','zap','rocket','flame','shield','target','compass','brain'].includes(p.avatar_id) && '🔥'}
+                    <div className="w-8 h-8 rounded-lg bg-orange-950/80 border border-orange-500/40 flex items-center justify-center text-base shrink-0 overflow-hidden">
+                      {p.avatar_image_url ? (
+                        <img src={p.avatar_image_url} alt={p.username} className="w-full h-full object-cover rounded-lg" />
+                      ) : (
+                        <>
+                          {p.avatar_id === 'atom' && '⚛️'}
+                          {p.avatar_id === 'zap' && '⚡'}
+                          {p.avatar_id === 'rocket' && '🚀'}
+                          {p.avatar_id === 'flame' && '🔥'}
+                          {p.avatar_id === 'shield' && '🛡️'}
+                          {p.avatar_id === 'target' && '🎯'}
+                          {p.avatar_id === 'compass' && '🧭'}
+                          {p.avatar_id === 'brain' && '🧠'}
+                          {!['atom','zap','rocket','flame','shield','target','compass','brain'].includes(p.avatar_id) && '🔥'}
+                        </>
+                      )}
                     </div>
                     <div className="overflow-hidden">
                       <div className="flex items-center gap-1.5 font-bold text-xs text-white">

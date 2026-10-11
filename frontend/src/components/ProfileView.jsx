@@ -5,11 +5,17 @@ import SphereGridSkillTree from './SphereGridSkillTree';
 import GrowthTriadRadar from './GrowthTriadRadar';
 import { formatIST, formatISTDate, formatISTTime, formatLastOnline } from '../utils/dateUtils';
 import {
+  loadImageFromFile,
+  cropAndCompressAvatar,
+  cropAndCompressBanner
+} from '../utils/imageCompressor';
+import {
   User, Trophy, Shield, Activity, Target, Zap, Clock, CheckCircle2,
   XCircle, ArrowLeft, RefreshCw, Flame, Edit3, BookOpen, Award,
   Swords, TrendingUp, Sparkles, Calendar, GraduationCap, Pin, PinOff,
   ChevronRight, Lock, Check, Layers, BarChart2, Star, Send,
-  Share2, Eye, FileText, Search
+  Share2, Eye, FileText, Search, Upload, Image as ImageIcon, Trash2,
+  ZoomIn, ZoomOut, Move
 } from 'lucide-react';
 
 const DIVISION_COLORS = {
@@ -155,12 +161,89 @@ export default function ProfileView({
     banner_theme: 'orange_cyber',
     avatar_id: 'default',
     title: 'JEE Aspirant',
+    avatar_image_url: null,
+    banner_image_url: null,
   });
   const [saving, setSaving] = useState(false);
   const [hoveredPoint, setHoveredPoint] = useState(null);
 
+  // Secondary Crop / Pan / Zoom Modal state
+  const [cropState, setCropState] = useState({
+    isOpen: false,
+    type: null, // 'avatar' | 'banner'
+    imgElement: null,
+    zoom: 1.0,
+    panX: 0,
+    panY: 0,
+  });
+  const [cropPreview, setCropPreview] = useState(null);
+
   const targetUsername = username || currentUser?.username;
   const isOwnProfile = !username || (currentUser && username.toLowerCase() === currentUser.username.toLowerCase());
+
+  // Real-time crop preview calculation
+  useEffect(() => {
+    if (!cropState.isOpen || !cropState.imgElement) {
+      setCropPreview(null);
+      return;
+    }
+    try {
+      if (cropState.type === 'avatar') {
+        const res = cropAndCompressAvatar(cropState.imgElement, {
+          zoom: cropState.zoom,
+          panX: cropState.panX,
+          panY: cropState.panY,
+        });
+        setCropPreview(res);
+      } else {
+        const res = cropAndCompressBanner(cropState.imgElement, {
+          zoom: cropState.zoom,
+          panX: cropState.panX,
+          panY: cropState.panY,
+        });
+        setCropPreview(res);
+      }
+    } catch (err) {
+      console.error('Failed to generate crop preview:', err);
+    }
+  }, [cropState.isOpen, cropState.imgElement, cropState.zoom, cropState.panX, cropState.panY, cropState.type]);
+
+  const handleFileSelect = async (e, type) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      const loaded = await loadImageFromFile(file);
+      setCropState({
+        isOpen: true,
+        type,
+        imgElement: loaded.img,
+        zoom: 1.0,
+        panX: 0,
+        panY: 0,
+      });
+    } catch (err) {
+      alert(err.message || 'Failed to read image file.');
+    } finally {
+      e.target.value = '';
+    }
+  };
+
+  const handleApplyCrop = () => {
+    if (!cropPreview?.dataUrl) return;
+    if (cropState.type === 'avatar') {
+      setEditForm((prev) => ({ ...prev, avatar_image_url: cropPreview.dataUrl }));
+    } else {
+      setEditForm((prev) => ({ ...prev, banner_image_url: cropPreview.dataUrl }));
+    }
+    setCropState({
+      isOpen: false,
+      type: null,
+      imgElement: null,
+      zoom: 1.0,
+      panX: 0,
+      panY: 0,
+    });
+  };
 
   const fetchProfile = () => {
     if (targetUsername) {
@@ -177,6 +260,8 @@ export default function ProfileView({
               banner_theme: res.profile.banner_theme || 'orange_cyber',
               avatar_id: res.profile.avatar_id || 'flame',
               title: res.profile.title || 'JEE Aspirant',
+              avatar_image_url: res.profile.avatar_image_url || null,
+              banner_image_url: res.profile.banner_image_url || null,
             });
           }
         })
@@ -390,24 +475,49 @@ export default function ProfileView({
       {/* =========================================================================
           HERO ASPIRANT PASSPORT BANNER (THEMEABLE & CUSTOMIZABLE)
           ========================================================================= */}
-      <div className={`relative rounded-3xl p-6 sm:p-8 border mb-8 overflow-hidden transition-all duration-300 ${theme.bannerClasses}`}>
-        {/* Ambient background glow accents */}
-        <div
-          className="absolute -top-20 -right-20 w-96 h-96 rounded-full blur-3xl pointer-events-none -z-10"
-          style={{ background: theme.glowColor }}
-        />
-        <div
-          className="absolute -bottom-20 -left-20 w-96 h-96 rounded-full blur-3xl pointer-events-none -z-10"
-          style={{ background: theme.glowColor }}
-        />
+      <div className={`relative rounded-3xl p-6 sm:p-8 border mb-8 overflow-hidden transition-all duration-300 ${
+        p.banner_image_url ? 'border-orange-500/40 shadow-2xl bg-[#0d1017]' : theme.bannerClasses
+      }`}>
+        {p.banner_image_url ? (
+          <>
+            {/* Custom panoramic banner image */}
+            <img
+              src={p.banner_image_url}
+              alt="Aspirant Banner"
+              className="absolute inset-0 w-full h-full object-cover -z-20 pointer-events-none"
+            />
+            {/* Adaptive Obsidian Dark Glass Readability Overlay */}
+            <div className="absolute inset-0 bg-gradient-to-r from-black/90 via-black/65 to-black/85 backdrop-blur-[2px] -z-10 pointer-events-none" />
+          </>
+        ) : (
+          <>
+            {/* Ambient background glow accents */}
+            <div
+              className="absolute -top-20 -right-20 w-96 h-96 rounded-full blur-3xl pointer-events-none -z-10"
+              style={{ background: theme.glowColor }}
+            />
+            <div
+              className="absolute -bottom-20 -left-20 w-96 h-96 rounded-full blur-3xl pointer-events-none -z-10"
+              style={{ background: theme.glowColor }}
+            />
+          </>
+        )}
 
-        <div className="flex flex-col lg:flex-row items-center lg:items-start gap-6 sm:gap-8 justify-between">
+        <div className="flex flex-col lg:flex-row items-center lg:items-start gap-6 sm:gap-8 justify-between relative z-10">
           {/* Left Block: Avatar + Name + Identity Details */}
           <div className="flex flex-col sm:flex-row items-center sm:items-start gap-6 flex-1 text-center sm:text-left">
             {/* Avatar with Division Aura Ring */}
             <div className="relative group shrink-0">
-              <div className={`w-24 h-24 rounded-3xl bg-[#121622] flex items-center justify-center text-5xl shadow-2xl transition-transform group-hover:scale-105 ${ringStyle}`}>
-                {AVATAR_MAP[p.avatar_id] || '🔥'}
+              <div className={`w-24 h-24 rounded-3xl bg-[#121622] overflow-hidden flex items-center justify-center text-5xl shadow-2xl transition-transform group-hover:scale-105 ${ringStyle}`}>
+                {p.avatar_image_url ? (
+                  <img
+                    src={p.avatar_image_url}
+                    alt={p.username}
+                    className="w-full h-full object-cover rounded-3xl"
+                  />
+                ) : (
+                  <span>{AVATAR_MAP[p.avatar_id] || '🔥'}</span>
+                )}
               </div>
               {/* Online/Offline presence dot */}
               <span 
@@ -1719,42 +1829,126 @@ export default function ProfileView({
                 />
               </div>
 
-              {/* Banner Theme Selector */}
+              {/* Custom Banner Header & Theme Selector */}
               <div>
-                <label className="text-xs font-bold text-slate-300 block mb-2">
-                  Passport Banner Theme
+                <label className="text-xs font-bold text-slate-300 block mb-1.5 flex items-center justify-between">
+                  <span>Passport Banner Header</span>
+                  {editForm.banner_image_url && (
+                    <span className="text-[10px] text-emerald-400 font-mono font-bold">Custom Photo Active</span>
+                  )}
                 </label>
-                <div className="grid grid-cols-2 gap-2.5">
+
+                {/* Banner Media Actions & Live Preview */}
+                <div className="mb-3 p-3 rounded-2xl bg-[#1c2130] border border-white/10">
+                  {editForm.banner_image_url ? (
+                    <div className="space-y-2.5">
+                      <div className="relative h-20 rounded-xl overflow-hidden border border-white/20">
+                        <img src={editForm.banner_image_url} alt="Banner Preview" className="w-full h-full object-cover" />
+                        <div className="absolute inset-0 bg-gradient-to-r from-black/80 via-black/50 to-black/80 flex items-center px-3">
+                          <span className="text-xs font-bold text-white truncate">{p.username}</span>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <label className="flex-1 py-1.5 px-3 rounded-xl bg-white/10 hover:bg-white/20 text-slate-200 text-xs font-bold transition cursor-pointer flex items-center justify-center gap-1.5">
+                          <Upload className="w-3.5 h-3.5 text-orange-400" />
+                          <span>Change Photo</span>
+                          <input type="file" accept="image/*" onChange={(e) => handleFileSelect(e, 'banner')} className="hidden" />
+                        </label>
+                        <button
+                          type="button"
+                          onClick={() => setEditForm({ ...editForm, banner_image_url: null })}
+                          className="py-1.5 px-3 rounded-xl bg-red-500/15 hover:bg-red-500/25 text-red-300 text-xs font-bold transition cursor-pointer flex items-center gap-1 border border-red-500/30"
+                          title="Remove custom banner and use theme preset"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                          <span>Remove</span>
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="text-left">
+                        <span className="text-xs text-slate-200 font-bold block">Upload Panoramic Banner</span>
+                        <span className="text-[10px] text-slate-400">Panoramic ratio (3.75:1) • Compressed to WebP</span>
+                      </div>
+                      <label className="py-2 px-3 rounded-xl bg-orange-500 hover:bg-orange-600 text-white text-xs font-bold transition cursor-pointer flex items-center gap-1.5 shadow-md shadow-orange-500/20 shrink-0">
+                        <Upload className="w-3.5 h-3.5" />
+                        <span>Upload Banner</span>
+                        <input type="file" accept="image/*" onChange={(e) => handleFileSelect(e, 'banner')} className="hidden" />
+                      </label>
+                    </div>
+                  )}
+                </div>
+
+                <span className="text-[11px] font-semibold text-slate-400 block mb-1.5">Theme Gradient Fallback:</span>
+                <div className="grid grid-cols-2 gap-2">
                   {Object.values(BANNER_THEMES).map((th) => (
                     <button
                       key={th.id}
                       type="button"
                       onClick={() => setEditForm({ ...editForm, banner_theme: th.id })}
-                      className={`p-2.5 rounded-xl border flex items-center gap-2.5 transition cursor-pointer text-left ${
+                      className={`p-2 rounded-xl border flex items-center gap-2 transition cursor-pointer text-left ${
                         editForm.banner_theme === th.id
                           ? 'border-white bg-white/10 shadow-md'
                           : 'border-white/10 bg-[#1c2130] hover:bg-white/5'
                       }`}
                     >
-                      <span className={`w-4 h-4 rounded-full bg-gradient-to-br ${th.swatch} shrink-0`} />
+                      <span className={`w-3.5 h-3.5 rounded-full bg-gradient-to-br ${th.swatch} shrink-0`} />
                       <span className="text-xs font-bold text-white truncate">{th.label}</span>
                     </button>
                   ))}
                 </div>
               </div>
 
-              {/* Avatar Selector */}
+              {/* Custom Avatar & Emoji Crest Selector */}
               <div>
-                <label className="text-xs font-bold text-slate-300 block mb-2">
-                  Aspirant Crest Avatar
+                <label className="text-xs font-bold text-slate-300 block mb-1.5 flex items-center justify-between">
+                  <span>Aspirant Avatar</span>
+                  {editForm.avatar_image_url && (
+                    <span className="text-[10px] text-emerald-400 font-mono font-bold">Custom Photo Active</span>
+                  )}
                 </label>
+
+                {/* Avatar Media Actions & Live Preview */}
+                <div className="mb-3 p-3 rounded-2xl bg-[#1c2130] border border-white/10 flex items-center gap-4">
+                  <div className={`w-14 h-14 rounded-2xl overflow-hidden bg-[#121622] flex items-center justify-center shrink-0 border border-white/15 ${ringStyle}`}>
+                    {editForm.avatar_image_url ? (
+                      <img src={editForm.avatar_image_url} alt="Avatar Preview" className="w-full h-full object-cover" />
+                    ) : (
+                      <span className="text-2xl">{AVATAR_MAP[editForm.avatar_id] || '🔥'}</span>
+                    )}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <label className="py-1.5 px-3 rounded-xl bg-white/10 hover:bg-white/20 text-slate-200 text-xs font-bold transition cursor-pointer flex items-center gap-1.5">
+                        <Upload className="w-3.5 h-3.5 text-orange-400" />
+                        <span>{editForm.avatar_image_url ? 'Change Photo' : 'Upload Custom Photo'}</span>
+                        <input type="file" accept="image/*" onChange={(e) => handleFileSelect(e, 'avatar')} className="hidden" />
+                      </label>
+                      {editForm.avatar_image_url && (
+                        <button
+                          type="button"
+                          onClick={() => setEditForm({ ...editForm, avatar_image_url: null })}
+                          className="py-1.5 px-2.5 rounded-xl bg-red-500/15 hover:bg-red-500/25 text-red-300 text-xs font-bold transition cursor-pointer flex items-center gap-1 border border-red-500/30"
+                          title="Revert to emoji crest"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                          <span>Remove</span>
+                        </button>
+                      )}
+                    </div>
+                    <span className="text-[10px] text-slate-400 block mt-1">Square crop • Compressed to WebP (&lt;30KB)</span>
+                  </div>
+                </div>
+
+                <span className="text-[11px] font-semibold text-slate-400 block mb-1.5">Emoji Crest Fallback:</span>
                 <div className="grid grid-cols-5 gap-2">
                   {Object.entries(AVATAR_MAP).map(([avKey, avIcon]) => (
                     <button
                       key={avKey}
                       type="button"
                       onClick={() => setEditForm({ ...editForm, avatar_id: avKey })}
-                      className={`h-11 rounded-xl flex items-center justify-center text-xl transition cursor-pointer border ${
+                      className={`h-10 rounded-xl flex items-center justify-center text-lg transition cursor-pointer border ${
                         editForm.avatar_id === avKey
                           ? 'bg-orange-500/20 border-orange-500 ring-2 ring-orange-500/50'
                           : 'bg-[#1c2130] border-white/10 hover:bg-white/5'
@@ -1801,6 +1995,139 @@ export default function ProfileView({
                 </button>
               </div>
             </form>
+          </div>
+        </div>,
+        document.body
+      )}
+
+      {/* =========================================================================
+          SECONDARY MEDIA CROP / ZOOM / PAN MODAL
+          ========================================================================= */}
+      {cropState.isOpen && typeof document !== 'undefined' && createPortal(
+        <div className="fixed inset-0 z-[10000] flex items-center justify-center p-4 bg-black/85 backdrop-blur-md animate-fadeIn">
+          <div className="bg-[#121622] border border-orange-500/40 rounded-3xl p-6 sm:p-7 max-w-lg w-full shadow-2xl relative text-center">
+            <div className="flex items-center justify-between mb-4 pb-3 border-b border-white/10">
+              <div className="text-left">
+                <h4 className="text-base font-black text-white flex items-center gap-2">
+                  <ImageIcon className="w-4 h-4 text-orange-400" />
+                  <span>{cropState.type === 'avatar' ? 'Adjust Aspirant Avatar' : 'Adjust Panoramic Banner'}</span>
+                </h4>
+                <p className="text-[11px] text-slate-400">
+                  {cropState.type === 'avatar' ? 'Center & scale your profile photo (256x256 WebP).' : 'Frame your panoramic passport banner (1200x320 WebP).'}
+                </p>
+              </div>
+              {cropPreview?.sizeKb && (
+                <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 font-bold shrink-0">
+                  ~{cropPreview.sizeKb} KB
+                </span>
+              )}
+            </div>
+
+            {/* Live Crop Preview Window */}
+            <div className="mb-5 flex justify-center items-center py-3 bg-[#0b0e17] rounded-2xl border border-white/5 overflow-hidden">
+              {cropState.type === 'avatar' ? (
+                <div className="relative p-2">
+                  <div className={`w-32 h-32 rounded-3xl overflow-hidden bg-[#181d2c] flex items-center justify-center shadow-2xl ${ringStyle}`}>
+                    {cropPreview?.dataUrl ? (
+                      <img src={cropPreview.dataUrl} alt="Preview" className="w-full h-full object-cover rounded-3xl" />
+                    ) : (
+                      <RefreshCw className="w-6 h-6 animate-spin text-orange-400" />
+                    )}
+                  </div>
+                  <div className={`absolute -bottom-1 left-1/2 -translate-x-1/2 text-[8px] font-black uppercase px-2 py-0.5 rounded-full border shadow ${divStyle}`}>
+                    {p.current_division}
+                  </div>
+                </div>
+              ) : (
+                <div className="relative w-full max-w-md h-28 rounded-xl overflow-hidden border border-white/15 shadow-xl bg-[#141724]">
+                  {cropPreview?.dataUrl ? (
+                    <img src={cropPreview.dataUrl} alt="Preview" className="w-full h-full object-cover" />
+                  ) : (
+                    <div className="w-full h-full flex items-center justify-center text-slate-500 text-xs">Loading...</div>
+                  )}
+                  <div className="absolute inset-0 bg-gradient-to-r from-black/85 via-black/55 to-black/85 pointer-events-none flex items-center px-4">
+                    <div className="text-left">
+                      <span className="text-xs font-black text-white">{p.username}</span>
+                      <span className="block text-[9px] text-slate-300 font-mono">{editForm.title || 'JEE Aspirant'}</span>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Interactive Zoom & Pan Controls */}
+            <div className="space-y-3.5 mb-6 text-left bg-[#171c2b] p-3.5 rounded-2xl border border-white/5">
+              {/* Zoom Slider */}
+              <div>
+                <div className="flex items-center justify-between text-xs font-bold text-slate-300 mb-1">
+                  <span className="flex items-center gap-1.5"><ZoomIn className="w-3.5 h-3.5 text-orange-400" /> Zoom Scale</span>
+                  <span className="font-mono text-orange-400">{cropState.zoom.toFixed(2)}x</span>
+                </div>
+                <input
+                  type="range"
+                  min="1"
+                  max="3"
+                  step="0.05"
+                  value={cropState.zoom}
+                  onChange={(e) => setCropState({ ...cropState, zoom: parseFloat(e.target.value) })}
+                  className="w-full accent-orange-500 cursor-pointer h-1.5 bg-slate-700 rounded-lg"
+                />
+              </div>
+
+              {/* Horizontal Pan Slider */}
+              <div>
+                <div className="flex items-center justify-between text-xs font-bold text-slate-300 mb-1">
+                  <span className="flex items-center gap-1.5"><Move className="w-3.5 h-3.5 text-cyan-400" /> Horizontal Shift</span>
+                  <span className="font-mono text-cyan-400">{cropState.panX > 0 ? `+${cropState.panX}` : cropState.panX}%</span>
+                </div>
+                <input
+                  type="range"
+                  min="-50"
+                  max="50"
+                  step="1"
+                  value={cropState.panX}
+                  onChange={(e) => setCropState({ ...cropState, panX: parseInt(e.target.value, 10) })}
+                  className="w-full accent-cyan-500 cursor-pointer h-1.5 bg-slate-700 rounded-lg"
+                />
+              </div>
+
+              {/* Vertical Pan Slider */}
+              <div>
+                <div className="flex items-center justify-between text-xs font-bold text-slate-300 mb-1">
+                  <span className="flex items-center gap-1.5"><Move className="w-3.5 h-3.5 text-purple-400 rotate-90" /> Vertical Shift</span>
+                  <span className="font-mono text-purple-400">{cropState.panY > 0 ? `+${cropState.panY}` : cropState.panY}%</span>
+                </div>
+                <input
+                  type="range"
+                  min="-50"
+                  max="50"
+                  step="1"
+                  value={cropState.panY}
+                  onChange={(e) => setCropState({ ...cropState, panY: parseInt(e.target.value, 10) })}
+                  className="w-full accent-purple-500 cursor-pointer h-1.5 bg-slate-700 rounded-lg"
+                />
+              </div>
+            </div>
+
+            {/* Action Buttons */}
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={() => setCropState({ isOpen: false, type: null, imgElement: null, zoom: 1, panX: 0, panY: 0 })}
+                className="flex-1 py-2.5 rounded-xl bg-white/5 hover:bg-white/10 text-slate-300 text-xs font-bold transition cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleApplyCrop}
+                disabled={!cropPreview?.dataUrl}
+                className="flex-1 py-2.5 rounded-xl bg-orange-500 hover:bg-orange-600 disabled:opacity-40 text-white text-xs font-bold transition cursor-pointer shadow-lg shadow-orange-500/20 flex items-center justify-center gap-1.5"
+              >
+                <Check className="w-4 h-4" />
+                <span>Apply & Crop</span>
+              </button>
+            </div>
           </div>
         </div>,
         document.body

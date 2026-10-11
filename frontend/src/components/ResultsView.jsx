@@ -100,7 +100,13 @@ export default function ResultsView({ roomCode, user, onReturnArena, onRematch, 
             {/* 2nd Place */}
             {participants[1] ? (
               <div className="order-2 md:order-1 bg-[#101524] border border-white/10 rounded-2xl p-5 text-center shadow-lg">
-                <span className="text-2xl mb-1 block">🥈</span>
+                {participants[1].avatar_image_url ? (
+                  <div className="w-11 h-11 rounded-xl mx-auto mb-2 overflow-hidden border border-slate-400 shadow">
+                    <img src={participants[1].avatar_image_url} alt={participants[1].username} className="w-full h-full object-cover" />
+                  </div>
+                ) : (
+                  <span className="text-2xl mb-1 block">🥈</span>
+                )}
                 <span className="text-xs font-mono font-bold text-slate-400">RANK #2</span>
                 <h3 
                   onClick={() => onViewProfile && onViewProfile(participants[1].username)}
@@ -135,6 +141,11 @@ export default function ResultsView({ roomCode, user, onReturnArena, onRematch, 
             {winner && (
               <div className="order-1 md:order-2 bg-gradient-to-b from-[#182136] to-[#101524] border-2 border-orange-500 rounded-3xl p-6 text-center shadow-2xl shadow-orange-950/50 -translate-y-2 glow-orange-subtle">
                 <span className="text-4xl mb-1 block">👑</span>
+                {winner.avatar_image_url && (
+                  <div className="w-14 h-14 rounded-2xl mx-auto mb-2 overflow-hidden border-2 border-amber-400 shadow-md">
+                    <img src={winner.avatar_image_url} alt={winner.username} className="w-full h-full object-cover" />
+                  </div>
+                )}
                 <span className="text-xs font-mono font-bold text-amber-400">CHAMPION #1</span>
                 <h3 
                   onClick={() => onViewProfile && onViewProfile(winner.username)}
@@ -168,7 +179,13 @@ export default function ResultsView({ roomCode, user, onReturnArena, onRematch, 
             {/* 3rd Place */}
             {participants[2] ? (
               <div className="order-3 bg-[#101524] border border-white/10 rounded-2xl p-5 text-center shadow-lg">
-                <span className="text-2xl mb-1 block">🥉</span>
+                {participants[2].avatar_image_url ? (
+                  <div className="w-11 h-11 rounded-xl mx-auto mb-2 overflow-hidden border border-amber-700 shadow">
+                    <img src={participants[2].avatar_image_url} alt={participants[2].username} className="w-full h-full object-cover" />
+                  </div>
+                ) : (
+                  <span className="text-2xl mb-1 block">🥉</span>
+                )}
                 <span className="text-xs font-mono font-bold text-slate-400">RANK #3</span>
                 <h3 
                   onClick={() => onViewProfile && onViewProfile(participants[2].username)}

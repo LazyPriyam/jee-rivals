@@ -210,8 +210,12 @@ export default function Navbar({
               }`}
               title={isCollapsed ? `${user.username} (${Math.round(user.overall_elo)} Elo • 🔥 ${user.current_streak || 0} Streak)` : undefined}
             >
-              <div className="w-8 h-8 rounded-lg bg-orange-950/90 border border-orange-500/40 flex items-center justify-center text-base shrink-0 group-hover:scale-105 transition">
-                {renderAvatarEmoji(user.avatar_id)}
+              <div className="w-8 h-8 rounded-lg bg-orange-950/90 border border-orange-500/40 flex items-center justify-center text-base shrink-0 group-hover:scale-105 transition overflow-hidden">
+                {user.avatar_image_url ? (
+                  <img src={user.avatar_image_url} alt={user.username} className="w-full h-full object-cover rounded-lg" />
+                ) : (
+                  renderAvatarEmoji(user.avatar_id)
+                )}
               </div>
               {isCollapsed && (
                 <button
@@ -426,10 +430,14 @@ export default function Navbar({
           {user ? (
             <button
               onClick={() => handleTabClick('profile')}
-              className="p-1 rounded-lg bg-[#202636] border border-orange-500/30 flex items-center text-sm"
+              className="w-8 h-8 rounded-lg bg-[#202636] border border-orange-500/30 flex items-center justify-center text-sm overflow-hidden"
               title={user.username}
             >
-              <span>{renderAvatarEmoji(user.avatar_id)}</span>
+              {user.avatar_image_url ? (
+                <img src={user.avatar_image_url} alt={user.username} className="w-full h-full object-cover" />
+              ) : (
+                <span>{renderAvatarEmoji(user.avatar_id)}</span>
+              )}
             </button>
           ) : (
             <button
@@ -528,8 +536,12 @@ export default function Navbar({
                   onClick={() => handleTabClick('profile')}
                   className="p-2.5 rounded-xl bg-[#202636] border border-orange-500/30 flex items-center gap-2.5 cursor-pointer"
                 >
-                  <div className="w-8 h-8 rounded-lg bg-orange-950/90 border border-orange-500/40 flex items-center justify-center text-sm">
-                    {renderAvatarEmoji(user.avatar_id)}
+                  <div className="w-8 h-8 rounded-lg bg-orange-950/90 border border-orange-500/40 flex items-center justify-center text-sm overflow-hidden shrink-0">
+                    {user.avatar_image_url ? (
+                      <img src={user.avatar_image_url} alt={user.username} className="w-full h-full object-cover" />
+                    ) : (
+                      renderAvatarEmoji(user.avatar_id)
+                    )}
                   </div>
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-1.5">

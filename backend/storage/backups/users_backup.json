@@ -24,14 +24,16 @@
     "bio": "कर्मण्येवाधिकारस्ते मा फलेषु कदाचन।\nमा कर्मफलहेतुर्भूर्मा ते सङ्गोऽस्त्वकर्मणि॥",
     "banner_theme": "orange_cyber",
     "pinned_badges": "[\"elo_bronze\", \"first_blood\"]",
-    "learnt_chapters": "[\"Mathematical Tools\", \"Kinematics 1D & 2D\", \"Rectilinear Motion\", \"Projectile Motion\", \"Relative Motion\", \"Newton's Laws of Motion & Friction\", \"Work, Energy and Power\", \"Circular Motion\", \"Center of Mass and Collisions\", \"Rotational Dynamics\", \"Some Basic Concepts of Chemistry (Mole Concept)\", \"Structure of Atom\", \"Chemical Equilibrium\", \"Chemical Thermodynamics & Thermochemistry\", \"Classification of Elements & Periodicity\", \"Chemical Bonding and Molecular Structure\", \"Sets, Relations and Functions\", \"Complex Numbers and Quadratic Equations\", \"Sequences and Series\", \"Trigonometric Ratios and Identities\"]",
+    "learnt_chapters": "[\"Chemical Bonding and Molecular Structure\", \"Classification of Elements & Periodicity\", \"Structure of Atom\", \"Rectilinear Motion\", \"Sequences and Series\", \"Trigonometric Ratios and Identities\", \"Kinematics 1D & 2D\", \"Complex Numbers and Quadratic Equations\", \"Circular Motion\", \"Work, Energy and Power\", \"Chemical Equilibrium\", \"Sets, Relations and Functions\", \"Newton's Laws of Motion & Friction\", \"Chemical Thermodynamics & Thermochemistry\", \"Mathematical Tools\", \"Relative Motion\", \"Rotational Dynamics\", \"Some Basic Concepts of Chemistry (Mole Concept)\", \"Center of Mass and Collisions\", \"Projectile Motion\"]",
     "chat_settings": "{}",
     "target_exam": "MIXED",
     "current_streak": 1,
     "longest_streak": 1,
     "last_active_date": "2026-10-10",
     "streak_freezes": 1,
-    "streak_history": "[\"2026-10-10\"]"
+    "streak_history": "[\"2026-10-10\"]",
+    "avatar_image_url": null,
+    "banner_image_url": null
   },
   {
     "id": "b16b5ae7-a7e1-4578-a774-e203bed53dc0",
@@ -65,7 +67,9 @@
     "longest_streak": 0,
     "last_active_date": null,
     "streak_freezes": 1,
-    "streak_history": "[]"
+    "streak_history": "[]",
+    "avatar_image_url": null,
+    "banner_image_url": null
   },
   {
     "id": "118c5780-5f1d-4b0d-ae96-ae8dbfc43b42",
@@ -99,6 +103,8 @@
     "longest_streak": 0,
     "last_active_date": null,
     "streak_freezes": 1,
-    "streak_history": "[]"
+    "streak_history": "[]",
+    "avatar_image_url": null,
+    "banner_image_url": null
   }
 ]

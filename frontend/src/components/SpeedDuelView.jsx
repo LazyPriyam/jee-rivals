@@ -384,8 +384,12 @@ export default function SpeedDuelView({
               >
                 {/* Lane Label: Driver Info */}
                 <div className="w-24 sm:w-36 shrink-0 flex items-center gap-2">
-                  <div className="w-7 h-7 rounded-xl bg-[#1e2433] border border-white/10 flex items-center justify-center text-xs shrink-0 relative shadow-inner">
-                    {p.avatar_id === 'atom' ? '⚛️' : p.avatar_id === 'rocket' ? '🚀' : p.avatar_id === 'brain' ? '🧠' : '🔥'}
+                  <div className="w-7 h-7 rounded-xl bg-[#1e2433] border border-white/10 flex items-center justify-center text-xs shrink-0 relative shadow-inner overflow-hidden">
+                    {p.avatar_image_url ? (
+                      <img src={p.avatar_image_url} alt={p.username} className="w-full h-full object-cover rounded-xl" />
+                    ) : (
+                      p.avatar_id === 'atom' ? '⚛️' : p.avatar_id === 'rocket' ? '🚀' : p.avatar_id === 'brain' ? '🧠' : '🔥'
+                    )}
                     {isRank1 && (
                       <span className="absolute -top-1.5 -right-1.5 text-[10px]" title="Race Leader">👑</span>
                     )}

@@ -85,7 +85,7 @@ def get_weekly_leaderboard(limit: int = Query(50, ge=1, le=100)):
     c = conn.cursor()
 
     c.execute("""
-        SELECT id, username, avatar_id, title, weekly_rp, total_solved, total_correct, overall_elo,
+        SELECT id, username, avatar_id, avatar_image_url, title, weekly_rp, total_solved, total_correct, overall_elo,
                physics_elo, chemistry_elo, math_elo, gold_medals, silver_medals, bronze_medals, current_streak,
                last_active
         FROM users
@@ -121,6 +121,7 @@ def get_weekly_leaderboard(limit: int = Query(50, ge=1, le=100)):
             "user_id": u["id"],
             "username": u["username"],
             "avatar_id": u.get("avatar_id") or "default",
+            "avatar_image_url": u.get("avatar_image_url"),
             "title": u.get("title") or "JEE Aspirant",
             "weekly_rp": u.get("weekly_rp", 0),
             "streak": u.get("current_streak") or 0,
@@ -168,7 +169,7 @@ def get_elo_leaderboard(subject: str = Query("overall"), limit: int = Query(50, 
     c = conn.cursor()
 
     c.execute(f"""
-        SELECT id, username, avatar_id, title, {elo_col} as elo, overall_elo, physics_elo, chemistry_elo, math_elo,
+        SELECT id, username, avatar_id, avatar_image_url, title, {elo_col} as elo, overall_elo, physics_elo, chemistry_elo, math_elo,
                total_solved, total_correct, gold_medals, silver_medals, bronze_medals, last_active
         FROM users
         ORDER BY {elo_col} DESC
@@ -184,6 +185,7 @@ def get_elo_leaderboard(subject: str = Query("overall"), limit: int = Query(50, 
             "user_id": u["id"],
             "username": u["username"],
             "avatar_id": u.get("avatar_id") or "default",
+            "avatar_image_url": u.get("avatar_image_url"),
             "title": u.get("title") or "JEE Aspirant",
             "rating": round(u.get("elo", 1200.0), 1),
             "ratings": {
@@ -238,15 +240,38 @@ def update_current_user_profile(
     if req.avatar_id is not None:
         updates.append("avatar_id = ?")
         params.append(req.avatar_id.strip())
+    if req.avatar_image_url is not None:
+        val = req.avatar_image_url.strip() if req.avatar_image_url else None
+        if val and len(val) > 120_000:
+            conn.close()
+            raise HTTPException(status_code=400, detail="Avatar image size is too large (max 100KB).")
+        updates.append("avatar_image_url = ?")
+        params.append(val if val else None)
+    if req.banner_image_url is not None:
+        val = req.banner_image_url.strip() if req.banner_image_url else None
+        if val and len(val) > 300_000:
+            conn.close()
+            raise HTTPException(status_code=400, detail="Banner image size is too large (max 250KB).")
+        updates.append("banner_image_url = ?")
+        params.append(val if val else None)
 
     if updates:
         params.append(current_user["id"])
         c.execute(f"UPDATE users SET {', '.join(updates)} WHERE id = ?", tuple(params))
         conn.commit()
+        # Immediate dual-layer vault backup
+        try:
+            from backend.app.database import backup_all_users
+            backup_all_users(conn)
+        except Exception:
+            pass
 
     c.execute("SELECT * FROM users WHERE id = ?", (current_user["id"],))
     updated_user = dict(c.fetchone())
     conn.close()
+
+    from backend.app.routes.auth import invalidate_user_cache
+    invalidate_user_cache(current_user["id"])
 
     return format_user_profile(updated_user)
 
