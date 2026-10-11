@@ -78,8 +78,13 @@ def sync_data(payload: SyncPayload, x_sync_token: Optional[str] = Header(None, a
             formulas_str = raw_formulas if isinstance(raw_formulas, str) else json.dumps(raw_formulas)
 
             common_pitfall = q.get("common_pitfall", "")
-            diff = q.get("difficulty_tier", "MEDIUM")
-            target_exam = q.get("target_exam", "JEE_MAIN")
+            target_exam = q.get("target_exam") or "JEE_MAIN"
+            passage_id = q.get("passage_id")
+            passage_title = q.get("passage_title")
+            passage_text = q.get("passage_text")
+            sub_idx = q.get("subquestion_index")
+            sub_tot = q.get("subquestion_total")
+
             raw_elo = q.get("elo_rating")
             if raw_elo and int(raw_elo) not in (1350, 1500, 1850):
                 elo = int(raw_elo)
@@ -91,8 +96,10 @@ def sync_data(payload: SyncPayload, x_sync_token: Optional[str] = Header(None, a
                 INSERT INTO questions (
                     id, subject, unit, chapter, question_type, text, options,
                     has_diagram, diagram_urls, correct_answer, solution_text,
-                    key_formulas, common_pitfall, difficulty_tier, elo_rating
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    key_formulas, common_pitfall, difficulty_tier, elo_rating,
+                    target_exam, passage_id, passage_title, passage_text,
+                    subquestion_index, subquestion_total
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                     subject = excluded.subject,
                     unit = excluded.unit,
@@ -107,11 +114,19 @@ def sync_data(payload: SyncPayload, x_sync_token: Optional[str] = Header(None, a
                     key_formulas = excluded.key_formulas,
                     common_pitfall = excluded.common_pitfall,
                     difficulty_tier = excluded.difficulty_tier,
-                    elo_rating = excluded.elo_rating
+                    elo_rating = excluded.elo_rating,
+                    target_exam = excluded.target_exam,
+                    passage_id = excluded.passage_id,
+                    passage_title = excluded.passage_title,
+                    passage_text = excluded.passage_text,
+                    subquestion_index = excluded.subquestion_index,
+                    subquestion_total = excluded.subquestion_total
             """, (
                 q_id, subject, unit, chapter, q_type, text, options_str,
                 has_diag, urls_str, correct_ans, sol_text,
-                formulas_str, common_pitfall, diff, elo
+                formulas_str, common_pitfall, diff, elo,
+                target_exam, passage_id, passage_title, passage_text,
+                sub_idx, sub_tot
             ))
             saved_questions += 1
         except Exception as e:
@@ -119,6 +134,12 @@ def sync_data(payload: SyncPayload, x_sync_token: Optional[str] = Header(None, a
 
     conn.commit()
     conn.close()
+
+    try:
+        from backend.app.tools.question_cache import clear_question_cache
+        clear_question_cache()
+    except Exception as e:
+        print(f"[SYNC] Error clearing question cache: {e}")
 
     return {
         "success": True,
