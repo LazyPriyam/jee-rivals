@@ -56,11 +56,18 @@ def reconcile_quarantined_question(
     # -------------------------------------------------------------
     close_rconn = False
     if rivals_conn is None:
-        rivals_db_path = Path(__file__).resolve().parent.parent.parent / "storage" / "rivals.db"
-        if rivals_db_path.exists():
-            rivals_conn = sqlite3.connect(str(rivals_db_path))
-            rivals_conn.row_factory = sqlite3.Row
+        try:
+            from backend.app.database import get_connection
+            rivals_conn = get_connection()
             close_rconn = True
+        except Exception:
+            rivals_db_path = Path(__file__).resolve().parent.parent.parent / "storage" / "rivals.db"
+            if rivals_db_path.exists():
+                rivals_conn = sqlite3.connect(str(rivals_db_path))
+                close_rconn = True
+
+    if rivals_conn and isinstance(rivals_conn, sqlite3.Connection):
+        rivals_conn.row_factory = sqlite3.Row
 
     if rivals_conn:
         rc = rivals_conn.cursor()
@@ -375,11 +382,18 @@ def reconcile_fixed_question(
     # 1. RIVALS.DB RECONCILIATION
     close_rconn = False
     if rivals_conn is None:
-        rivals_db_path = Path(__file__).resolve().parent.parent.parent / "storage" / "rivals.db"
-        if rivals_db_path.exists():
-            rivals_conn = sqlite3.connect(str(rivals_db_path))
-            rivals_conn.row_factory = sqlite3.Row
+        try:
+            from backend.app.database import get_connection
+            rivals_conn = get_connection()
             close_rconn = True
+        except Exception:
+            rivals_db_path = Path(__file__).resolve().parent.parent.parent / "storage" / "rivals.db"
+            if rivals_db_path.exists():
+                rivals_conn = sqlite3.connect(str(rivals_db_path))
+                close_rconn = True
+
+    if rivals_conn and isinstance(rivals_conn, sqlite3.Connection):
+        rivals_conn.row_factory = sqlite3.Row
 
     if rivals_conn:
         rc = rivals_conn.cursor()
@@ -400,8 +414,9 @@ def reconcile_fixed_question(
         subject = q_row["subject"] if q_row else "General"
         chapter = q_row["chapter"] if q_row else "General"
 
-        # Rooms scoring
-        rc.execute("SELECT id, question_ids, negative_marking, base_correct_score FROM rooms WHERE question_ids LIKE ?", (f"%{question_id}%",))
+        # Rooms scoring & participant reconciliation
+        rc.execute("SELECT id, code, question_ids, negative_marking, base_correct_score FROM rooms WHERE question_ids LIKE ?", (f"%{question_id}%",))
+        room_affected_users = set()
         for rm in rc.fetchall():
             try:
                 raw_qids = json.loads(rm["question_ids"]) if isinstance(rm["question_ids"], str) else (rm["question_ids"] or [])
@@ -414,6 +429,7 @@ def reconcile_fixed_question(
             q_idx = raw_qids.index(question_id)
             neg_mark = abs(float(rm.get("negative_marking") or 1.0))
             base_score = float(rm.get("base_correct_score") or 4.0)
+            rm_code = rm.get("code") or rm.get("id")
 
             rc.execute("SELECT user_id, answers FROM room_participants WHERE room_id = ?", (rm["id"],))
             for p in rc.fetchall():
@@ -434,75 +450,163 @@ def reconcile_fixed_question(
                         WHERE room_id = ? AND user_id = ?
                     """, (int(upgrade_delta), upgrade_delta, rm["id"], p_uid))
                     summary["rivals_rooms_updated"] += 1
+                    if p_uid and not str(p_uid).startswith("bot_"):
+                        room_affected_users.add((p_uid, rm_code, upgrade_delta))
 
-        # Activity log & Rating updates for users who submitted clean_key
+        # B. User Identification for Rating / RP Bounty / Notifications
+        # 1. Fetch reporters from question_reports (CRITICAL: reporters must ALWAYS be compensated & notified!)
+        rc.execute("""
+            SELECT DISTINCT id, reporter_id, reporter_username, provisional_elo_refunded, provisional_subject, created_at
+            FROM question_reports
+            WHERE question_id = ? AND reporter_id IS NOT NULL
+        """, (question_id,))
+        reporters = [dict(r) for r in rc.fetchall()]
+
+        # 2. Fetch users from activity_log
         rc.execute("""
             SELECT DISTINCT user_id, created_at, elo_delta, is_correct
             FROM activity_log
             WHERE question_id = ?
         """, (question_id,))
-        for att in rc.fetchall():
+        attempt_logs = [dict(r) for r in rc.fetchall()]
+
+        # Unified user map to prevent double-awarding: uid -> user_info
+        target_users = {}
+        for rep in reporters:
+            uid = rep["reporter_id"]
+            if uid and not str(uid).startswith("bot_"):
+                target_users[uid] = {
+                    "is_reporter": True,
+                    "provisional_elo": float(rep.get("provisional_elo_refunded") or 0.0),
+                    "created_at": rep.get("created_at") or now_str
+                }
+
+        for att in attempt_logs:
             uid = att["user_id"]
-            if not uid or uid.startswith("bot_"):
+            if uid and not str(uid).startswith("bot_"):
+                if uid not in target_users:
+                    target_users[uid] = {
+                        "is_reporter": False,
+                        "provisional_elo": 0.0,
+                        "created_at": att.get("created_at") or now_str
+                    }
+
+        for p_uid, rm_code, up_marks in room_affected_users:
+            if p_uid not in target_users:
+                target_users[p_uid] = {
+                    "is_reporter": False,
+                    "provisional_elo": 0.0,
+                    "created_at": now_str,
+                    "room_code": rm_code,
+                    "up_marks": up_marks
+                }
+            else:
+                target_users[p_uid]["room_code"] = rm_code
+                target_users[p_uid]["up_marks"] = up_marks
+
+        for uid, uinfo in target_users.items():
+            # Check if notification already delivered for this resolution to avoid duplicate awarding
+            rc.execute("""
+                SELECT id FROM user_notifications
+                WHERE user_id = ? AND type = 'REPORT_RESOLVED' AND details LIKE ?
+            """, (uid, f"%{question_id}%"))
+            if rc.fetchone():
                 continue
 
-            # Check if this user was a reporter who already received provisional Elo refund
-            rc.execute("""
-                SELECT provisional_elo_refunded FROM question_reports
-                WHERE question_id = ? AND reporter_id = ? AND provisional_elo_refunded > 0
-            """, (question_id, uid))
-            rep_prov_row = rc.fetchone()
-            prov_already_given = float(rep_prov_row["provisional_elo_refunded"] or 0.0) if rep_prov_row else 0.0
-
+            prov_already_given = uinfo.get("provisional_elo", 0.0)
             earned_elo = 16.0
             bonus_rp = 35
             net_earned_elo = max(0.0, round(earned_elo - prov_already_given, 1))
 
-            rc.execute("""
-                UPDATE users
-                SET overall_elo = max(100.0, overall_elo + ?),
-                    weekly_rp = weekly_rp + ?
-                WHERE id = ?
-            """, (net_earned_elo, bonus_rp, uid))
+            subj_col = None
+            if subject:
+                s_low = subject.lower()
+                if "chem" in s_low:
+                    subj_col = "chemistry_elo"
+                elif "math" in s_low:
+                    subj_col = "math_elo"
+                elif "phys" in s_low:
+                    subj_col = "physics_elo"
 
+            # Award net Elo and RP bounty
+            if subj_col and net_earned_elo > 0:
+                rc.execute(f"""
+                    UPDATE users
+                    SET overall_elo = max(100.0, overall_elo + ?),
+                        {subj_col} = max(100.0, {subj_col} + ?),
+                        weekly_rp = weekly_rp + ?
+                    WHERE id = ?
+                """, (net_earned_elo, net_earned_elo, bonus_rp, uid))
+            elif net_earned_elo > 0:
+                rc.execute("""
+                    UPDATE users
+                    SET overall_elo = max(100.0, overall_elo + ?),
+                        weekly_rp = weekly_rp + ?
+                    WHERE id = ?
+                """, (net_earned_elo, bonus_rp, uid))
+            else:
+                rc.execute("""
+                    UPDATE users
+                    SET weekly_rp = weekly_rp + ?
+                    WHERE id = ?
+                """, (bonus_rp, uid))
+
+            # In-App Notification
             notif_id = f"notif_{uuid.uuid4().hex[:12]}"
             if prov_already_given > 0:
                 notif_title = f"🏆 Answer Key Corrected: {chapter}"
                 extra_elo_str = f" (+{net_earned_elo:.1f} additional Elo)" if net_earned_elo > 0 else ""
                 notif_msg = (
                     f"Question #{question_id[:8]} official answer key was corrected to '{clean_key}'! "
-                    f"Your provisional credit (+{prov_already_given:.1f} Elo) is permanently locked in{extra_elo_str}, "
+                    f"Your report was verified: your provisional credit (+{prov_already_given:.1f} Elo) is permanently locked in{extra_elo_str}, "
                     f"plus +{bonus_rp} RP Question Bounty awarded. Thank you for your sharp eye!"
+                )
+            elif uinfo.get("is_reporter"):
+                notif_title = f"🏆 Report Verified: {chapter}"
+                notif_msg = (
+                    f"Question #{question_id[:8]} official answer key was corrected to '{clean_key}' following your report! "
+                    f"+{earned_elo:.1f} Elo and +{bonus_rp} RP Question Bounty have been credited to your profile. "
+                    f"Thank you for keeping questions accurate!"
                 )
             else:
                 notif_title = f"✓ Answer Key Corrected: {chapter}"
+                rm_info = f" in Room #{uinfo['room_code']}" if uinfo.get("room_code") else ""
                 notif_msg = (
-                    f"Question {question_id[:8]} answer key was corrected to '{clean_key}'. "
-                    f"Your test result was upgraded to Correct (+4 marks), and +{earned_elo} Elo + {bonus_rp} RP "
-                    f"awarded to your profile."
+                    f"Question #{question_id[:8]} official answer key was corrected to '{clean_key}'. "
+                    f"Your attempt{rm_info} was upgraded to Correct (+4 marks), and +{earned_elo:.1f} Elo + {bonus_rp} RP "
+                    f"Question Bounty awarded to your profile."
                 )
+
             notif_details = json.dumps({
                 "question_id": question_id,
                 "chapter": chapter,
+                "subject": subject,
                 "new_key": clean_key,
                 "earned_elo": earned_elo,
+                "net_earned_elo": net_earned_elo,
+                "provisional_locked": prov_already_given,
+                "bonus_rp": bonus_rp,
                 "action": "FIX_KEY"
             })
+
             try:
                 rc.execute("""
                     INSERT INTO user_notifications (id, user_id, type, title, message, details, is_read, created_at)
                     VALUES (?, ?, 'REPORT_RESOLVED', ?, ?, ?, 0, ?)
                 """, (notif_id, uid, notif_title, notif_msg, notif_details, now_str))
                 summary["notifications_sent"] += 1
-            except Exception:
-                pass
+            except Exception as ne:
+                print(f"[RECONCILIATION] Error inserting notification for {uid}: {ne}")
 
             summary["users_compensated"] += 1
-            summary["total_elo_awarded"] += earned_elo
+            summary["total_elo_awarded"] += (earned_elo if prov_already_given == 0 else net_earned_elo)
 
         rivals_conn.commit()
         if close_rconn:
-            rivals_conn.close()
+            try:
+                rivals_conn.close()
+            except Exception:
+                pass
 
     # 2. JEE.DB RECONCILIATION
     close_jconn = False

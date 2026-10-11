@@ -697,11 +697,11 @@ def quarantine_question(question_id: str, admin: bool = Depends(verify_admin_syn
         WHERE question_id = ? AND status = 'PENDING'
     """, (now, resolver, question_id))
     conn.commit()
-    conn.close()
 
     # Automatic Marks Re-scoring, Elo Compensation & Student Notification
     from backend.app.tools.moderation_reconciliation import reconcile_quarantined_question
-    rec_res = reconcile_quarantined_question(question_id, resolver=resolver)
+    rec_res = reconcile_quarantined_question(question_id, rivals_conn=conn, resolver=resolver)
+    conn.close()
 
     return {
         "success": True,
@@ -848,10 +848,10 @@ def fix_question_key(question_id: str, payload: FixQuestionKeyRequest, admin: bo
         WHERE question_id = ? AND status = 'PENDING'
     """, (now, resolver, question_id))
     conn.commit()
-    conn.close()
 
     from backend.app.tools.moderation_reconciliation import reconcile_fixed_question
-    rec_res = reconcile_fixed_question(question_id, clean_key, resolver=resolver)
+    rec_res = reconcile_fixed_question(question_id, clean_key, rivals_conn=conn, resolver=resolver)
+    conn.close()
 
     return {
         "success": True,
