@@ -461,6 +461,10 @@ export default function AdaptivePracticeView({ user, onOpenAuth, onNavigateTab, 
       const res = await api.adaptive.skip(session.session_id);
       if (res?.next_question) {
         setQuestion(res.next_question);
+        setSession(prev => prev ? {
+          ...prev,
+          current_elo: res.next_question.chapter_elo ?? res.current_elo ?? prev.current_elo
+        } : prev);
         setSubmitted(false);
         setResult(null);
         setSelectedAnswer('');
@@ -480,7 +484,12 @@ export default function AdaptivePracticeView({ user, onOpenAuth, onNavigateTab, 
       return;
     }
     if (result?.next_question) {
-      setQuestion(result.next_question);
+      const nextQ = result.next_question;
+      setQuestion(nextQ);
+      setSession(prev => prev ? {
+        ...prev,
+        current_elo: nextQ.chapter_elo ?? prev.current_elo
+      } : prev);
       setSubmitted(false);
       setResult(null);
       setSelectedAnswer('');
@@ -1074,12 +1083,12 @@ export default function AdaptivePracticeView({ user, onOpenAuth, onNavigateTab, 
               </div>
             </div>
 
-            {/* Center: Live Session Elo & Streak */}
+            {/* Center: Live Chapter Elo & Streak */}
             <div className="flex items-center gap-4">
               <div className="text-center px-3 py-1 rounded-2xl bg-[#1e2433] border border-white/10">
-                <span className="text-[9px] font-mono uppercase text-slate-400 block">Session Elo</span>
+                <span className="text-[9px] font-mono uppercase text-slate-400 block">Chapter Elo</span>
                 <span className="text-lg font-black font-mono text-orange-400 block leading-tight">
-                  {Math.round(session.current_elo)}
+                  {Math.round(submitted ? session.current_elo : (question.chapter_elo ?? session.current_elo))}
                 </span>
               </div>
 

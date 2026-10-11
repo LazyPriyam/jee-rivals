@@ -11,6 +11,9 @@ from backend.app.models import QuestionOut, QuestionOptionModel
 from backend.app.routes.questions import row_to_question_out
 from backend.app.tools.adaptive_engine import (
     get_user_subject_elo,
+    get_user_chapter_elo,
+    get_initial_adaptive_elo,
+    update_cached_chapter_elo,
     get_user_weak_chapters,
     get_user_revenge_question_ids,
     select_next_adaptive_question,
@@ -97,8 +100,8 @@ def parse_formulas_and_pitfalls(q_row: dict) -> Tuple[List[str], str]:
 def start_adaptive_session(req: AdaptiveStartRequest, user: dict = Depends(get_current_user)):
     """
     Initializes a new personalized adaptive session:
-    - Seeds starting Elo from the user's live profile rating for the requested subject.
-    - Probes question bank and selects optimal starting question.
+    - Seeds starting Elo from the user's live Chapter Elo for the requested chapter(s).
+    - Probes question bank and selects optimal starting question calibrated to Chapter Elo.
     - If restricted to learnt chapters or multiple specified chapters, only plucks questions from those chapters.
     """
     conn = get_connection()
@@ -107,9 +110,6 @@ def start_adaptive_session(req: AdaptiveStartRequest, user: dict = Depends(get_c
     user_id = user["id"]
     now = datetime.datetime.utcnow().isoformat()
     session_id = f"adp_{uuid.uuid4().hex[:12]}"
-
-    # Seed initial Elo from user's actual rating
-    initial_elo = get_user_subject_elo(user, req.subject)
 
     # Determine allowed chapters if restricted to multiple chapters or learnt
     effective_allowed = None
@@ -134,14 +134,17 @@ def start_adaptive_session(req: AdaptiveStartRequest, user: dict = Depends(get_c
     if req.chapters and len(req.chapters) > 1:
         target_ch = None
 
-    # Select first question
+    # Seed initial Elo from user's Chapter Elo across active chapters
+    seed_elo = get_initial_adaptive_elo(c, user, req.subject, target_ch, effective_allowed)
+
+    # Select first question calibrated to each candidate question's Chapter Elo
     first_q, meta = select_next_adaptive_question(
         cursor=c,
         user_id=user_id,
         subject=req.subject,
         chapter=target_ch,
         target_exam=req.target_exam,
-        current_session_elo=initial_elo,
+        current_session_elo=seed_elo,
         is_last_correct=None,
         streak=0,
         seen_question_ids=set(),
@@ -156,6 +159,7 @@ def start_adaptive_session(req: AdaptiveStartRequest, user: dict = Depends(get_c
             detail="No suitable questions found for your selected active chapters. Try marking more chapters as learnt or select Full Syllabus."
         )
 
+    initial_elo = float(meta.get("chapter_elo") or seed_elo)
     allowed_json = json.dumps(effective_allowed) if effective_allowed is not None else None
 
     # Auto-abandon any previously running in-progress session for this user to enforce 1 active session per user
@@ -195,6 +199,7 @@ def start_adaptive_session(req: AdaptiveStartRequest, user: dict = Depends(get_c
         "target_exam": req.target_exam,
         "first_question": {
             **q_out.dict(),
+            "chapter_elo": meta.get("chapter_elo") or round(initial_elo, 1),
             "target_elo": meta.get("target_elo"),
             "tier_label": meta.get("tier_label"),
             "is_revenge": meta.get("is_revenge", False),
@@ -224,14 +229,19 @@ def get_active_adaptive_session(user: dict = Depends(get_current_user)):
         return {"active": False}
 
     sess = dict(s_row)
-    c.execute("SELECT * FROM questions WHERE id = ?", (sess.get("current_question_id"),))
-    q_row = c.fetchone()
+    from backend.app.tools.question_cache import get_question_cached
+    q = get_question_cached(sess.get("current_question_id"), cursor=c)
+    if not q:
+        c.execute("SELECT * FROM questions WHERE id = ?", (sess.get("current_question_id"),))
+        q_row = c.fetchone()
+        if not q_row:
+            conn.close()
+            return {"active": False}
+        q = dict(q_row)
+
+    live_ch_elo = round(get_user_chapter_elo(c, user["id"], q.get("chapter"), float(sess.get("current_elo", 1200.0))), 1)
     conn.close()
 
-    if not q_row:
-        return {"active": False}
-
-    q = dict(q_row)
     q_out = row_to_question_out(q)
 
     allowed_list = None
@@ -248,8 +258,8 @@ def get_active_adaptive_session(user: dict = Depends(get_current_user)):
             "mode": sess["mode"],
             "target_questions": sess.get("target_questions"),
             "current_index": sess.get("current_index", 1),
-            "current_elo": round(float(sess.get("current_elo", 1500.0)), 1),
-            "initial_elo": round(float(sess.get("initial_elo", 1500.0)), 1),
+            "current_elo": live_ch_elo,
+            "initial_elo": round(float(sess.get("initial_elo", 1200.0)), 1),
             "streak": sess.get("current_streak", 0),
             "subject": sess.get("subject", "Full Syllabus"),
             "chapter": sess.get("chapter"),
@@ -260,7 +270,8 @@ def get_active_adaptive_session(user: dict = Depends(get_current_user)):
         },
         "question": {
             **q_out.dict(),
-            "target_elo": sess.get("current_elo"),
+            "chapter_elo": live_ch_elo,
+            "target_elo": live_ch_elo,
             "tier_label": q.get("difficulty_tier") or "JEE_MAIN_STANDARD"
         }
     }
@@ -338,9 +349,8 @@ def skip_adaptive_question(session_id: str, user: dict = Depends(get_current_use
 
     # Record skip in session history without penalizing accuracy or Elo
     if current_q_id:
-        c.execute("SELECT * FROM questions WHERE id = ?", (current_q_id,))
-        q_row = c.fetchone()
-        q = dict(q_row) if q_row else {}
+        from backend.app.tools.question_cache import get_question_cached
+        q = get_question_cached(current_q_id, cursor=c) or {}
         history.append({
             "question_id": current_q_id,
             "subject": q.get("subject"),
@@ -364,7 +374,7 @@ def skip_adaptive_question(session_id: str, user: dict = Depends(get_current_use
 
     target_ch = sess.get("chapter") if (not session_allowed or len(session_allowed) <= 1) else None
 
-    # Draw replacement question at matching session Elo
+    # Draw replacement question calibrated to Chapter Elo
     next_q, meta = select_next_adaptive_question(
         cursor=c,
         user_id=user["id"],
@@ -383,9 +393,11 @@ def skip_adaptive_question(session_id: str, user: dict = Depends(get_current_use
         conn.close()
         raise HTTPException(status_code=404, detail="No replacement question available for this session.")
 
+    next_ch_elo = float(meta.get("chapter_elo") or current_session_elo)
     nq_out = row_to_question_out(next_q)
     next_q_data = {
         **nq_out.dict(),
+        "chapter_elo": round(next_ch_elo, 1),
         "target_elo": meta.get("target_elo"),
         "tier_label": meta.get("tier_label"),
         "is_revenge": meta.get("is_revenge", False),
@@ -394,9 +406,9 @@ def skip_adaptive_question(session_id: str, user: dict = Depends(get_current_use
 
     c.execute("""
         UPDATE adaptive_sessions
-        SET current_question_id = ?, history = ?
+        SET current_question_id = ?, current_elo = ?, history = ?
         WHERE id = ?
-    """, (next_q["id"], json.dumps(history), session_id))
+    """, (next_q["id"], next_ch_elo, json.dumps(history), session_id))
 
     conn.commit()
     conn.close()
@@ -406,7 +418,7 @@ def skip_adaptive_question(session_id: str, user: dict = Depends(get_current_use
         "skipped_question_id": current_q_id,
         "next_question": next_q_data,
         "current_streak": curr_streak,
-        "current_elo": round(current_session_elo, 1)
+        "current_elo": round(next_ch_elo, 1)
     }
 
 
@@ -418,7 +430,8 @@ def submit_adaptive_answer(
     user: dict = Depends(get_current_user)
 ):
     """
-    Evaluates student answer, updates Elo ladder, profiles weaknesses,
+    Evaluates student answer against the user's Chapter Elo for the question's chapter,
+    updates Chapter Elo ladder in-memory and in background DB, profiles weaknesses,
     and returns immediate solutions, formulas, common pitfalls, and the next adapted question.
     """
     conn = get_connection()
@@ -447,7 +460,7 @@ def submit_adaptive_answer(
         q = dict(q_row)
 
     q_elo = float(q.get("elo_rating") or 1500)
-    current_session_elo = float(sess["current_elo"])
+    current_chapter_elo = get_user_chapter_elo(c, user["id"], q.get("chapter"), float(sess["current_elo"]))
     curr_streak = int(sess["current_streak"])
 
     # 1. Evaluate correctness
@@ -457,9 +470,13 @@ def submit_adaptive_answer(
     new_streak = curr_streak + 1 if is_correct else 0
     best_streak = max(int(sess["best_streak"]), new_streak)
 
-    # 3. Calculate Elo delta
-    elo_delta = calculate_adaptive_elo_delta(current_session_elo, q_elo, is_correct, curr_streak)
-    new_session_elo = max(1000.0, min(2600.0, current_session_elo + elo_delta))
+    # 3. Calculate Elo delta against the question's Chapter Elo
+    elo_delta = calculate_adaptive_elo_delta(current_chapter_elo, q_elo, is_correct, curr_streak)
+    new_chapter_elo = max(600.0, min(3000.0, current_chapter_elo + elo_delta))
+
+    # Synchronously update the in-memory Chapter Elo cache so the very next question
+    # selection immediately reflects the updated Chapter Elo in 0ms
+    update_cached_chapter_elo(user["id"], q.get("chapter"), new_chapter_elo)
 
     # 4. Offload permanent user profile and telemetry updates to background task
     q_copy = dict(q)
@@ -514,7 +531,7 @@ def submit_adaptive_answer(
         "time_spent_seconds": req.time_spent_seconds,
         "question_elo": q_elo,
         "elo_delta": elo_delta,
-        "session_elo_after": round(new_session_elo, 1)
+        "session_elo_after": round(new_chapter_elo, 1)
     }
     history.append(history_item)
 
@@ -551,7 +568,7 @@ def submit_adaptive_answer(
             subject=sess["subject"],
             chapter=target_ch,
             target_exam=sess.get("target_exam", "MIXED"),
-            current_session_elo=new_session_elo,
+            current_session_elo=new_chapter_elo,
             is_last_correct=is_correct,
             streak=new_streak,
             seen_question_ids=seen_ids,
@@ -559,9 +576,11 @@ def submit_adaptive_answer(
             allowed_chapters=session_allowed
         )
         if next_q:
+            next_ch_elo = float(meta.get("chapter_elo") or new_chapter_elo)
             nq_out = row_to_question_out(next_q)
             next_q_data = {
                 **nq_out.dict(),
+                "chapter_elo": round(next_ch_elo, 1),
                 "target_elo": meta.get("target_elo"),
                 "tier_label": meta.get("tier_label"),
                 "is_revenge": meta.get("is_revenge", False),
@@ -573,7 +592,7 @@ def submit_adaptive_answer(
                     current_streak = ?, best_streak = ?, current_question_id = ?, history = ?
                 WHERE id = ?
             """, (
-                new_index, new_session_elo, new_correct, new_attempted,
+                new_index, new_chapter_elo, new_correct, new_attempted,
                 new_streak, best_streak, next_q["id"], json.dumps(history),
                 session_id
             ))
@@ -589,7 +608,7 @@ def submit_adaptive_answer(
                 best_streak = ?, history = ?
             WHERE id = ?
         """, (
-            now, new_session_elo, new_correct, new_attempted,
+            now, new_chapter_elo, new_correct, new_attempted,
             new_streak, best_streak, json.dumps(history), session_id
         ))
 
@@ -605,8 +624,8 @@ def submit_adaptive_answer(
         "key_formulas": formulas,
         "common_pitfall": pitfall,
         "elo_delta": elo_delta,
-        "session_elo_before": round(current_session_elo, 1),
-        "session_elo_after": round(new_session_elo, 1),
+        "session_elo_before": round(current_chapter_elo, 1),
+        "session_elo_after": round(new_chapter_elo, 1),
         "current_streak": new_streak,
         "flow_state": new_streak >= 3,
         "total_attempted": new_attempted,

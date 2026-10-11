@@ -143,6 +143,11 @@ def invalidate_user_cache(user_id: Optional[str] = None):
             invalidate_mastery_cache(str(user_id))
         except Exception:
             pass
+        try:
+            from backend.app.tools.adaptive_engine import invalidate_adaptive_chapter_elo_cache
+            invalidate_adaptive_chapter_elo_cache(str(user_id))
+        except Exception:
+            pass
     else:
         _USER_CACHE.clear()
         try:
@@ -158,6 +163,11 @@ def invalidate_user_cache(user_id: Optional[str] = None):
         try:
             from backend.app.routes.mastery import invalidate_mastery_cache
             invalidate_mastery_cache()
+        except Exception:
+            pass
+        try:
+            from backend.app.tools.adaptive_engine import invalidate_adaptive_chapter_elo_cache
+            invalidate_adaptive_chapter_elo_cache()
         except Exception:
             pass
 

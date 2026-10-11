@@ -7,6 +7,80 @@ from typing import Optional, List, Dict, Any, Tuple, Set
 
 _WEAK_CHAPTERS_CACHE: Dict[Tuple[str, str], Tuple[float, List[str]]] = {}
 _REVENGE_QIDS_CACHE: Dict[Tuple[str, str, str], Tuple[float, Set[str]]] = {}
+_USER_CHAPTER_ELOS_CACHE: Dict[str, Tuple[float, Dict[str, float]]] = {}
+
+
+def invalidate_adaptive_chapter_elo_cache(user_id: Optional[str] = None):
+    global _USER_CHAPTER_ELOS_CACHE
+    if user_id:
+        _USER_CHAPTER_ELOS_CACHE.pop(str(user_id), None)
+    else:
+        _USER_CHAPTER_ELOS_CACHE.clear()
+
+
+def get_user_chapter_elo_map(cursor, user_id: str) -> Dict[str, float]:
+    """
+    Returns a normalized map of {chapter_name: chapter_elo} from user_chapter_elo,
+    cached in RAM for 60s (and updated immediately in-memory on adaptive submit).
+    """
+    uid = str(user_id)
+    now_t = time.time()
+    cached = _USER_CHAPTER_ELOS_CACHE.get(uid)
+    if cached and (now_t - cached[0]) < 60.0:
+        return cached[1]
+
+    from backend.app.tools.jee_syllabus import normalize_chapter_name
+    chap_map: Dict[str, float] = {}
+    try:
+        cursor.execute("""
+            SELECT chapter, elo FROM user_chapter_elo
+            WHERE user_id = ?
+        """, (uid,))
+        for r in cursor.fetchall():
+            ch_raw = r["chapter"]
+            elo_val = float(r["elo"] or 1200.0)
+            if ch_raw:
+                chap_map[ch_raw] = elo_val
+                norm_c = normalize_chapter_name(ch_raw)
+                if norm_c:
+                    chap_map[norm_c] = elo_val
+    except Exception:
+        pass
+
+    _USER_CHAPTER_ELOS_CACHE[uid] = (now_t, chap_map)
+    return chap_map
+
+
+def get_user_chapter_elo(cursor, user_id: str, chapter: Optional[str], fallback_elo: float = 1200.0) -> float:
+    """Returns the user's Chapter Elo for the specified chapter (defaulting to 1200.0 for untouched chapters)."""
+    if not chapter:
+        return fallback_elo
+    from backend.app.tools.jee_syllabus import normalize_chapter_name
+    chap_map = get_user_chapter_elo_map(cursor, user_id)
+    norm_c = normalize_chapter_name(chapter)
+    if norm_c in chap_map:
+        return float(chap_map[norm_c])
+    if chapter in chap_map:
+        return float(chap_map[chapter])
+    return 1200.0
+
+
+def update_cached_chapter_elo(user_id: str, chapter: Optional[str], new_elo: float):
+    """Updates the in-memory chapter Elo cache immediately so the next adaptive question uses the fresh Chapter Elo in 0ms."""
+    if not chapter:
+        return
+    uid = str(user_id)
+    cached = _USER_CHAPTER_ELOS_CACHE.get(uid)
+    if not cached:
+        return
+    from backend.app.tools.jee_syllabus import normalize_chapter_name
+    chap_map = cached[1]
+    norm_c = normalize_chapter_name(chapter)
+    chap_map[chapter] = round(float(new_elo), 1)
+    if norm_c:
+        chap_map[norm_c] = round(float(new_elo), 1)
+    _USER_CHAPTER_ELOS_CACHE[uid] = (time.time(), chap_map)
+
 
 def get_user_subject_elo(user: dict, subject: str) -> float:
     """Returns the user's specific subject Elo rating or overall Elo as fallback."""
@@ -18,6 +92,48 @@ def get_user_subject_elo(user: dict, subject: str) -> float:
     elif "math" in subj_norm:
         return float(user.get("math_elo") or user.get("overall_elo") or 1200.0)
     return float(user.get("overall_elo") or 1200.0)
+
+
+def get_initial_adaptive_elo(
+    cursor,
+    user: dict,
+    subject: str,
+    target_chapter: Optional[str] = None,
+    allowed_chapters: Optional[List[str]] = None
+) -> float:
+    """
+    Seeds the initial adaptive Elo from the user's Chapter Elo(s) in user_chapter_elo:
+    - Single chapter: exact Chapter Elo of that chapter (1200.0 if untouched).
+    - Multiple allowed/learnt chapters: average Chapter Elo across those chapters.
+    - Full syllabus / subject: average Chapter Elo of attempted chapters in that subject (or 1200.0 baseline).
+    """
+    user_id = str(user["id"])
+    if target_chapter:
+        return round(get_user_chapter_elo(cursor, user_id, target_chapter, 1200.0), 1)
+
+    chap_map = get_user_chapter_elo_map(cursor, user_id)
+    from backend.app.tools.jee_syllabus import normalize_chapter_name, JEE_SYLLABUS
+
+    if allowed_chapters and len(allowed_chapters) > 0:
+        norm_set = {normalize_chapter_name(c) for c in allowed_chapters if c}
+        if norm_set:
+            vals = [chap_map.get(c, 1200.0) for c in norm_set]
+            return round(sum(vals) / len(vals), 1)
+
+    # Filter canonical chapters by subject if a single subject was selected
+    subj_chaps = []
+    for s_name, units in JEE_SYLLABUS.items():
+        if subject and subject != "Full Syllabus" and s_name.lower() != subject.strip().lower():
+            continue
+        for u in units:
+            for ch in u["chapters"]:
+                norm_c = normalize_chapter_name(ch)
+                if norm_c in chap_map:
+                    subj_chaps.append(chap_map[norm_c])
+
+    if subj_chaps:
+        return round(sum(subj_chaps) / len(subj_chaps), 1)
+    return 1200.0
 
 
 def get_user_weak_chapters(cursor, user_id: str, subject: Optional[str] = None) -> List[str]:
@@ -108,38 +224,35 @@ def select_next_adaptive_question(
     allowed_chapters: Optional[List[str]] = None
 ) -> Tuple[Optional[dict], dict]:
     """
-    Intelligent multi-factor question selector:
-    - Calculates target difficulty curve based on last performance and streak.
-    - If user failed previous question, initiates Concept Remediation on same chapter.
-    - Auto-weights detected weak syllabus topics and pending revenge problems.
+    Intelligent Chapter-Elo-driven multi-factor question selector:
+    - Evaluates each candidate question against the user's Chapter Elo for that question's chapter
+      (from user_chapter_elo), modulated by in-session momentum and streak.
+    - If user failed previous question, initiates Concept Remediation on the same chapter.
+    - Auto-weights detected weak syllabus chapters and pending revenge problems.
     - Clamps to healthy difficulty bounds and avoids repeats.
     - Strictly restricts questions to allowed_chapters if provided (user's learnt chapters).
     """
     seen = seen_question_ids or set()
     weak_chapters = set(get_user_weak_chapters(cursor, user_id, subject))
     revenge_qids = get_user_revenge_question_ids(cursor, user_id, subject, chapter)
+    chapter_elo_map = get_user_chapter_elo_map(cursor, user_id)
 
-    # 1. Calculate Target Elo Ladder
+    # 1. Calculate In-Session Momentum / Step Offset relative to each chapter's Elo
     if is_last_correct is True:
-        # User succeeded! Step upward.
+        # User succeeded! Push above the chapter's baseline Elo, scaling with flow-state streak.
         if streak >= 3:
-            # Flow state multiplier: Push into high-tier challenge
-            elo_jump = random.uniform(85, 120)
+            step_offset = random.uniform(85, 120) + min(120.0, (streak - 2) * 25.0)
         else:
-            elo_jump = random.uniform(60, 90)
-        target_elo = current_session_elo + elo_jump
+            step_offset = random.uniform(45, 75) + max(0, streak - 1) * 20.0
         is_remediation = False
     elif is_last_correct is False:
-        # User missed: Dip downward to diagnose fundamentals and trigger remediation
-        elo_drop = random.uniform(50, 80)
-        target_elo = max(1100.0, current_session_elo - elo_drop)
+        # User missed: Dip downward below chapter Elo to diagnose fundamentals and trigger remediation
+        step_offset = -random.uniform(50, 80)
         is_remediation = True
     else:
-        # Initial probe question
-        target_elo = current_session_elo
+        # Initial probe or skip replacement: match exact Chapter Elo
+        step_offset = 0.0
         is_remediation = False
-
-    target_elo = max(1000.0, min(2500.0, target_elo))
 
     # 2. Select Candidate Questions via Fast Hot-Cache
     target_chapter = chapter or (remediation_chapter if is_remediation else None)
@@ -154,8 +267,10 @@ def select_next_adaptive_question(
             from backend.app.tools.fsrs_engine import find_due_fsrs_question
             due_q = find_due_fsrs_question(cursor, user_id, subject, list(effective_allowed) if effective_allowed else None)
             if due_q and due_q.get("id") not in seen:
+                due_ch_elo = get_user_chapter_elo(cursor, user_id, due_q.get("chapter"), 1200.0)
                 metadata = {
                     "target_elo": round(float(due_q.get("elo_rating") or 1500), 1),
+                    "chapter_elo": round(due_ch_elo, 1),
                     "question_elo": float(due_q.get("elo_rating") or 1500),
                     "is_revenge": False,
                     "is_remediation": False,
@@ -217,12 +332,19 @@ def select_next_adaptive_question(
     if not pool:
         return None, {}
 
-    # 3. Multi-Factor Scoring
+    # 3. Chapter-Elo Multi-Factor Scoring
     scored = []
     for q in pool:
         q_elo = float(q.get("elo_rating") or 1500)
-        # Elo Proximity bell curve (standard dev = 220)
-        diff = abs(q_elo - target_elo)
+        q_ch_raw = q.get("chapter") or ""
+        q_ch_norm = normalize_chapter_name(q_ch_raw) if q_ch_raw else ""
+        user_ch_elo = float(chapter_elo_map.get(q_ch_norm, chapter_elo_map.get(q_ch_raw, 1200.0)))
+
+        # Chapter-specific target Elo = User's Chapter Elo + In-Session Momentum Step
+        q_target_elo = max(1000.0, min(2500.0, user_ch_elo + step_offset))
+
+        # Elo Proximity bell curve (standard dev = 220) relative to THIS chapter's target Elo
+        diff = abs(q_elo - q_target_elo)
         elo_score = math.exp(-((diff / 220.0) ** 2))
 
         weight = elo_score
@@ -232,9 +354,10 @@ def select_next_adaptive_question(
         if is_revenge:
             weight *= 2.8  # Strong bonus to avenge previously failed questions
 
-        is_weak = q.get("chapter") in weak_chapters
+        is_low_ch_elo = (q_ch_norm in chapter_elo_map and user_ch_elo < 1350.0)
+        is_weak = (q_ch_raw in weak_chapters) or (q_ch_norm in weak_chapters) or is_low_ch_elo
         if is_weak:
-            weight *= 2.2  # Heavy focus on identified conceptual weak chapters
+            weight *= 2.2  # Heavy focus on identified conceptual weak or low-Elo chapters
 
         if q["id"] not in seen:
             weight *= 1.5  # Freshness preference
@@ -242,7 +365,7 @@ def select_next_adaptive_question(
         # Gentle randomness to avoid robotic predictability
         jitter = random.uniform(0.85, 1.15)
         final_score = weight * jitter
-        scored.append((final_score, q, is_revenge, is_remediation or is_weak))
+        scored.append((final_score, q, is_revenge, is_remediation or is_weak, user_ch_elo, q_target_elo))
 
     scored.sort(key=lambda x: x[0], reverse=True)
 
@@ -252,13 +375,17 @@ def select_next_adaptive_question(
     best_q = None
     is_q_revenge = False
     is_q_remed = False
+    best_ch_elo = 1200.0
+    best_target_elo = current_session_elo
 
-    for score, cand_q, rev, rem in scored:
+    for score, cand_q, rev, rem, ch_elo_val, q_targ_val in scored:
         is_valid, healed_q, defects = audit_and_heal_question(cand_q)
         if is_valid and healed_q:
             best_q = healed_q
             is_q_revenge = rev
             is_q_remed = rem
+            best_ch_elo = ch_elo_val
+            best_target_elo = q_targ_val
             break
 
     if not best_q:
@@ -275,7 +402,8 @@ def select_next_adaptive_question(
         tier_label = "FOUNDATION_DIAGNOSTIC"
 
     metadata = {
-        "target_elo": round(target_elo, 1),
+        "target_elo": round(best_target_elo, 1),
+        "chapter_elo": round(best_ch_elo, 1),
         "question_elo": q_elo,
         "is_revenge": is_q_revenge,
         "is_remediation": is_q_remed,
