@@ -220,8 +220,8 @@ ACHIEVEMENTS_REGISTRY = [
         "category": "TRIAD",
         "icon": "🧭",
         "target": 25,
-        "check": lambda u, s: (s.get("growth_triad", {}).get("active_chapters", 0) >= 25) or (len(u.get("learnt_chapters", [])) >= 25 if isinstance(u.get("learnt_chapters"), list) else False),
-        "progress": lambda u, s: min(25, s.get("growth_triad", {}).get("active_chapters", 0) or (len(u.get("learnt_chapters", [])) if isinstance(u.get("learnt_chapters"), list) else 0)),
+        "check": lambda u, s: s.get("growth_triad", {}).get("active_chapters", 0) >= 25,
+        "progress": lambda u, s: min(25, s.get("growth_triad", {}).get("active_chapters", 0)),
     },
     {
         "id": "triad_halfway_50",

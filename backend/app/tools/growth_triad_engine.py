@@ -8,7 +8,8 @@ Evaluates the core three pillars of an aspirant's development:
 
 import json
 import logging
-from typing import Dict, Any, List, Optional
+import time
+from typing import Dict, Any, List, Optional, Tuple
 
 logger = logging.getLogger("jee_rivals.growth_triad")
 
@@ -22,8 +23,8 @@ IDEAL_PACE_SECONDS = {
     "Mathematics": 170    # Multi-step algebra, geometry, lengthy numerical solving
 }
 
-# Cache for triad calculations to prevent remote DB query overhead
-_TRIAD_CACHE: Dict[str, Dict[str, Any]] = {}
+# Cache for triad calculations to prevent remote DB query overhead: user_id -> (timestamp, result)
+_TRIAD_CACHE: Dict[str, Tuple[float, Dict[str, Any]]] = {}
 
 
 def calculate_growth_triad(
@@ -50,20 +51,15 @@ def calculate_growth_triad(
         }
     """
     user_id = user.get("id", "")
+    now_t = time.time()
     cached = _TRIAD_CACHE.get(user_id)
-    if cached:
-        return cached
+    if cached and (now_t - cached[0] < 30.0):
+        return cached[1]
 
     # -------------------------------------------------------------
-    # 1. CHAPTER KNOWLEDGE CALCULATION (0 - 100)
+    # 1. CHAPTER KNOWLEDGE CALCULATION (0 - 100) FROM ACTUAL MASTERY
     # -------------------------------------------------------------
-    learnt_raw = user.get("learnt_chapters") or "[]"
-    try:
-        learnt = json.loads(learnt_raw) if isinstance(learnt_raw, str) else learnt_raw
-        if not isinstance(learnt, list):
-            learnt = []
-    except Exception:
-        learnt = []
+    from backend.app.tools.jee_syllabus import normalize_chapter_name
 
     ch_raw = user.get("chapter_stats") or "{}"
     try:
@@ -73,38 +69,92 @@ def calculate_growth_triad(
     except Exception:
         ch_stats = {}
 
-    active_set = set(learnt)
-    for ch_name, stat in ch_stats.items():
+    chapter_mastery: Dict[str, Dict[str, Any]] = {}
+
+    # A. Official persistent 92-chapter mastery records from user_chapter_elo
+    if cursor and user_id:
+        try:
+            cursor.execute("""
+                SELECT chapter, elo, attempts, correct
+                FROM user_chapter_elo
+                WHERE user_id = ? AND attempts > 0
+            """, (user_id,))
+            for r in cursor.fetchall():
+                ch_norm = normalize_chapter_name(r["chapter"])
+                if ch_norm:
+                    chapter_mastery[ch_norm] = {
+                        "elo": float(r["elo"] or 1200.0),
+                        "attempts": int(r["attempts"] or 0),
+                        "correct": int(r["correct"] or 0)
+                    }
+        except Exception as e:
+            logger.warning(f"Error querying user_chapter_elo in triad: {e}")
+
+    # B. Query activity_log for any attempted questions across duels, mocks, or practice
+    if cursor and user_id:
+        try:
+            cursor.execute("""
+                SELECT chapter, COUNT(*) as att, SUM(CASE WHEN is_correct = 1 THEN 1 ELSE 0 END) as corr
+                FROM activity_log
+                WHERE user_id = ?
+                GROUP BY chapter
+            """, (user_id,))
+            for r in cursor.fetchall():
+                ch_norm = normalize_chapter_name(r[0])
+                if ch_norm and ch_norm not in chapter_mastery:
+                    chapter_mastery[ch_norm] = {
+                        "elo": 1200.0,
+                        "attempts": int(r[1] or 0),
+                        "correct": int(r[2] or 0)
+                    }
+        except Exception:
+            pass
+
+    # C. Query user chapter_stats for legacy attempts
+    for ch_raw_name, stat in ch_stats.items():
         if isinstance(stat, dict) and stat.get("attempts", 0) > 0:
+            ch_norm = normalize_chapter_name(ch_raw_name)
+            if ch_norm and ch_norm not in chapter_mastery:
+                chapter_mastery[ch_norm] = {
+                    "elo": float(stat.get("elo") or 1200.0),
+                    "attempts": int(stat.get("attempts", 0)),
+                    "correct": int(stat.get("correct", 0))
+                }
+
+    # Evaluate breadth and mastery depth strictly from tested chapters
+    active_set = set()
+    mastered_count = 0     # 1800+ Elo
+    proficient_count = 0   # 1500-1799 Elo
+    emerging_count = 0     # 1300-1499 Elo
+    critical_count = 0     # <1300 Elo
+
+    for ch_name, data in chapter_mastery.items():
+        if data["attempts"] > 0:
             active_set.add(ch_name)
+            elo = data["elo"]
+            if elo >= 1800.0:
+                mastered_count += 1
+            elif elo >= 1500.0:
+                proficient_count += 1
+            elif elo >= 1300.0:
+                emerging_count += 1
+            else:
+                critical_count += 1
 
     active_chapters_count = len(active_set)
     breadth_pct = round((active_chapters_count / float(TOTAL_SYLLABUS_CHAPTERS)) * 100.0, 1)
 
-    # Depth count (chapters with >= 3 correct or elo >= 1400 in user_chapter_elo)
-    mastered_count = 0
-    if cursor and user_id:
-        try:
-            cursor.execute(
-                "SELECT COUNT(*) FROM user_chapter_elo WHERE user_id = ? AND elo >= 1450",
-                (user_id,)
-            )
-            row = cursor.fetchone()
-            if row:
-                mastered_count = int(row[0])
-        except Exception:
-            pass
+    # Depth & quality of mastery across the syllabus
+    # 25 mastered/proficient chapters represents top 1% national JEE readiness
+    depth_score = min(
+        100.0,
+        ((mastered_count * 1.0 + proficient_count * 0.75 + emerging_count * 0.45 + critical_count * 0.15) / 25.0) * 100.0
+    )
 
-    # If user_chapter_elo is empty, fallback to ch_stats count with >= 3 correct
-    if mastered_count == 0:
-        for stat in ch_stats.values():
-            if isinstance(stat, dict) and stat.get("correct", 0) >= 3:
-                mastered_count += 1
-
-    # Knowledge score: 65% Breadth + 35% Depth
+    # Chapter Knowledge: 55% Syllabus Breadth + 45% Tested Mastery Depth
     knowledge_score = min(
         100.0,
-        round((breadth_pct * 0.65) + (min(1.0, mastered_count / 30.0) * 100.0 * 0.35), 1)
+        round((breadth_pct * 0.55) + (depth_score * 0.45), 1)
     )
 
     # -------------------------------------------------------------
@@ -385,11 +435,10 @@ def calculate_growth_triad(
         "chapter_metrics": chapter_breakdown
     }
 
-    _TRIAD_CACHE[user_id] = result
+    _TRIAD_CACHE[user_id] = (now_t, result)
     return result
 
 
 def invalidate_user_triad_cache(user_id: str):
     """Clears cached triad calculation for a user upon new test or duel completion."""
-    if user_id in _TRIAD_CACHE:
-        del _TRIAD_CACHE[user_id]
+    _TRIAD_CACHE.pop(str(user_id), None)

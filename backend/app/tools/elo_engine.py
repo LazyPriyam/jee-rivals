@@ -263,7 +263,7 @@ def get_user_syllabus_coverage(cursor: sqlite3.Cursor, user_id: str, user_dict: 
     Computes exact syllabus exploration and breadth metrics across the official 92 canonical chapters.
     Aggregates chapter exploration from:
     1. activity_log & user_chapter_elo (combined via fast single UNION query)
-    2. users.chapter_stats & users.learnt_chapters (reused from user_dict if provided)
+    2. users.chapter_stats (where attempts > 0)
     """
     import json
     from backend.app.tools.jee_syllabus import normalize_chapter_name, ALL_CANONICAL_CHAPTERS, JEE_SYLLABUS
@@ -308,19 +308,16 @@ def get_user_syllabus_coverage(cursor: sqlite3.Cursor, user_id: str, user_dict: 
     except Exception:
         pass
 
-    # 2. Extract chapter_stats & learnt_chapters (reuse user_dict if passed to save a DB round trip)
+    # 2. Extract chapter_stats (reuse user_dict if passed to save a DB round trip)
     try:
         raw_cstats = None
-        raw_learnt = None
         if user_dict is not None:
             raw_cstats = user_dict.get("chapter_stats")
-            raw_learnt = user_dict.get("learnt_chapters")
         else:
-            cursor.execute("SELECT chapter_stats, learnt_chapters FROM users WHERE id = ?", (user_id,))
+            cursor.execute("SELECT chapter_stats FROM users WHERE id = ?", (user_id,))
             u_row = cursor.fetchone()
             if u_row:
                 raw_cstats = u_row["chapter_stats"]
-                raw_learnt = u_row["learnt_chapters"]
 
         if raw_cstats:
             cstats = json.loads(raw_cstats) if isinstance(raw_cstats, str) else raw_cstats
@@ -330,11 +327,6 @@ def get_user_syllabus_coverage(cursor: sqlite3.Cursor, user_id: str, user_dict: 
                         record_chap(ch_k, ch_v.get("subject"))
                     elif isinstance(ch_v, (int, float)) and ch_v > 0:
                         record_chap(ch_k)
-        if raw_learnt:
-            learnt = json.loads(raw_learnt) if isinstance(raw_learnt, str) else raw_learnt
-            if isinstance(learnt, list):
-                for ch_name in learnt:
-                    record_chap(ch_name)
     except Exception:
         pass
 
