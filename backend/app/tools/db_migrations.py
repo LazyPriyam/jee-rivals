@@ -539,6 +539,36 @@ def migration_007_custom_profile_media(conn: sqlite3.Connection):
         c.execute("ALTER TABLE users ADD COLUMN banner_image_url TEXT DEFAULT NULL;")
 
 
+def migration_008_provisional_report_reconciliation(conn: sqlite3.Connection):
+    """
+    Safely adds provisional_elo_refunded and provisional_subject to question_reports table
+    to support instantaneous anti-frustration provisional Elo restoration and moderator review clawback.
+    """
+    c = conn.cursor()
+    c.execute("""
+    CREATE TABLE IF NOT EXISTS question_reports (
+        id TEXT PRIMARY KEY,
+        question_id TEXT NOT NULL,
+        reporter_id TEXT,
+        reporter_username TEXT,
+        reason TEXT,
+        notes TEXT,
+        status TEXT DEFAULT 'PENDING',
+        created_at TEXT NOT NULL,
+        resolved_at TEXT,
+        resolved_by TEXT,
+        provisional_elo_refunded REAL DEFAULT 0.0,
+        provisional_subject TEXT DEFAULT NULL
+    );
+    """)
+    c.execute("PRAGMA table_info(question_reports);")
+    existing_cols = {row[1] for row in c.fetchall()}
+    if "provisional_elo_refunded" not in existing_cols:
+        c.execute("ALTER TABLE question_reports ADD COLUMN provisional_elo_refunded REAL DEFAULT 0.0;")
+    if "provisional_subject" not in existing_cols:
+        c.execute("ALTER TABLE question_reports ADD COLUMN provisional_subject TEXT DEFAULT NULL;")
+
+
 # Master migration registry (ordered sequentially)
 MIGRATIONS: List[Dict[str, Any]] = [
     {
@@ -575,6 +605,11 @@ MIGRATIONS: List[Dict[str, Any]] = [
         "version": 7,
         "name": "custom_profile_media",
         "func": migration_007_custom_profile_media,
+    },
+    {
+        "version": 8,
+        "name": "provisional_report_reconciliation",
+        "func": migration_008_provisional_report_reconciliation,
     },
 ]
 

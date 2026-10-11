@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Flag, X, AlertTriangle, CheckCircle, Send, Loader2 } from 'lucide-react';
+import { Flag, X, AlertTriangle, CheckCircle, Send, Loader2, Shield } from 'lucide-react';
 import { api } from '../utils/api';
 import sound from '../utils/sound';
 
@@ -17,34 +17,43 @@ export default function ReportQuestionModal({
   onClose,
   questionId,
   questionText,
+  question,
   mode = 'general', // 'adaptive' | 'mock_test' | 'arena' | 'general'
   canSkip = false,
   onSkip = null,
   onReportSuccess = null
 }) {
+  const activeQuestionId = questionId || question?.id;
+  const activeQuestionText = questionText || question?.text;
+  const isModalOpen = isOpen !== undefined ? isOpen : Boolean(question);
+
   const [selectedReason, setSelectedReason] = useState('WRONG_ANSWER');
   const [notes, setNotes] = useState('');
   const [skipQuestion, setSkipQuestion] = useState(canSkip);
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [wasSkipped, setWasSkipped] = useState(false);
+  const [provisionalRefund, setProvisionalRefund] = useState(0);
   const [error, setError] = useState('');
 
-  if (!isOpen) return null;
+  if (!isModalOpen || !activeQuestionId) return null;
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!questionId) return;
+    if (!activeQuestionId) return;
 
     sound.click();
     setSubmitting(true);
     setError('');
 
     try {
-      await api.questions.report(questionId, {
+      const res = await api.questions.report(activeQuestionId, {
         reason: selectedReason,
         notes: notes.trim()
       });
+
+      const refunded = Number(res?.provisional_elo_refunded || 0);
+      setProvisionalRefund(refunded);
 
       let skipped = false;
       if (canSkip && skipQuestion && onSkip) {
@@ -59,10 +68,11 @@ export default function ReportQuestionModal({
 
       if (onReportSuccess) {
         onReportSuccess({
-          questionId,
+          questionId: activeQuestionId,
           reason: selectedReason,
           notes: notes.trim(),
-          skipped
+          skipped,
+          provisional_elo_refunded: refunded
         });
       }
 
@@ -70,10 +80,11 @@ export default function ReportQuestionModal({
       setTimeout(() => {
         setSubmitted(false);
         setWasSkipped(false);
+        setProvisionalRefund(0);
         setNotes('');
         setSelectedReason('WRONG_ANSWER');
         onClose();
-      }, 1600);
+      }, refunded > 0 ? 2400 : 1600);
     } catch (err) {
       setError(err.message || 'Failed to submit report. Please try again.');
     } finally {
@@ -106,14 +117,33 @@ export default function ReportQuestionModal({
 
         {submitted ? (
           <div className="py-8 text-center flex flex-col items-center justify-center space-y-3">
-            <div className="w-14 h-14 rounded-2xl bg-emerald-500/20 border border-emerald-500/40 text-emerald-400 flex items-center justify-center animate-bounce">
-              <CheckCircle className="w-8 h-8" />
+            <div className={`w-14 h-14 rounded-2xl flex items-center justify-center animate-bounce ${
+              provisionalRefund > 0
+                ? 'bg-amber-500/20 border border-amber-500/40 text-amber-400'
+                : 'bg-emerald-500/20 border border-emerald-500/40 text-emerald-400'
+            }`}>
+              {provisionalRefund > 0 ? (
+                <Shield className="w-8 h-8" />
+              ) : (
+                <CheckCircle className="w-8 h-8" />
+              )}
             </div>
             <h3 className="text-xl font-black text-white">
-              {wasSkipped ? 'Reported & Replaced!' : 'Report Logged'}
-            </h3>
-            <p className="text-sm text-slate-400 max-w-xs leading-relaxed">
               {wasSkipped
+                ? 'Reported & Replaced!'
+                : provisionalRefund > 0
+                ? 'Provisional Elo Restored!'
+                : 'Report Logged'}
+            </h3>
+            {provisionalRefund > 0 && (
+              <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-500/20 border border-amber-500/40 text-amber-300 font-mono text-xs font-bold animate-pulse">
+                <span>🛡️ +{provisionalRefund.toFixed(1)} Elo Credited Pending Review</span>
+              </div>
+            )}
+            <p className="text-sm text-slate-400 max-w-xs leading-relaxed">
+              {provisionalRefund > 0
+                ? 'As an anti-frustration safeguard, your lost Elo has been provisionally credited back to your rating while moderators review the issue. If confirmed, this is locked in permanently with a bounty. If dismissed, the credit will be reverted.'
+                : wasSkipped
                 ? 'Your report was dispatched to the moderation hub. This question was skipped with zero Elo penalty, and a fresh question has been drawn.'
                 : 'Thank you for keeping the question bank accurate! Your report has been dispatched to the human moderation hub.'}
             </p>
@@ -130,14 +160,25 @@ export default function ReportQuestionModal({
                 Report Issue for Human Review
               </h2>
               <p className="text-xs text-slate-400 mt-1">
-                Question ID: <span className="font-mono text-amber-400 font-bold">{questionId}</span>
+                Question ID: <span className="font-mono text-amber-400 font-bold">{activeQuestionId}</span>
               </p>
             </div>
 
+            {/* Provisional Elo Safeguard Feature Callout */}
+            {selectedReason === 'WRONG_ANSWER' && (
+              <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded-2xl text-[11px] text-amber-300 flex items-center gap-2.5">
+                <Shield className="w-4 h-4 text-amber-400 shrink-0" />
+                <div className="leading-relaxed">
+                  <strong className="text-white block font-bold">Provisional Elo Safeguard Active:</strong>
+                  If you lost rating answering this question, your lost Elo is immediately credited back provisionally pending human moderation review.
+                </div>
+              </div>
+            )}
+
             {/* Snippet preview if available */}
-            {questionText && (
+            {activeQuestionText && (
               <div className="p-3 bg-[#141824] border border-white/5 rounded-2xl text-xs text-slate-400 line-clamp-2 italic">
-                "{questionText.replace(/<[^>]*>/g, '').slice(0, 150)}..."
+                "{activeQuestionText.replace(/<[^>]*>/g, '').slice(0, 150)}..."
               </div>
             )}
 

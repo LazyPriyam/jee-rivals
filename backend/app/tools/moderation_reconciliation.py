@@ -174,6 +174,17 @@ def reconcile_quarantined_question(
                 bonus_rp = 50
                 comp_type = "Activity-Adjusted Compensation + Bounty"
 
+            # Check if this user was a reporter who already received provisional Elo refund
+            rc.execute("""
+                SELECT provisional_elo_refunded FROM question_reports
+                WHERE question_id = ? AND reporter_id = ? AND provisional_elo_refunded > 0
+            """, (question_id, uid))
+            rep_prov_row = rc.fetchone()
+            prov_already_given = float(rep_prov_row["provisional_elo_refunded"] or 0.0) if rep_prov_row else 0.0
+
+            # Only refund remaining difference if refund_elo > prov_already_given to avoid double credit
+            net_refund_elo = max(0.0, round(refund_elo - prov_already_given, 1))
+
             # Apply to user profile
             subj_col = None
             if subject.lower() == "physics":
@@ -186,31 +197,42 @@ def reconcile_quarantined_question(
             if subj_col:
                 rc.execute(f"""
                     UPDATE users
-                    SET overall_elo = max(1000.0, overall_elo + ?),
-                        {subj_col} = max(1000.0, {subj_col} + ?),
+                    SET overall_elo = max(100.0, overall_elo + ?),
+                        {subj_col} = max(100.0, {subj_col} + ?),
                         weekly_rp = weekly_rp + ?
                     WHERE id = ?
-                """, (refund_elo, refund_elo, bonus_rp, uid))
+                """, (net_refund_elo, net_refund_elo, bonus_rp, uid))
             else:
                 rc.execute("""
                     UPDATE users
-                    SET overall_elo = max(1000.0, overall_elo + ?),
+                    SET overall_elo = max(100.0, overall_elo + ?),
                         weekly_rp = weekly_rp + ?
                     WHERE id = ?
-                """, (refund_elo, bonus_rp, uid))
+                """, (net_refund_elo, bonus_rp, uid))
 
             # Send In-App Notification
             notif_id = f"notif_{uuid.uuid4().hex[:12]}"
-            notif_title = f"🚩 Report Verified: {chapter}"
-            notif_msg = (
-                f"Question {question_id[:8]} was confirmed defective & quarantined. "
-                f"Full bonus marks awarded on test sheets, and +{refund_elo} Elo & +{bonus_rp} RP "
-                f"credited to your profile ({comp_type}). Thank you for keeping our question bank accurate!"
-            )
+            if prov_already_given > 0:
+                notif_title = f"🏆 Report Verified: {chapter}"
+                extra_elo_str = f" (+{net_refund_elo:.1f} additional Elo)" if net_refund_elo > 0 else ""
+                notif_msg = (
+                    f"Question #{question_id[:8]} defect was confirmed & quarantined! "
+                    f"Your provisional credit (+{prov_already_given:.1f} Elo) is now locked in permanently{extra_elo_str}, "
+                    f"plus +{bonus_rp} RP Question Bounty awarded to your profile. Thank you for protecting the question bank!"
+                )
+            else:
+                notif_title = f"🚩 Report Verified: {chapter}"
+                notif_msg = (
+                    f"Question {question_id[:8]} was confirmed defective & quarantined. "
+                    f"Full bonus marks awarded on test sheets, and +{refund_elo} Elo & +{bonus_rp} RP "
+                    f"credited to your profile ({comp_type}). Thank you for keeping our question bank accurate!"
+                )
             notif_details = json.dumps({
                 "question_id": question_id,
                 "chapter": chapter,
                 "refund_elo": refund_elo,
+                "provisional_locked": prov_already_given,
+                "net_refund_elo": net_refund_elo,
                 "bonus_rp": bonus_rp,
                 "action": "QUARANTINE"
             })
@@ -424,23 +446,41 @@ def reconcile_fixed_question(
             if not uid or uid.startswith("bot_"):
                 continue
 
-            # Award deserved rating
+            # Check if this user was a reporter who already received provisional Elo refund
+            rc.execute("""
+                SELECT provisional_elo_refunded FROM question_reports
+                WHERE question_id = ? AND reporter_id = ? AND provisional_elo_refunded > 0
+            """, (question_id, uid))
+            rep_prov_row = rc.fetchone()
+            prov_already_given = float(rep_prov_row["provisional_elo_refunded"] or 0.0) if rep_prov_row else 0.0
+
             earned_elo = 16.0
             bonus_rp = 35
+            net_earned_elo = max(0.0, round(earned_elo - prov_already_given, 1))
+
             rc.execute("""
                 UPDATE users
-                SET overall_elo = max(1000.0, overall_elo + ?),
+                SET overall_elo = max(100.0, overall_elo + ?),
                     weekly_rp = weekly_rp + ?
                 WHERE id = ?
-            """, (earned_elo, bonus_rp, uid))
+            """, (net_earned_elo, bonus_rp, uid))
 
             notif_id = f"notif_{uuid.uuid4().hex[:12]}"
-            notif_title = f"✓ Answer Key Corrected: {chapter}"
-            notif_msg = (
-                f"Question {question_id[:8]} answer key was corrected to '{clean_key}'. "
-                f"Your test result was upgraded to Correct (+4 marks), and +{earned_elo} Elo + {bonus_rp} RP "
-                f"awarded to your profile."
-            )
+            if prov_already_given > 0:
+                notif_title = f"🏆 Answer Key Corrected: {chapter}"
+                extra_elo_str = f" (+{net_earned_elo:.1f} additional Elo)" if net_earned_elo > 0 else ""
+                notif_msg = (
+                    f"Question #{question_id[:8]} official answer key was corrected to '{clean_key}'! "
+                    f"Your provisional credit (+{prov_already_given:.1f} Elo) is permanently locked in{extra_elo_str}, "
+                    f"plus +{bonus_rp} RP Question Bounty awarded. Thank you for your sharp eye!"
+                )
+            else:
+                notif_title = f"✓ Answer Key Corrected: {chapter}"
+                notif_msg = (
+                    f"Question {question_id[:8]} answer key was corrected to '{clean_key}'. "
+                    f"Your test result was upgraded to Correct (+4 marks), and +{earned_elo} Elo + {bonus_rp} RP "
+                    f"awarded to your profile."
+                )
             notif_details = json.dumps({
                 "question_id": question_id,
                 "chapter": chapter,

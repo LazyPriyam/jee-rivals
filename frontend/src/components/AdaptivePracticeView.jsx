@@ -32,7 +32,8 @@ import {
   Flag,
   Search,
   Layers,
-  Filter
+  Filter,
+  Shield
 } from 'lucide-react';
 import ReportQuestionModal from './ReportQuestionModal';
 
@@ -474,6 +475,31 @@ export default function AdaptivePracticeView({ user, onOpenAuth, onNavigateTab, 
       handleSessionError(err, 'Failed to replace question.');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleReportSuccess = (reportInfo) => {
+    const refund = Number(reportInfo?.provisional_elo_refunded || 0);
+    if (refund > 0) {
+      if (sound.levelUp) sound.levelUp();
+      // Instantly update session chapter Elo on the current view
+      setSession((prev) => prev ? {
+        ...prev,
+        current_elo: Math.round(Number(prev.current_elo || 1200) + refund)
+      } : prev);
+
+      // If reviewing the question solution right now, update elo_delta display
+      setResult((prev) => prev ? {
+        ...prev,
+        provisional_refund: refund,
+        session_elo_after: Math.round(Number(prev.session_elo_after || 1200) + refund)
+      } : prev);
+
+      // Re-sync user profile dynamically across Navbar and entire app
+      api.auth.getMe().then((freshUser) => {
+        if (onUpdateUser) onUpdateUser(freshUser);
+        window.dispatchEvent(new CustomEvent('jee_user_updated', { detail: freshUser }));
+      }).catch(() => {});
     }
   };
 
@@ -1358,13 +1384,32 @@ export default function AdaptivePracticeView({ user, onOpenAuth, onNavigateTab, 
                     <span className="text-[10px] uppercase block opacity-80">Rating Shift</span>
                     <span
                       className={`text-lg font-black ${
-                        result?.elo_delta >= 0 ? 'text-emerald-400' : 'text-red-400'
+                        result?.provisional_refund > 0
+                          ? 'text-amber-400'
+                          : result?.elo_delta >= 0
+                          ? 'text-emerald-400'
+                          : 'text-red-400'
                       }`}
                     >
-                      {result?.elo_delta >= 0 ? `+${result?.elo_delta}` : result?.elo_delta} ELO
+                      {result?.provisional_refund > 0
+                        ? `🛡️ +${result.provisional_refund.toFixed(1)} ELO`
+                        : result?.elo_delta >= 0
+                        ? `+${result?.elo_delta} ELO`
+                        : `${result?.elo_delta} ELO`}
                     </span>
                   </div>
                 </div>
+
+                {/* Active Provisional Refund Safeguard Banner */}
+                {result?.provisional_refund > 0 && (
+                  <div className="p-3 bg-amber-500/15 border border-amber-500/40 rounded-2xl flex items-center justify-between text-xs text-amber-200">
+                    <div className="flex items-center gap-2">
+                      <Shield className="w-4 h-4 text-amber-400 shrink-0" />
+                      <span><strong>Provisional Rating Restored:</strong> +{result.provisional_refund.toFixed(1)} Elo credited to your profile pending review.</span>
+                    </div>
+                    <span className="font-mono font-bold text-amber-400 bg-amber-500/20 px-2 py-0.5 rounded text-[10px]">SAFEGUARD ACTIVE</span>
+                  </div>
+                )}
 
                 {/* On-Demand Verified Derivation & Answer Key */}
                 <div className="pt-1">
@@ -1628,8 +1673,9 @@ export default function AdaptivePracticeView({ user, onOpenAuth, onNavigateTab, 
         questionId={question?.id}
         questionText={question?.text}
         mode="adaptive"
-        canSkip={true}
+        canSkip={!submitted}
         onSkip={handleSkipQuestion}
+        onReportSuccess={handleReportSuccess}
       />
     </div>
   );

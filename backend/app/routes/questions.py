@@ -304,8 +304,9 @@ def derive_question_solution(
 def report_question(question_id: str, report_data: QuestionReportRequest, user: Optional[dict] = Depends(get_optional_user)):
     conn = get_connection()
     c = conn.cursor()
-    c.execute("SELECT id FROM questions WHERE id = ?", (question_id,))
-    if not c.fetchone():
+    c.execute("SELECT id, subject, chapter FROM questions WHERE id = ?", (question_id,))
+    q_row = c.fetchone()
+    if not q_row:
         conn.close()
         raise HTTPException(status_code=404, detail="Question not found.")
 
@@ -314,13 +315,183 @@ def report_question(question_id: str, report_data: QuestionReportRequest, user: 
     reporter_id = user["id"] if user else "guest"
     reporter_name = user.get("username", "Guest Aspirant") if user else "Guest Aspirant"
 
+    provisional_elo = 0.0
+    rep_subject = q_row["subject"] if q_row else "General"
+    rep_chapter = q_row["chapter"] if q_row else "General"
+
+    # Only authenticated registered users receive rating adjustments and personal notifications
+    if user and user.get("id") and user["id"] != "guest":
+        uid = user["id"]
+
+        # Ensure notifications table exists
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS user_notifications (
+                id TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                type TEXT NOT NULL,
+                title TEXT NOT NULL,
+                message TEXT NOT NULL,
+                details TEXT DEFAULT '{}',
+                is_read INTEGER DEFAULT 0,
+                created_at TEXT NOT NULL
+            );
+        """)
+
+        # 1. Check if user already has an active pending report for this question that received provisional Elo
+        c.execute("""
+            SELECT id, provisional_elo_refunded FROM question_reports
+            WHERE question_id = ? AND reporter_id = ? AND status = 'PENDING' AND provisional_elo_refunded > 0
+        """, (question_id, uid))
+        prior_prov = c.fetchone()
+
+        if not prior_prov:
+            # 2. Check activity log for user's most recent attempt on this question
+            c.execute("""
+                SELECT elo_delta, is_correct, subject, chapter, mode FROM activity_log
+                WHERE user_id = ? AND question_id = ?
+                ORDER BY created_at DESC LIMIT 1
+            """, (uid, question_id))
+            att_row = c.fetchone()
+
+            if att_row:
+                if att_row["subject"]:
+                    rep_subject = att_row["subject"]
+                if att_row["chapter"]:
+                    rep_chapter = att_row["chapter"]
+
+                # If question was marked wrong or user suffered an Elo penalty
+                if att_row["is_correct"] == 0 or float(att_row["elo_delta"] or 0.0) < 0:
+                    lost_val = abs(float(att_row["elo_delta"] or 0.0))
+                    provisional_elo = round(lost_val if lost_val > 0 else 15.0, 1)
+            else:
+                # 3. Check active adaptive session history
+                c.execute("""
+                    SELECT history, subject FROM adaptive_sessions
+                    WHERE user_id = ? AND status = 'IN_PROGRESS'
+                    ORDER BY id DESC LIMIT 1
+                """, (uid,))
+                as_row = c.fetchone()
+                found_in_session = False
+                if as_row:
+                    if as_row["subject"]:
+                        rep_subject = as_row["subject"]
+                    try:
+                        raw_h = as_row["history"]
+                        h_list = json.loads(raw_h) if isinstance(raw_h, str) else (raw_h or [])
+                        for item in reversed(h_list):
+                            if item.get("question_id") == question_id:
+                                if item.get("chapter"):
+                                    rep_chapter = item.get("chapter")
+                                if not item.get("is_correct") or float(item.get("elo_delta") or 0.0) < 0:
+                                    lost_val = abs(float(item.get("elo_delta") or 0.0))
+                                    provisional_elo = round(lost_val if lost_val > 0 else 15.0, 1)
+                                found_in_session = True
+                                break
+                    except Exception:
+                        pass
+
+                if not found_in_session:
+                    # 4. Check room participants if attempted in an arena or test room
+                    c.execute("""
+                        SELECT rp.answers, r.id FROM room_participants rp
+                        JOIN rooms r ON rp.room_id = r.id
+                        WHERE rp.user_id = ? AND r.question_ids LIKE ?
+                        ORDER BY rp.rowid DESC LIMIT 1
+                    """, (uid, f"%{question_id}%"))
+                    rp_row = c.fetchone()
+                    if rp_row:
+                        provisional_elo = 15.0
+
+            # Apply provisional restoration if elo lost
+            if provisional_elo > 0:
+                subj_col = None
+                if "chem" in rep_subject.lower():
+                    subj_col = "chemistry_elo"
+                elif "math" in rep_subject.lower():
+                    subj_col = "math_elo"
+                elif "phys" in rep_subject.lower():
+                    subj_col = "physics_elo"
+
+                if subj_col:
+                    c.execute(f"""
+                        UPDATE users
+                        SET overall_elo = max(100.0, overall_elo + ?),
+                            {subj_col} = max(100.0, {subj_col} + ?)
+                        WHERE id = ?
+                    """, (provisional_elo, provisional_elo, uid))
+                else:
+                    c.execute("""
+                        UPDATE users
+                        SET overall_elo = max(100.0, overall_elo + ?)
+                        WHERE id = ?
+                    """, (provisional_elo, uid))
+
+                # Update user_chapter_elo if chapter is known
+                if rep_chapter and rep_chapter != "General":
+                    try:
+                        c.execute("""
+                            UPDATE user_chapter_elo
+                            SET elo = max(100.0, elo + ?)
+                            WHERE user_id = ? AND chapter = ?
+                        """, (provisional_elo, uid, rep_chapter))
+                    except Exception:
+                        pass
+
+                # Log activity refund
+                c.execute("""
+                    INSERT INTO activity_log (
+                        user_id, question_id, subject, chapter, is_correct,
+                        time_spent_seconds, elo_delta, mode, created_at
+                    ) VALUES (?, ?, ?, ?, 1, 0, ?, 'PROVISIONAL_REPORT_REFUND', ?)
+                """, (uid, question_id, rep_subject, rep_chapter, provisional_elo, now))
+
+                # In-App Notification
+                notif_id = f"notif_{uuid.uuid4().hex[:12]}"
+                notif_title = f"🛡️ Provisional Elo Restored (+{provisional_elo:.1f} Elo)"
+                notif_msg = (
+                    f"You flagged Question #{question_id[:8]} ({rep_chapter}) for {report_data.reason}. "
+                    f"As a provisional safeguard, +{provisional_elo:.1f} Elo has been credited to your rating pending human review. "
+                    f"If the defect is confirmed, your rating is locked in permanently with a bounty. "
+                    f"If the report is dismissed, this provisional credit will be reverted."
+                )
+                details_json = json.dumps({
+                    "question_id": question_id,
+                    "chapter": rep_chapter,
+                    "subject": rep_subject,
+                    "provisional_elo": provisional_elo,
+                    "action": "PROVISIONAL_REFUND"
+                })
+                c.execute("""
+                    INSERT INTO user_notifications (id, user_id, type, title, message, details, is_read, created_at)
+                    VALUES (?, ?, 'PROVISIONAL_ELO_RESTORED', ?, ?, ?, 0, ?)
+                """, (notif_id, uid, notif_title, notif_msg, details_json, now))
+
+    # Insert question report record
     c.execute("""
-        INSERT INTO question_reports (id, question_id, reporter_id, reporter_username, reason, notes, status, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, 'PENDING', ?)
-    """, (report_id, question_id, reporter_id, reporter_name, report_data.reason, report_data.notes or "", now))
+        INSERT INTO question_reports (
+            id, question_id, reporter_id, reporter_username, reason, notes,
+            status, created_at, provisional_elo_refunded, provisional_subject
+        )
+        VALUES (?, ?, ?, ?, ?, ?, 'PENDING', ?, ?, ?)
+    """, (
+        report_id, question_id, reporter_id, reporter_name,
+        report_data.reason, report_data.notes or "", now,
+        provisional_elo, rep_subject
+    ))
     conn.commit()
     conn.close()
-    return {"success": True, "message": "Report submitted successfully.", "report_id": report_id}
+
+    success_msg = (
+        f"Report submitted. +{provisional_elo:.1f} Elo provisionally restored pending review."
+        if provisional_elo > 0
+        else "Report submitted successfully."
+    )
+    return {
+        "success": True,
+        "message": success_msg,
+        "report_id": report_id,
+        "provisional_elo_refunded": provisional_elo
+    }
 
 
 @router.get("/reports/summary")
@@ -383,7 +554,9 @@ def get_all_reports(
             COALESCE(q.has_diagram, 0) as has_diagram,
             q.diagram_urls,
             COALESCE(q.difficulty_tier, 'MEDIUM') as difficulty_tier,
-            COALESCE(q.validation_status, 'UNKNOWN') as validation_status
+            COALESCE(q.validation_status, 'UNKNOWN') as validation_status,
+            COALESCE(qr.provisional_elo_refunded, 0.0) as provisional_elo_refunded,
+            COALESCE(qr.provisional_subject, '') as provisional_subject
         FROM question_reports qr
         LEFT JOIN questions q ON qr.question_id = q.id
     """
@@ -514,6 +687,67 @@ def dismiss_reports(question_id: str, admin: bool = Depends(verify_admin_sync)):
     now = datetime.datetime.utcnow().isoformat()
     resolver = "Admin (GUI)"
 
+    # Find pending reports for this question that had provisional Elo restored
+    c.execute("""
+        SELECT id, reporter_id, reporter_username, provisional_elo_refunded, provisional_subject
+        FROM question_reports
+        WHERE question_id = ? AND status = 'PENDING' AND provisional_elo_refunded > 0
+    """, (question_id,))
+    refunded_reports = [dict(r) for r in c.fetchall()]
+
+    for rep in refunded_reports:
+        uid = rep["reporter_id"]
+        val = float(rep["provisional_elo_refunded"] or 0.0)
+        subj = rep.get("provisional_subject") or "General"
+        if uid and uid != "guest" and val > 0:
+            subj_col = None
+            if "chem" in subj.lower():
+                subj_col = "chemistry_elo"
+            elif "math" in subj.lower():
+                subj_col = "math_elo"
+            elif "phys" in subj.lower():
+                subj_col = "physics_elo"
+
+            if subj_col:
+                c.execute(f"""
+                    UPDATE users
+                    SET overall_elo = max(100.0, overall_elo - ?),
+                        {subj_col} = max(100.0, {subj_col} - ?)
+                    WHERE id = ?
+                """, (val, val, uid))
+            else:
+                c.execute("""
+                    UPDATE users
+                    SET overall_elo = max(100.0, overall_elo - ?)
+                    WHERE id = ?
+                """, (val, uid))
+
+            # Record clawback in activity_log
+            c.execute("""
+                INSERT INTO activity_log (
+                    user_id, question_id, subject, chapter, is_correct,
+                    time_spent_seconds, elo_delta, mode, created_at
+                ) VALUES (?, ?, ?, 'General', 0, 0, ?, 'REPORT_DISMISSED_REVERSION', ?)
+            """, (uid, question_id, subj, -val, now))
+
+            # Dispatch In-App Notification alerting the student of the reversion
+            notif_id = f"notif_{uuid.uuid4().hex[:12]}"
+            notif_title = f"⚖️ Report Dismissed: Question #{question_id[:8]}"
+            notif_msg = (
+                f"Your report for Question #{question_id[:8]} was reviewed by moderators and dismissed "
+                f"(the official answer key and problem formulation were verified as correct). "
+                f"The provisional safeguard credit of {val:.1f} Elo has been reverted."
+            )
+            details_json = json.dumps({
+                "question_id": question_id,
+                "reverted_elo": val,
+                "action": "DISMISSED"
+            })
+            c.execute("""
+                INSERT INTO user_notifications (id, user_id, type, title, message, details, is_read, created_at)
+                VALUES (?, ?, 'REPORT_DISMISSED', ?, ?, ?, 0, ?)
+            """, (notif_id, uid, notif_title, notif_msg, details_json, now))
+
     c.execute("""
         UPDATE question_reports 
         SET status = 'DISMISSED', resolved_at = ?, resolved_by = ? 
@@ -521,7 +755,11 @@ def dismiss_reports(question_id: str, admin: bool = Depends(verify_admin_sync)):
     """, (now, resolver, question_id))
     conn.commit()
     conn.close()
-    return {"success": True, "message": f"Reports for question {question_id} dismissed."}
+    return {
+        "success": True,
+        "message": f"Reports for question {question_id} dismissed. {len(refunded_reports)} provisional refunds reverted.",
+        "reverted_count": len(refunded_reports)
+    }
 
 
 @router.post("/{question_id}/restore")

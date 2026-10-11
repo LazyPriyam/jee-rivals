@@ -506,40 +506,71 @@ export default function NotificationPanel({
                       </div>
 
                       <div className="space-y-2">
-                        {data.moderation_updates.map((m) => (
-                          <div
-                            key={m.id}
-                            className="p-3 bg-emerald-950/30 border border-emerald-500/40 rounded-2xl shadow-md relative group"
-                          >
-                            <div className="flex items-start justify-between gap-2">
-                              <div className="flex items-start gap-2.5">
-                                <div className="w-7 h-7 rounded-xl bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 flex items-center justify-center text-xs shrink-0 mt-0.5 font-bold">
-                                  ✨
+                        {data.moderation_updates.map((m) => {
+                          const isProvisional = m.type === 'PROVISIONAL_ELO_RESTORED';
+                          const isDismissed = m.type === 'REPORT_DISMISSED';
+
+                          const cardClass = isDismissed
+                            ? 'bg-rose-950/25 border-rose-500/35'
+                            : isProvisional
+                            ? 'bg-amber-950/30 border-amber-500/40'
+                            : 'bg-emerald-950/30 border-emerald-500/40';
+
+                          const iconClass = isDismissed
+                            ? 'bg-rose-500/20 border-rose-500/40 text-rose-300'
+                            : isProvisional
+                            ? 'bg-amber-500/20 border-amber-500/40 text-amber-300'
+                            : 'bg-emerald-500/20 border-emerald-500/40 text-emerald-300';
+
+                          const badgeText = isDismissed
+                            ? 'Report Dismissed • Credit Reverted'
+                            : isProvisional
+                            ? 'Provisional Safeguard • Pending Review'
+                            : 'System Verified & Credited';
+
+                          const badgeColor = isDismissed
+                            ? 'text-rose-400/90'
+                            : isProvisional
+                            ? 'text-amber-400/90'
+                            : 'text-emerald-400/80';
+
+                          const iconEmoji = isDismissed ? '⚖️' : isProvisional ? '🛡️' : '✨';
+
+                          return (
+                            <div
+                              key={m.id}
+                              className={`p-3 border rounded-2xl shadow-md relative group ${cardClass}`}
+                            >
+                              <div className="flex items-start justify-between gap-2">
+                                <div className="flex items-start gap-2.5">
+                                  <div className={`w-7 h-7 rounded-xl border flex items-center justify-center text-xs shrink-0 mt-0.5 font-bold ${iconClass}`}>
+                                    {iconEmoji}
+                                  </div>
+                                  <div>
+                                    <span className="font-bold text-xs text-white block">
+                                      {m.title}
+                                    </span>
+                                    <p className="text-[11px] text-slate-300 mt-1 leading-relaxed">
+                                      {m.message}
+                                    </p>
+                                    <span className={`text-[9px] font-mono mt-1.5 block font-bold ${badgeColor}`}>
+                                      {badgeText}
+                                    </span>
+                                  </div>
                                 </div>
-                                <div>
-                                  <span className="font-bold text-xs text-white block">
-                                    {m.title}
-                                  </span>
-                                  <p className="text-[11px] text-slate-300 mt-1 leading-relaxed">
-                                    {m.message}
-                                  </p>
-                                  <span className="text-[9px] text-emerald-400/80 font-mono mt-1.5 block">
-                                    System Verified & Credited
-                                  </span>
-                                </div>
+                                <button
+                                  type="button"
+                                  disabled={processingId === m.id}
+                                  onClick={() => handleDismissNotification(m.id)}
+                                  className="p-1.5 text-slate-400 hover:text-white rounded-lg hover:bg-white/10 transition cursor-pointer shrink-0"
+                                  title="Dismiss notification"
+                                >
+                                  <Check className="w-3.5 h-3.5 text-emerald-400" />
+                                </button>
                               </div>
-                              <button
-                                type="button"
-                                disabled={processingId === m.id}
-                                onClick={() => handleDismissNotification(m.id)}
-                                className="p-1.5 text-slate-400 hover:text-white rounded-lg hover:bg-white/10 transition cursor-pointer shrink-0"
-                                title="Dismiss notification"
-                              >
-                                <Check className="w-3.5 h-3.5 text-emerald-400" />
-                              </button>
                             </div>
-                          </div>
-                        ))}
+                          );
+                        })}
                       </div>
                     </div>
                   )}
