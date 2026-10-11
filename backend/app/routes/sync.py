@@ -180,7 +180,13 @@ def get_existing_question_ids(
     c.execute(query, tuple(params))
     ids = [r[0] for r in c.fetchall()]
     conn.close()
-    return {"total": len(ids), "ids": ids}
+    return {
+        "total": len(ids),
+        "ids": ids,
+        "filtered": bool(subject or chapter),
+        "subject": subject,
+        "chapter": chapter
+    }
 
 
 @router.post("/questions/delete-batch")
