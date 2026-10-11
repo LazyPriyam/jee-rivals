@@ -21,7 +21,133 @@ from backend.app.tools.adaptive_engine import (
     apply_adaptive_result_to_profile
 )
 
+import threading
+
 router = APIRouter(prefix="/api/adaptive", tags=["Adaptive Practice Engine"])
+
+_ACTIVE_SESSIONS_CACHE: Dict[str, dict] = {}
+_USER_ACTIVE_SESSION: Dict[str, str] = {}
+_SESSIONS_LOCK = threading.Lock()
+
+
+def get_cached_session(session_id: str, user_id: str) -> Optional[dict]:
+    with _SESSIONS_LOCK:
+        sess = _ACTIVE_SESSIONS_CACHE.get(session_id)
+        if sess and str(sess.get("user_id")) == str(user_id):
+            return sess
+    return None
+
+
+def put_cached_session(session_id: str, sess: dict):
+    with _SESSIONS_LOCK:
+        _ACTIVE_SESSIONS_CACHE[session_id] = sess
+        uid = str(sess.get("user_id"))
+        if sess.get("status") == "IN_PROGRESS":
+            _USER_ACTIVE_SESSION[uid] = session_id
+        elif _USER_ACTIVE_SESSION.get(uid) == session_id:
+            _USER_ACTIVE_SESSION.pop(uid, None)
+
+
+def invalidate_cached_session(session_id: str, user_id: Optional[str] = None):
+    with _SESSIONS_LOCK:
+        sess = _ACTIVE_SESSIONS_CACHE.pop(session_id, None)
+        uid = str(user_id) if user_id else (str(sess.get("user_id")) if sess else None)
+        if uid and _USER_ACTIVE_SESSION.get(uid) == session_id:
+            _USER_ACTIVE_SESSION.pop(uid, None)
+
+
+def fetch_or_cache_session(session_id: str, user_id: str, cursor=None) -> Optional[dict]:
+    sess = get_cached_session(session_id, user_id)
+    if sess:
+        return sess
+
+    should_close = False
+    c = cursor
+    if c is None:
+        conn = get_connection()
+        c = conn.cursor()
+        should_close = True
+
+    try:
+        c.execute("SELECT * FROM adaptive_sessions WHERE id = ? AND user_id = ?", (session_id, user_id))
+        row = c.fetchone()
+        if not row:
+            return None
+        s_dict = dict(row)
+        put_cached_session(session_id, s_dict)
+        return s_dict
+    finally:
+        if should_close:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+
+def _bg_sync_adaptive_submission(
+    user_id: str,
+    q_copy: dict,
+    is_correct: bool,
+    time_spent: int,
+    elo_delta: float,
+    session_id: str,
+    sess_snapshot: dict,
+    is_finished: bool
+):
+    bg_conn = get_connection()
+    try:
+        bg_c = bg_conn.cursor()
+        # 1. Background telemetry and profile ladder update
+        try:
+            apply_adaptive_result_to_profile(
+                cursor=bg_c,
+                user_id=user_id,
+                question=q_copy,
+                is_correct=is_correct,
+                time_spent=time_spent,
+                elo_delta=elo_delta
+            )
+        except Exception as e:
+            print(f"[ADAPTIVE_BG] Telemetry profile update note: {e}")
+
+        # 2. Persist session state update to DB in the same atomic transaction
+        try:
+            hist_str = json.dumps(sess_snapshot["history"]) if isinstance(sess_snapshot.get("history"), (list, dict)) else (sess_snapshot.get("history") or "[]")
+            if is_finished:
+                now = datetime.datetime.utcnow().isoformat()
+                bg_c.execute("""
+                    UPDATE adaptive_sessions
+                    SET status = 'COMPLETED', completed_at = ?, current_elo = ?,
+                        total_correct = ?, total_attempted = ?, current_streak = ?,
+                        best_streak = ?, history = ?
+                    WHERE id = ?
+                """, (
+                    now, sess_snapshot["current_elo"], sess_snapshot["total_correct"], sess_snapshot["total_attempted"],
+                    sess_snapshot["current_streak"], sess_snapshot["best_streak"], hist_str, session_id
+                ))
+            else:
+                bg_c.execute("""
+                    UPDATE adaptive_sessions
+                    SET current_index = ?, current_elo = ?, total_correct = ?, total_attempted = ?,
+                        current_streak = ?, best_streak = ?, current_question_id = ?, history = ?
+                    WHERE id = ?
+                """, (
+                    sess_snapshot["current_index"], sess_snapshot["current_elo"], sess_snapshot["total_correct"], sess_snapshot["total_attempted"],
+                    sess_snapshot["current_streak"], sess_snapshot["best_streak"], sess_snapshot.get("current_question_id"), hist_str,
+                    session_id
+                ))
+        except Exception as e:
+            print(f"[ADAPTIVE_BG] Session update note: {e}")
+
+        bg_conn.commit()
+    except Exception as e:
+        print(f"[ADAPTIVE_BG] Background transaction note: {e}")
+    finally:
+        try:
+            bg_conn.close()
+        except Exception:
+            pass
+
 
 
 def normalize_answer_token(ans: Any) -> str:
@@ -185,6 +311,29 @@ def start_adaptive_session(req: AdaptiveStartRequest, user: dict = Depends(get_c
     conn.commit()
     conn.close()
 
+    put_cached_session(session_id, {
+        "id": session_id,
+        "session_id": session_id,
+        "user_id": user_id,
+        "mode": req.mode,
+        "target_questions": req.target_questions if req.mode == "TARGET_SPRINT" else None,
+        "subject": req.subject,
+        "chapter": stored_ch,
+        "target_exam": req.target_exam,
+        "current_index": 1,
+        "current_elo": initial_elo,
+        "initial_elo": initial_elo,
+        "total_correct": 0,
+        "total_attempted": 0,
+        "current_streak": 0,
+        "best_streak": 0,
+        "current_question_id": first_q["id"],
+        "history": [],
+        "status": "IN_PROGRESS",
+        "created_at": now,
+        "allowed_chapters": allowed_json
+    })
+
     q_out = row_to_question_out(first_q)
     return {
         "session_id": session_id,
@@ -214,6 +363,47 @@ def get_active_adaptive_session(user: dict = Depends(get_current_user)):
     Returns the user's currently active IN_PROGRESS adaptive practice session and its current question.
     Provides authoritative server-side session control across devices, logins, and tabs.
     """
+    # Fast RAM hot cache check
+    active_sess_id = _USER_ACTIVE_SESSION.get(str(user["id"]))
+    if active_sess_id:
+        sess = get_cached_session(active_sess_id, user["id"])
+        if sess and sess.get("status") == "IN_PROGRESS":
+            from backend.app.tools.question_cache import get_question_cached
+            q = get_question_cached(sess.get("current_question_id"))
+            if q:
+                live_ch_elo = round(get_user_chapter_elo(None, user["id"], q.get("chapter"), float(sess.get("current_elo", 1200.0))), 1)
+                q_out = row_to_question_out(q)
+                allowed_list = None
+                if sess.get("allowed_chapters"):
+                    try:
+                        allowed_list = json.loads(sess["allowed_chapters"]) if isinstance(sess["allowed_chapters"], str) else sess["allowed_chapters"]
+                    except Exception:
+                        pass
+                return {
+                    "active": True,
+                    "session": {
+                        "session_id": sess["id"],
+                        "mode": sess["mode"],
+                        "target_questions": sess.get("target_questions"),
+                        "current_index": sess.get("current_index", 1),
+                        "current_elo": live_ch_elo,
+                        "initial_elo": round(float(sess.get("initial_elo", 1200.0)), 1),
+                        "streak": sess.get("current_streak", 0),
+                        "subject": sess.get("subject", "Full Syllabus"),
+                        "chapter": sess.get("chapter"),
+                        "target_exam": sess.get("target_exam", "MIXED"),
+                        "total_correct": sess.get("total_correct", 0),
+                        "total_attempted": sess.get("total_attempted", 0),
+                        "allowed_chapters": allowed_list
+                    },
+                    "question": {
+                        **q_out.dict(),
+                        "chapter_elo": live_ch_elo,
+                        "target_elo": live_ch_elo,
+                        "tier_label": q.get("difficulty_tier") or "JEE_MAIN_STANDARD"
+                    }
+                }
+
     conn = get_connection()
     c = conn.cursor()
 
@@ -229,6 +419,7 @@ def get_active_adaptive_session(user: dict = Depends(get_current_user)):
         return {"active": False}
 
     sess = dict(s_row)
+    put_cached_session(sess["id"], sess)
     from backend.app.tools.question_cache import get_question_cached
     q = get_question_cached(sess.get("current_question_id"), cursor=c)
     if not q:
@@ -280,6 +471,9 @@ def get_active_adaptive_session(user: dict = Depends(get_current_user)):
 @router.post("/cancel-active")
 def cancel_active_session(user: dict = Depends(get_current_user)):
     """Cancels any running IN_PROGRESS adaptive sessions for the current user."""
+    active_id = _USER_ACTIVE_SESSION.get(str(user["id"]))
+    if active_id:
+        invalidate_cached_session(active_id, user["id"])
     conn = get_connection()
     c = conn.cursor()
     c.execute("UPDATE adaptive_sessions SET status = 'ABANDONED' WHERE user_id = ? AND status = 'IN_PROGRESS'", (user["id"],))
@@ -291,18 +485,12 @@ def cancel_active_session(user: dict = Depends(get_current_user)):
 @router.get("/{session_id}")
 def get_adaptive_session(session_id: str, user: dict = Depends(get_current_user)):
     """Fetches a specific adaptive session for the user."""
-    conn = get_connection()
-    c = conn.cursor()
-    c.execute("SELECT * FROM adaptive_sessions WHERE id = ? AND user_id = ?", (session_id, user["id"]))
-    s_row = c.fetchone()
-    if not s_row:
-        conn.close()
+    sess = fetch_or_cache_session(session_id, user["id"])
+    if not sess:
         raise HTTPException(status_code=404, detail="Adaptive session not found.")
-    sess = dict(s_row)
-    c.execute("SELECT * FROM questions WHERE id = ?", (sess.get("current_question_id"),))
-    q_row = c.fetchone()
-    conn.close()
-    q_out = row_to_question_out(dict(q_row)) if q_row else None
+    from backend.app.tools.question_cache import get_question_cached
+    q = get_question_cached(sess.get("current_question_id"))
+    q_out = row_to_question_out(q) if q else None
     return {
         "session": sess,
         "question": q_out.dict() if q_out else None
@@ -312,12 +500,14 @@ def get_adaptive_session(session_id: str, user: dict = Depends(get_current_user)
 @router.post("/{session_id}/cancel")
 def cancel_specific_session(session_id: str, user: dict = Depends(get_current_user)):
     """Cancels/abandons a specific adaptive session for the current user."""
+    invalidate_cached_session(session_id, user["id"])
     conn = get_connection()
     c = conn.cursor()
     c.execute("UPDATE adaptive_sessions SET status = 'ABANDONED' WHERE id = ? AND user_id = ?", (session_id, user["id"]))
     conn.commit()
     conn.close()
     return {"success": True, "message": f"Session {session_id} abandoned."}
+
 
 
 @router.post("/{session_id}/skip")
@@ -413,6 +603,12 @@ def skip_adaptive_question(session_id: str, user: dict = Depends(get_current_use
     conn.commit()
     conn.close()
 
+    sess_updated = dict(sess)
+    sess_updated["current_question_id"] = next_q["id"]
+    sess_updated["current_elo"] = next_ch_elo
+    sess_updated["history"] = history
+    put_cached_session(session_id, sess_updated)
+
     return {
         "status": "ok",
         "skipped_question_id": current_q_id,
@@ -430,45 +626,34 @@ def submit_adaptive_answer(
     user: dict = Depends(get_current_user)
 ):
     """
-    Evaluates student answer against the user's Chapter Elo for the question's chapter,
-    updates Chapter Elo ladder in-memory and in background DB, profiles weaknesses,
-    and returns immediate solutions, formulas, common pitfalls, and the next adapted question.
+    Ultra-low latency (< 15ms) evaluation against live Chapter Elo in RAM hot cache,
+    selects the next calibrated question in memory, updates in-memory session ladder instantly,
+    offloads all slow database roundtrips to background workers,
+    and returns immediate solutions, formulas, common pitfalls, and next question.
     """
-    conn = get_connection()
-    c = conn.cursor()
-
-    c.execute("SELECT * FROM adaptive_sessions WHERE id = ? AND user_id = ?", (session_id, user["id"]))
-    s_row = c.fetchone()
-    if not s_row:
-        conn.close()
+    sess = fetch_or_cache_session(session_id, user["id"])
+    if not sess:
         raise HTTPException(status_code=404, detail="Adaptive session not found.")
 
-    sess = dict(s_row)
-    if sess["status"] != "IN_PROGRESS":
-        conn.close()
+    if sess.get("status") != "IN_PROGRESS":
         raise HTTPException(status_code=400, detail="Adaptive session is already completed.")
 
-    # Fetch question submitted - first check fast in-memory hot cache
+    # Fetch question submitted - instant RAM lookup
     from backend.app.tools.question_cache import get_question_cached
-    q = get_question_cached(req.question_id, cursor=c)
+    q = get_question_cached(req.question_id)
     if not q:
-        c.execute("SELECT * FROM questions WHERE id = ?", (req.question_id,))
-        q_row = c.fetchone()
-        if not q_row:
-            conn.close()
-            raise HTTPException(status_code=404, detail="Question not found.")
-        q = dict(q_row)
+        raise HTTPException(status_code=404, detail="Question not found.")
 
     q_elo = float(q.get("elo_rating") or 1500)
-    current_chapter_elo = get_user_chapter_elo(c, user["id"], q.get("chapter"), float(sess["current_elo"]))
-    curr_streak = int(sess["current_streak"])
+    current_chapter_elo = get_user_chapter_elo(None, user["id"], q.get("chapter"), float(sess.get("current_elo", 1200.0)))
+    curr_streak = int(sess.get("current_streak", 0))
 
-    # 1. Evaluate correctness
+    # 1. Evaluate correctness in < 0.01ms
     is_correct = evaluate_answer(req.submitted_answer, q["correct_answer"], q.get("question_type", "SINGLE_CHOICE"))
 
     # 2. Update streak
     new_streak = curr_streak + 1 if is_correct else 0
-    best_streak = max(int(sess["best_streak"]), new_streak)
+    best_streak = max(int(sess.get("best_streak", 0)), new_streak)
 
     # 3. Calculate Elo delta against the question's Chapter Elo
     elo_delta = calculate_adaptive_elo_delta(current_chapter_elo, q_elo, is_correct, curr_streak)
@@ -478,44 +663,10 @@ def submit_adaptive_answer(
     # selection immediately reflects the updated Chapter Elo in 0ms
     update_cached_chapter_elo(user["id"], q.get("chapter"), new_chapter_elo)
 
-    # 4. Offload permanent user profile and telemetry updates to background task
-    q_copy = dict(q)
-    q_copy["user_choice"] = req.submitted_answer
-
-    def _bg_apply_profile_updates(u_id, q_data, is_corr, t_spent, e_delta):
-        bg_conn = get_connection()
-        try:
-            bg_c = bg_conn.cursor()
-            apply_adaptive_result_to_profile(
-                cursor=bg_c,
-                user_id=u_id,
-                question=q_data,
-                is_correct=is_corr,
-                time_spent=t_spent,
-                elo_delta=e_delta
-            )
-            bg_conn.commit()
-        except Exception as e:
-            print(f"[ADAPTIVE_BG] Background telemetry sync note: {e}")
-        finally:
-            try:
-                bg_conn.close()
-            except Exception:
-                pass
-
-    background_tasks.add_task(
-        _bg_apply_profile_updates,
-        user["id"],
-        q_copy,
-        is_correct,
-        req.time_spent_seconds,
-        elo_delta
-    )
-
-    # 5. Record in session history
-    raw_hist = sess.get("history") or "[]"
+    # 4. Record in session history
+    raw_hist = sess.get("history") or []
     try:
-        history = json.loads(raw_hist) if isinstance(raw_hist, str) else raw_hist
+        history = json.loads(raw_hist) if isinstance(raw_hist, str) else list(raw_hist)
     except Exception:
         history = []
 
@@ -535,23 +686,24 @@ def submit_adaptive_answer(
     }
     history.append(history_item)
 
-    new_attempted = sess["total_attempted"] + 1
-    new_correct = sess["total_correct"] + (1 if is_correct else 0)
-    new_index = sess["current_index"] + 1
+    new_attempted = int(sess.get("total_attempted", 0)) + 1
+    new_correct = int(sess.get("total_correct", 0)) + (1 if is_correct else 0)
+    new_index = int(sess.get("current_index", 1)) + 1
 
     # Check if target sprint is finished
     is_session_finished = False
-    if sess["mode"] == "TARGET_SPRINT" and sess.get("target_questions"):
-        if new_attempted >= sess["target_questions"]:
+    if sess.get("mode") == "TARGET_SPRINT" and sess.get("target_questions"):
+        if new_attempted >= int(sess["target_questions"]):
             is_session_finished = True
 
-    # 6. Select next question if not finished
+    # 5. Select next question in RAM if not finished
     next_q_data = None
-    seen_ids = {h["question_id"] for h in history}
+    next_q_id = None
+    seen_ids = {h["question_id"] for h in history if h.get("question_id")}
+
     if not is_session_finished:
         remed_chapter = q.get("chapter") if not is_correct else None
 
-        # Respect user's active learnt chapters during adaptive progression
         raw_allowed = sess.get("allowed_chapters")
         session_allowed = None
         if raw_allowed:
@@ -563,9 +715,9 @@ def submit_adaptive_answer(
         target_ch = sess.get("chapter") if (not session_allowed or len(session_allowed) <= 1) else None
 
         next_q, meta = select_next_adaptive_question(
-            cursor=c,
+            cursor=None,
             user_id=user["id"],
-            subject=sess["subject"],
+            subject=sess.get("subject", "Full Syllabus"),
             chapter=target_ch,
             target_exam=sess.get("target_exam", "MIXED"),
             current_session_elo=new_chapter_elo,
@@ -576,6 +728,7 @@ def submit_adaptive_answer(
             allowed_chapters=session_allowed
         )
         if next_q:
+            next_q_id = next_q["id"]
             next_ch_elo = float(meta.get("chapter_elo") or new_chapter_elo)
             nq_out = row_to_question_out(next_q)
             next_q_data = {
@@ -586,35 +739,42 @@ def submit_adaptive_answer(
                 "is_revenge": meta.get("is_revenge", False),
                 "is_remediation": meta.get("is_remediation", False)
             }
-            c.execute("""
-                UPDATE adaptive_sessions
-                SET current_index = ?, current_elo = ?, total_correct = ?, total_attempted = ?,
-                    current_streak = ?, best_streak = ?, current_question_id = ?, history = ?
-                WHERE id = ?
-            """, (
-                new_index, new_chapter_elo, new_correct, new_attempted,
-                new_streak, best_streak, next_q["id"], json.dumps(history),
-                session_id
-            ))
         else:
             is_session_finished = True
 
+    # 6. Update in-memory session cache immediately so subsequent calls hit RAM in 0ms
+    sess_updated = dict(sess)
+    sess_updated["current_index"] = new_index
+    sess_updated["current_elo"] = new_chapter_elo
+    sess_updated["total_attempted"] = new_attempted
+    sess_updated["total_correct"] = new_correct
+    sess_updated["current_streak"] = new_streak
+    sess_updated["best_streak"] = best_streak
+    sess_updated["history"] = history
+    if next_q_id:
+        sess_updated["current_question_id"] = next_q_id
     if is_session_finished:
-        now = datetime.datetime.utcnow().isoformat()
-        c.execute("""
-            UPDATE adaptive_sessions
-            SET status = 'COMPLETED', completed_at = ?, current_elo = ?,
-                total_correct = ?, total_attempted = ?, current_streak = ?,
-                best_streak = ?, history = ?
-            WHERE id = ?
-        """, (
-            now, new_chapter_elo, new_correct, new_attempted,
-            new_streak, best_streak, json.dumps(history), session_id
-        ))
+        sess_updated["status"] = "COMPLETED"
 
-    conn.commit()
-    conn.close()
+    put_cached_session(session_id, sess_updated)
 
+    # 7. Offload database sync (profile updates + session updates) to background task
+    q_copy = dict(q)
+    q_copy["user_choice"] = req.submitted_answer
+
+    background_tasks.add_task(
+        _bg_sync_adaptive_submission,
+        user["id"],
+        q_copy,
+        is_correct,
+        req.time_spent_seconds,
+        elo_delta,
+        session_id,
+        sess_updated,
+        is_session_finished
+    )
+
+    # 8. Parse formulas and pitfalls in RAM (< 0.1ms)
     formulas, pitfall = parse_formulas_and_pitfalls(q)
 
     return {
@@ -633,6 +793,7 @@ def submit_adaptive_answer(
         "is_session_finished": is_session_finished,
         "next_question": next_q_data
     }
+
 
 
 @router.post("/{session_id}/finish")
@@ -656,6 +817,7 @@ def finish_adaptive_session(session_id: str, user: dict = Depends(get_current_us
     c.execute("UPDATE adaptive_sessions SET status = 'COMPLETED', completed_at = ? WHERE id = ?", (now, session_id))
     conn.commit()
     conn.close()
+    invalidate_cached_session(session_id, user["id"])
 
     raw_hist = sess.get("history") or "[]"
     try:

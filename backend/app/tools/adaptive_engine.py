@@ -8,6 +8,7 @@ from typing import Optional, List, Dict, Any, Tuple, Set
 _WEAK_CHAPTERS_CACHE: Dict[Tuple[str, str], Tuple[float, List[str]]] = {}
 _REVENGE_QIDS_CACHE: Dict[Tuple[str, str, str], Tuple[float, Set[str]]] = {}
 _USER_CHAPTER_ELOS_CACHE: Dict[str, Tuple[float, Dict[str, float]]] = {}
+_FSRS_DUE_CACHE: Dict[Tuple[str, str], Tuple[float, Optional[dict]]] = {}
 
 
 def invalidate_adaptive_chapter_elo_cache(user_id: Optional[str] = None):
@@ -21,31 +22,49 @@ def invalidate_adaptive_chapter_elo_cache(user_id: Optional[str] = None):
 def get_user_chapter_elo_map(cursor, user_id: str) -> Dict[str, float]:
     """
     Returns a normalized map of {chapter_name: chapter_elo} from user_chapter_elo,
-    cached in RAM for 60s (and updated immediately in-memory on adaptive submit).
+    cached in RAM for 300s (and updated immediately in-memory on adaptive submit).
     """
     uid = str(user_id)
     now_t = time.time()
     cached = _USER_CHAPTER_ELOS_CACHE.get(uid)
-    if cached and (now_t - cached[0]) < 60.0:
+    if cached and (now_t - cached[0]) < 300.0:
         return cached[1]
 
     from backend.app.tools.jee_syllabus import normalize_chapter_name
     chap_map: Dict[str, float] = {}
-    try:
-        cursor.execute("""
-            SELECT chapter, elo FROM user_chapter_elo
-            WHERE user_id = ?
-        """, (uid,))
-        for r in cursor.fetchall():
-            ch_raw = r["chapter"]
-            elo_val = float(r["elo"] or 1200.0)
-            if ch_raw:
-                chap_map[ch_raw] = elo_val
-                norm_c = normalize_chapter_name(ch_raw)
-                if norm_c:
-                    chap_map[norm_c] = elo_val
-    except Exception:
-        pass
+    should_close = False
+    c = cursor
+    if c is None:
+        try:
+            from backend.app.database import get_connection
+            conn = get_connection()
+            c = conn.cursor()
+            should_close = True
+        except Exception:
+            c = None
+
+    if c is not None:
+        try:
+            c.execute("""
+                SELECT chapter, elo FROM user_chapter_elo
+                WHERE user_id = ?
+            """, (uid,))
+            for r in c.fetchall():
+                ch_raw = r["chapter"]
+                elo_val = float(r["elo"] or 1200.0)
+                if ch_raw:
+                    chap_map[ch_raw] = elo_val
+                    norm_c = normalize_chapter_name(ch_raw)
+                    if norm_c:
+                        chap_map[norm_c] = elo_val
+        except Exception:
+            pass
+        finally:
+            if should_close:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
 
     _USER_CHAPTER_ELOS_CACHE[uid] = (now_t, chap_map)
     return chap_map
@@ -140,74 +159,124 @@ def get_user_weak_chapters(cursor, user_id: str, subject: Optional[str] = None) 
     """
     Identifies chapters where the user's historical accuracy is under 60%
     or where they have incurred recent mistakes in activity_log.
+    Cached in RAM for 600s to eliminate redundant queries during active circuits.
     """
     cache_key = (str(user_id), str(subject or "ALL"))
     now_t = time.time()
-    if cache_key in _WEAK_CHAPTERS_CACHE and (now_t - _WEAK_CHAPTERS_CACHE[cache_key][0]) < 60:
+    if cache_key in _WEAK_CHAPTERS_CACHE and (now_t - _WEAK_CHAPTERS_CACHE[cache_key][0]) < 600.0:
         return _WEAK_CHAPTERS_CACHE[cache_key][1]
 
-    query = """
-        SELECT chapter,
-               COUNT(*) as total,
-               SUM(CASE WHEN is_correct = 1 THEN 1 ELSE 0 END) as correct
-        FROM activity_log
-        WHERE user_id = ?
-    """
-    params = [user_id]
-    if subject and subject != "Full Syllabus":
-        query += " AND subject = ?"
-        params.append(subject)
+    should_close = False
+    c = cursor
+    if c is None:
+        try:
+            from backend.app.database import get_connection
+            conn = get_connection()
+            c = conn.cursor()
+            should_close = True
+        except Exception:
+            c = None
 
-    query += " GROUP BY chapter HAVING total >= 2"
-    cursor.execute(query, params)
-    rows = cursor.fetchall()
+    if c is None:
+        return []
 
-    weak = []
-    for r in rows:
-        tot = r["total"]
-        cor = r["correct"] or 0
-        acc = cor / tot if tot > 0 else 0
-        if acc < 0.60:
-            weak.append(r["chapter"])
-    _WEAK_CHAPTERS_CACHE[cache_key] = (now_t, weak)
-    return weak
+    try:
+        query = """
+            SELECT chapter,
+                   COUNT(*) as total,
+                   SUM(CASE WHEN is_correct = 1 THEN 1 ELSE 0 END) as correct
+            FROM activity_log
+            WHERE user_id = ?
+        """
+        params = [user_id]
+        if subject and subject != "Full Syllabus":
+            query += " AND subject = ?"
+            params.append(subject)
+
+        query += " GROUP BY chapter HAVING total >= 2"
+        c.execute(query, params)
+        rows = c.fetchall()
+
+        weak = []
+        for r in rows:
+            tot = r["total"]
+            cor = r["correct"] or 0
+            acc = cor / tot if tot > 0 else 0
+            if acc < 0.60:
+                weak.append(r["chapter"])
+        _WEAK_CHAPTERS_CACHE[cache_key] = (now_t, weak)
+        return weak
+    except Exception:
+        return []
+    finally:
+        if should_close:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
 
 
 def get_user_revenge_question_ids(cursor, user_id: str, subject: Optional[str] = None, chapter: Optional[str] = None) -> Set[str]:
     """
     Finds question IDs that the user previously failed in Duels, Mocks, or Practice,
     which have not yet been answered correctly since.
+    Cached in RAM for 600s to eliminate redundant queries during active circuits.
     """
     cache_key = (str(user_id), str(subject or "ALL"), str(chapter or "ALL"))
     now_t = time.time()
-    if cache_key in _REVENGE_QIDS_CACHE and (now_t - _REVENGE_QIDS_CACHE[cache_key][0]) < 60:
+    if cache_key in _REVENGE_QIDS_CACHE and (now_t - _REVENGE_QIDS_CACHE[cache_key][0]) < 600.0:
         return _REVENGE_QIDS_CACHE[cache_key][1]
 
-    query = """
-        SELECT question_id, is_correct, created_at
-        FROM activity_log
-        WHERE user_id = ?
-    """
-    params = [user_id]
-    if subject and subject != "Full Syllabus":
-        query += " AND subject = ?"
-        params.append(subject)
-    if chapter:
-        query += " AND chapter = ?"
-        params.append(chapter)
+    should_close = False
+    c = cursor
+    if c is None:
+        try:
+            from backend.app.database import get_connection
+            conn = get_connection()
+            c = conn.cursor()
+            should_close = True
+        except Exception:
+            c = None
 
-    query += " ORDER BY created_at ASC"
-    cursor.execute(query, params)
-    rows = cursor.fetchall()
+    if c is None:
+        return set()
 
-    status_map = {}
-    for r in rows:
-        status_map[r["question_id"]] = bool(r["is_correct"])
+    try:
+        query = """
+            SELECT question_id, is_correct, created_at
+            FROM activity_log
+            WHERE user_id = ?
+        """
+        params = [user_id]
+        if subject and subject != "Full Syllabus":
+            query += " AND subject = ?"
+            params.append(subject)
+        if chapter:
+            query += " AND chapter = ?"
+            params.append(chapter)
 
-    # Revenge questions are those whose most recent attempt was incorrect
-    revenge_ids = {qid for qid, is_cor in status_map.items() if not is_cor}
-    _REVENGE_QIDS_CACHE[cache_key] = (now_t, revenge_ids)
-    return revenge_ids
+        query += " ORDER BY created_at ASC"
+        c.execute(query, params)
+        rows = c.fetchall()
+
+        status_map = {}
+        for r in rows:
+            status_map[r["question_id"]] = bool(r["is_correct"])
+
+        # Revenge questions are those whose most recent attempt was incorrect
+        revenge_ids = {qid for qid, is_cor in status_map.items() if not is_cor}
+        _REVENGE_QIDS_CACHE[cache_key] = (now_t, revenge_ids)
+        return revenge_ids
+    except Exception:
+        return set()
+    finally:
+        if should_close:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
 
 
 def select_next_adaptive_question(
@@ -263,23 +332,32 @@ def select_next_adaptive_question(
 
     # Check for Due Spaced Repetition questions (interleaving spaced retrieval)
     if len(seen) > 0 and len(seen) % 3 == 0:
-        try:
-            from backend.app.tools.fsrs_engine import find_due_fsrs_question
-            due_q = find_due_fsrs_question(cursor, user_id, subject, list(effective_allowed) if effective_allowed else None)
-            if due_q and due_q.get("id") not in seen:
-                due_ch_elo = get_user_chapter_elo(cursor, user_id, due_q.get("chapter"), 1200.0)
-                metadata = {
-                    "target_elo": round(float(due_q.get("elo_rating") or 1500), 1),
-                    "chapter_elo": round(due_ch_elo, 1),
-                    "question_elo": float(due_q.get("elo_rating") or 1500),
-                    "is_revenge": False,
-                    "is_remediation": False,
-                    "is_fsrs_due": True,
-                    "tier_label": "SPACED_MEMORY_REINFORCEMENT"
-                }
-                return due_q, metadata
-        except Exception:
-            pass
+        fsrs_key = (str(user_id), str(subject or "ALL"))
+        now_t = time.time()
+        cached_fsrs = _FSRS_DUE_CACHE.get(fsrs_key)
+        if cached_fsrs and (now_t - cached_fsrs[0]) < 180.0:
+            due_q = cached_fsrs[1]
+        else:
+            try:
+                from backend.app.tools.fsrs_engine import find_due_fsrs_question
+                due_q = find_due_fsrs_question(cursor, user_id, subject, list(effective_allowed) if effective_allowed else None)
+                _FSRS_DUE_CACHE[fsrs_key] = (now_t, due_q)
+            except Exception:
+                due_q = None
+
+        if due_q and due_q.get("id") not in seen:
+            due_ch_elo = get_user_chapter_elo(cursor, user_id, due_q.get("chapter"), 1200.0)
+            metadata = {
+                "target_elo": round(float(due_q.get("elo_rating") or 1500), 1),
+                "chapter_elo": round(due_ch_elo, 1),
+                "question_elo": float(due_q.get("elo_rating") or 1500),
+                "is_revenge": False,
+                "is_remediation": False,
+                "is_fsrs_due": True,
+                "tier_label": "SPACED_MEMORY_REINFORCEMENT"
+            }
+            return due_q, metadata
+
 
     cached_bank = get_all_questions_cached(cursor)
 

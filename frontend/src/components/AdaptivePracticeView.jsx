@@ -33,7 +33,8 @@ import {
   Search,
   Layers,
   Filter,
-  Shield
+  Shield,
+  Loader2
 } from 'lucide-react';
 import ReportQuestionModal from './ReportQuestionModal';
 
@@ -1345,10 +1346,18 @@ export default function AdaptivePracticeView({ user, onOpenAuth, onNavigateTab, 
                     type="button"
                     onClick={handleSubmitAnswer}
                     disabled={submitting || !selectedAnswer.trim()}
-                    className="px-8 py-3.5 bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-400 hover:to-amber-400 text-white font-black text-sm rounded-2xl shadow-xl transition cursor-pointer glow-orange disabled:opacity-50"
+                    className="px-8 py-3.5 bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-400 hover:to-amber-400 text-white font-black text-sm rounded-2xl shadow-xl transition cursor-pointer glow-orange disabled:opacity-50 flex items-center gap-2"
                   >
-                    {submitting ? 'Evaluating Answer...' : 'SUBMIT ANSWER ➔'}
+                    {submitting ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin text-white" />
+                        <span>Evaluating Answer...</span>
+                      </>
+                    ) : (
+                      <span>SUBMIT ANSWER ➔</span>
+                    )}
                   </button>
+
                 </div>
               </div>
             ) : (

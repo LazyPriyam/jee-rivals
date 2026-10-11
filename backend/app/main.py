@@ -38,6 +38,14 @@ app = FastAPI(
 async def start_background_tasks():
     asyncio.create_task(run_abandoned_room_cleaner())
     asyncio.create_task(run_periodic_accounts_backup())
+    asyncio.create_task(run_question_cache_warmup())
+
+async def run_question_cache_warmup():
+    try:
+        from backend.app.tools.question_cache import warmup_question_cache
+        await asyncio.to_thread(warmup_question_cache)
+    except Exception as e:
+        pass
 
 async def run_abandoned_room_cleaner():
     while True:
