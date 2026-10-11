@@ -149,9 +149,18 @@ def sync_data(payload: SyncPayload, x_sync_token: Optional[str] = Header(None, a
     }
 
 
+class QuestionBatchDeletePayload(BaseModel):
+    question_ids: List[str]
+    clean_diagrams: bool = True
+
+
 @router.get("/question-ids")
-def get_existing_question_ids(x_sync_token: Optional[str] = Header(None, alias="X-Sync-Token")):
-    """Returns all question IDs currently stored on the cloud server for fast delta synchronization."""
+def get_existing_question_ids(
+    subject: Optional[str] = None,
+    chapter: Optional[str] = None,
+    x_sync_token: Optional[str] = Header(None, alias="X-Sync-Token")
+):
+    """Returns question IDs currently stored on the cloud server (optionally filtered by subject/chapter) for fast delta sync."""
     if not x_sync_token or x_sync_token != ADMIN_SYNC_TOKEN:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -159,10 +168,99 @@ def get_existing_question_ids(x_sync_token: Optional[str] = Header(None, alias="
         )
     conn = get_connection()
     c = conn.cursor()
-    c.execute("SELECT id FROM questions")
+    query = "SELECT id FROM questions WHERE 1=1"
+    params = []
+    if subject:
+        query += " AND LOWER(subject) = ?"
+        params.append(subject.strip().lower())
+    if chapter:
+        query += " AND LOWER(chapter) = ?"
+        params.append(chapter.strip().lower())
+
+    c.execute(query, tuple(params))
     ids = [r[0] for r in c.fetchall()]
     conn.close()
     return {"total": len(ids), "ids": ids}
+
+
+@router.post("/questions/delete-batch")
+def delete_questions_batch(
+    payload: QuestionBatchDeletePayload,
+    x_sync_token: Optional[str] = Header(None, alias="X-Sync-Token")
+):
+    """
+    Deletes a list of questions by ID from the cloud database and removes orphaned diagram files.
+    Used by 'jee cloud push --delete' to prune questions removed locally.
+    """
+    if not x_sync_token or x_sync_token != ADMIN_SYNC_TOKEN:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or missing sync authentication token."
+        )
+
+    if not payload.question_ids:
+        return {"success": True, "deleted_count": 0, "cleaned_diagrams": 0}
+
+    from pathlib import Path
+    conn = get_connection()
+    c = conn.cursor()
+    deleted_count = 0
+    cleaned_diagrams = 0
+
+    try:
+        diagram_filenames_to_check = set()
+        if payload.clean_diagrams:
+            for i in range(0, len(payload.question_ids), 100):
+                chunk_q = payload.question_ids[i:i + 100]
+                placeholders = ",".join(["?"] * len(chunk_q))
+                c.execute(f"SELECT diagram_urls FROM questions WHERE id IN ({placeholders}) AND has_diagram = 1", chunk_q)
+                for r in c.fetchall():
+                    raw = r[0]
+                    if raw:
+                        try:
+                            urls = json.loads(raw) if isinstance(raw, str) else raw
+                            for u in urls:
+                                fn = Path(str(u).replace("\\", "/")).name
+                                if fn:
+                                    diagram_filenames_to_check.add(fn)
+                        except Exception:
+                            pass
+
+        for i in range(0, len(payload.question_ids), 200):
+            chunk = payload.question_ids[i:i + 200]
+            placeholders = ",".join(["?"] * len(chunk))
+            c.execute(f"DELETE FROM questions WHERE id IN ({placeholders})", chunk)
+            deleted_count += getattr(c, "rowcount", len(chunk))
+
+        if payload.clean_diagrams and diagram_filenames_to_check:
+            for fn in diagram_filenames_to_check:
+                try:
+                    c.execute("SELECT COUNT(*) FROM questions WHERE diagram_urls LIKE ? LIMIT 1", (f"%{fn}%",))
+                    still_used = c.fetchone()[0]
+                    if not still_used:
+                        fpath = DIAGRAMS_DIR / fn
+                        if fpath.is_file():
+                            fpath.unlink(missing_ok=True)
+                            cleaned_diagrams += 1
+                except Exception:
+                    pass
+
+        conn.commit()
+    finally:
+        conn.close()
+
+    try:
+        from backend.app.tools.question_cache import invalidate_question_cache
+        invalidate_question_cache()
+    except Exception as e:
+        print(f"[SYNC] Error invalidating question cache after delete: {e}")
+
+    return {
+        "success": True,
+        "deleted_count": deleted_count,
+        "cleaned_diagrams": cleaned_diagrams
+    }
+
 
 
 class AdminDeleteUserPayload(BaseModel):
