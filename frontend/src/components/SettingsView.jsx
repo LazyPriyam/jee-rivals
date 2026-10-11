@@ -776,9 +776,33 @@ export default function SettingsView({
 
             {/* Banner Theme Selection */}
             <div className="space-y-2 pt-1">
-              <label className="text-xs font-bold text-slate-300">
-                Profile Banner Glow Style
-              </label>
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-bold text-slate-300">
+                  Profile Banner Theme Style
+                </label>
+                {user?.banner_image_url ? (
+                  <span className="text-[10px] text-emerald-400 font-mono font-bold">Custom Photo Active</span>
+                ) : null}
+              </div>
+              {user?.banner_image_url ? (
+                <div className="p-2.5 rounded-xl bg-[#121622] border border-orange-500/30 flex items-center justify-between gap-3 mb-1">
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <div className="w-16 h-8 rounded-lg overflow-hidden border border-white/20 shrink-0">
+                      <img src={user.banner_image_url} alt="Custom Banner" className="w-full h-full object-cover" />
+                    </div>
+                    <span className="text-[11px] text-slate-300 truncate">Custom photo active. Theme applies as fallback.</span>
+                  </div>
+                  {onNavigateTab ? (
+                    <button
+                      type="button"
+                      onClick={() => onNavigateTab('profile')}
+                      className="text-[11px] text-orange-400 hover:text-orange-300 font-bold underline shrink-0 cursor-pointer"
+                    >
+                      Manage in Profile
+                    </button>
+                  ) : null}
+                </div>
+              ) : null}
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
                 {BANNER_THEMES.map((theme) => {
                   const isSel = bannerTheme === theme.id;

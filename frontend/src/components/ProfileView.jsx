@@ -475,62 +475,82 @@ export default function ProfileView({
       {/* =========================================================================
           HERO ASPIRANT PASSPORT BANNER (THEMEABLE & CUSTOMIZABLE)
           ========================================================================= */}
-      <div className={`relative rounded-3xl p-6 sm:p-8 border mb-8 overflow-hidden transition-all duration-300 ${
-        p.banner_image_url ? 'border-orange-500/40 shadow-2xl bg-[#0d1017]' : theme.bannerClasses
+      <div className={`relative rounded-3xl border mb-8 overflow-hidden transition-all duration-300 shadow-2xl bg-[#0d1019] ${
+        p.banner_image_url ? 'border-orange-500/40' : (theme.accentBorder || 'border-white/10')
       }`}>
-        {p.banner_image_url ? (
-          <>
-            {/* Custom panoramic banner image */}
-            <img
-              src={p.banner_image_url}
-              alt="Aspirant Banner"
-              className="absolute inset-0 w-full h-full object-cover -z-20 pointer-events-none"
-            />
-            {/* Adaptive Obsidian Dark Glass Readability Overlay */}
-            <div className="absolute inset-0 bg-gradient-to-r from-black/90 via-black/65 to-black/85 backdrop-blur-[2px] -z-10 pointer-events-none" />
-          </>
-        ) : (
-          <>
-            {/* Ambient background glow accents */}
-            <div
-              className="absolute -top-20 -right-20 w-96 h-96 rounded-full blur-3xl pointer-events-none -z-10"
-              style={{ background: theme.glowColor }}
-            />
-            <div
-              className="absolute -bottom-20 -left-20 w-96 h-96 rounded-full blur-3xl pointer-events-none -z-10"
-              style={{ background: theme.glowColor }}
-            />
-          </>
-        )}
-
-        <div className="flex flex-col lg:flex-row items-center lg:items-start gap-6 sm:gap-8 justify-between relative z-10">
-          {/* Left Block: Avatar + Name + Identity Details */}
-          <div className="flex flex-col sm:flex-row items-center sm:items-start gap-6 flex-1 text-center sm:text-left">
-            {/* Avatar with Division Aura Ring */}
-            <div className="relative group shrink-0">
-              <div className={`w-24 h-24 rounded-3xl bg-[#121622] overflow-hidden flex items-center justify-center text-5xl shadow-2xl transition-transform group-hover:scale-105 ${ringStyle}`}>
-                {p.avatar_image_url ? (
-                  <img
-                    src={p.avatar_image_url}
-                    alt={p.username}
-                    className="w-full h-full object-cover rounded-3xl"
-                  />
-                ) : (
-                  <span>{AVATAR_MAP[p.avatar_id] || '🔥'}</span>
-                )}
-              </div>
-              {/* Online/Offline presence dot */}
-              <span 
-                className={`absolute -top-1 -right-1 w-4 h-4 rounded-full border-2 border-[#121622] ${presence.isOnline ? 'bg-emerald-400 ring-2 ring-emerald-500/50 animate-pulse' : 'bg-slate-500'}`}
-                title={presence.detail}
+        {/* Dedicated Panoramic Hero Banner Header */}
+        <div className="relative h-44 sm:h-52 w-full overflow-hidden bg-[#141724]">
+          {p.banner_image_url ? (
+            <>
+              <img
+                src={p.banner_image_url}
+                alt="Aspirant Banner"
+                className="w-full h-full object-cover select-none"
               />
-              <div className={`absolute -bottom-2.5 left-1/2 -translate-x-1/2 text-[9px] font-black uppercase px-2 py-0.5 rounded-full border shadow-md whitespace-nowrap ${divStyle}`}>
-                {p.current_division}
-              </div>
+              {/* Subtle bottom vignette to blend smoothly into passport card */}
+              <div className="absolute inset-0 bg-gradient-to-t from-[#0d1019] via-black/20 to-black/30 pointer-events-none" />
+            </>
+          ) : (
+            <div className={`w-full h-full relative ${theme.bannerClasses}`}>
+              {/* Cyber Ambient Glowing Orbs */}
+              <div
+                className="absolute -top-16 -right-16 w-80 h-80 rounded-full blur-3xl pointer-events-none opacity-60"
+                style={{ background: theme.glowColor }}
+              />
+              <div
+                className="absolute -bottom-16 -left-16 w-80 h-80 rounded-full blur-3xl pointer-events-none opacity-60"
+                style={{ background: theme.glowColor }}
+              />
+              <div className="absolute inset-0 bg-gradient-to-t from-[#0d1019] via-transparent to-black/25 pointer-events-none" />
             </div>
+          )}
 
-            {/* Profile Credentials */}
-            <div className="flex-1 min-w-0">
+          {/* Quick "Change Banner" / "Customize Banner" pill button for profile owner in top-right */}
+          {isOwnProfile && (
+            <div className="absolute top-3.5 right-3.5 z-20">
+              <button
+                type="button"
+                onClick={() => setEditModalOpen(true)}
+                className="px-3 py-1.5 rounded-xl bg-black/60 hover:bg-black/85 backdrop-blur-md border border-white/20 hover:border-orange-400 text-white text-xs font-bold transition flex items-center gap-1.5 shadow-xl cursor-pointer group"
+                title="Customize banner or upload panoramic photo"
+              >
+                <ImageIcon className="w-3.5 h-3.5 text-orange-400 group-hover:scale-110 transition-transform" />
+                <span>{p.banner_image_url ? 'Change Banner' : 'Customize Banner'}</span>
+              </button>
+            </div>
+          )}
+        </div>
+
+        {/* Passport Body: Avatar overlapping banner bottom + Profile Credentials */}
+        <div className="px-6 sm:px-8 pb-6 sm:pb-8 pt-0 relative z-10">
+          <div className="flex flex-col lg:flex-row items-center lg:items-start gap-6 sm:gap-8 justify-between">
+            {/* Left Block: Avatar + Name + Identity Details */}
+            <div className="flex flex-col sm:flex-row items-center sm:items-start gap-6 flex-1 text-center sm:text-left -mt-12 sm:-mt-14 relative z-10">
+              {/* Avatar with Division Aura Ring */}
+              <div className="relative group shrink-0">
+                <div className={`w-24 h-24 sm:w-28 sm:h-28 rounded-3xl bg-[#121622] overflow-hidden flex items-center justify-center text-5xl sm:text-6xl shadow-2xl transition-transform group-hover:scale-105 ${ringStyle} border-4 border-[#0d1019]`}>
+                  {p.avatar_image_url ? (
+                    <img
+                      src={p.avatar_image_url}
+                      alt={p.username}
+                      className="w-full h-full object-cover rounded-2xl"
+                    />
+                  ) : (
+                    <span>{AVATAR_MAP[p.avatar_id] || '🔥'}</span>
+                  )}
+                </div>
+                {/* Online/Offline presence dot */}
+                <span 
+                  className={`absolute -top-1 -right-1 w-4 h-4 rounded-full border-2 border-[#121622] ${presence.isOnline ? 'bg-emerald-400 ring-2 ring-emerald-500/50 animate-pulse' : 'bg-slate-500'}`}
+                  title={presence.detail}
+                />
+                <div className={`absolute -bottom-2.5 left-1/2 -translate-x-1/2 text-[9px] font-black uppercase px-2 py-0.5 rounded-full border shadow-md whitespace-nowrap ${divStyle}`}>
+                  {p.current_division}
+                </div>
+              </div>
+
+              {/* Profile Credentials */}
+              <div className="flex-1 min-w-0 pt-2 sm:pt-4">
               <div className="flex flex-wrap items-center justify-center sm:justify-start gap-2.5 mb-1.5">
                 <h1 className="text-2xl sm:text-3xl font-black text-white tracking-tight truncate">
                   {p.username}
@@ -697,6 +717,7 @@ export default function ProfileView({
           </div>
         </div>
       </div>
+    </div>
 
       {/* =========================================================================
           DOSSIER 5-TAB NAVIGATION BAR
@@ -1866,16 +1887,25 @@ export default function ProfileView({
                       </div>
                     </div>
                   ) : (
-                    <div className="flex items-center justify-between gap-3">
-                      <div className="text-left">
-                        <span className="text-xs text-slate-200 font-bold block">Upload Panoramic Banner</span>
-                        <span className="text-[10px] text-slate-400">Panoramic ratio (3.75:1) • Compressed to WebP</span>
+                    <div className="space-y-2.5">
+                      <div className={`relative h-20 rounded-xl overflow-hidden border border-white/20 ${
+                        BANNER_THEMES[editForm.banner_theme]?.bannerClasses || BANNER_THEMES.orange_cyber.bannerClasses
+                      }`}>
+                        <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent flex items-end px-3 py-1.5">
+                          <span className="text-xs font-bold text-white truncate">{p.username} (Theme Preset Active)</span>
+                        </div>
                       </div>
-                      <label className="py-2 px-3 rounded-xl bg-orange-500 hover:bg-orange-600 text-white text-xs font-bold transition cursor-pointer flex items-center gap-1.5 shadow-md shadow-orange-500/20 shrink-0">
-                        <Upload className="w-3.5 h-3.5" />
-                        <span>Upload Banner</span>
-                        <input type="file" accept="image/*" onChange={(e) => handleFileSelect(e, 'banner')} className="hidden" />
-                      </label>
+                      <div className="flex items-center justify-between gap-3 pt-0.5">
+                        <div className="text-left">
+                          <span className="text-xs text-slate-200 font-bold block">Upload Panoramic Banner</span>
+                          <span className="text-[10px] text-slate-400">Panoramic ratio (3.75:1) • Compressed to WebP</span>
+                        </div>
+                        <label className="py-2 px-3 rounded-xl bg-orange-500 hover:bg-orange-600 text-white text-xs font-bold transition cursor-pointer flex items-center gap-1.5 shadow-md shadow-orange-500/20 shrink-0">
+                          <Upload className="w-3.5 h-3.5" />
+                          <span>Upload Banner</span>
+                          <input type="file" accept="image/*" onChange={(e) => handleFileSelect(e, 'banner')} className="hidden" />
+                        </label>
+                      </div>
                     </div>
                   )}
                 </div>
@@ -2045,7 +2075,7 @@ export default function ProfileView({
                   ) : (
                     <div className="w-full h-full flex items-center justify-center text-slate-500 text-xs">Loading...</div>
                   )}
-                  <div className="absolute inset-0 bg-gradient-to-r from-black/85 via-black/55 to-black/85 pointer-events-none flex items-center px-4">
+                  <div className="absolute inset-0 bg-gradient-to-t from-black/75 via-transparent to-transparent pointer-events-none flex items-end p-2.5">
                     <div className="text-left">
                       <span className="text-xs font-black text-white">{p.username}</span>
                       <span className="block text-[9px] text-slate-300 font-mono">{editForm.title || 'JEE Aspirant'}</span>
