@@ -78,6 +78,7 @@ def sync_data(payload: SyncPayload, x_sync_token: Optional[str] = Header(None, a
             formulas_str = raw_formulas if isinstance(raw_formulas, str) else json.dumps(raw_formulas)
 
             common_pitfall = q.get("common_pitfall", "")
+            diff = q.get("difficulty_tier") or "MEDIUM"
             target_exam = q.get("target_exam") or "JEE_MAIN"
             passage_id = q.get("passage_id")
             passage_title = q.get("passage_title")
@@ -136,10 +137,10 @@ def sync_data(payload: SyncPayload, x_sync_token: Optional[str] = Header(None, a
     conn.close()
 
     try:
-        from backend.app.tools.question_cache import clear_question_cache
-        clear_question_cache()
+        from backend.app.tools.question_cache import invalidate_question_cache
+        invalidate_question_cache()
     except Exception as e:
-        print(f"[SYNC] Error clearing question cache: {e}")
+        print(f"[SYNC] Error invalidating question cache: {e}")
 
     return {
         "success": True,
