@@ -29,6 +29,7 @@ import {
   Zap,
   TrendingDown,
   TrendingUp,
+  Shield,
   ShieldAlert,
   Brain,
   Compass,
@@ -62,11 +63,50 @@ export default function TestAnalysisView({
   const [auditFilter, setAuditFilter] = useState('ALL'); // 'ALL', 'CORRECT', 'INCORRECT', 'UNATTEMPTED'
   const [expandedSolutions, setExpandedSolutions] = useState({});
   const [reportTarget, setReportTarget] = useState(null);
+  const [reportedQuestionIds, setReportedQuestionIds] = useState(new Set());
+  const [provisionalAlert, setProvisionalAlert] = useState(null);
   const [launchingDrill, setLaunchingDrill] = useState(false);
 
   // Filters for Chapter Matrix (Page 5)
   const [chapterSubjFilter, setChapterSubjFilter] = useState('ALL');
   const [chapterSortBy, setChapterSortBy] = useState('MARKS_LOST');
+
+  // Load existing user reports to badge flagged questions automatically
+  useEffect(() => {
+    if (user?.id) {
+      api.questions.getReports({ reporter_id: user.id })
+        .then((reps) => {
+          if (Array.isArray(reps)) {
+            const pendingIds = new Set(
+              reps
+                .filter((r) => r.report_status === 'PENDING' || r.status === 'PENDING')
+                .map((r) => r.question_id)
+            );
+            setReportedQuestionIds((prev) => new Set([...prev, ...pendingIds]));
+          }
+        })
+        .catch(() => {});
+    }
+  }, [user?.id]);
+
+  const handleReportSuccess = (reportInfo) => {
+    const qId = reportInfo?.questionId;
+    const refund = Number(reportInfo?.provisional_elo_refunded || 0);
+    if (qId) {
+      setReportedQuestionIds((prev) => new Set(prev).add(qId));
+    }
+    if (refund > 0) {
+      if (sound.levelUp) sound.levelUp();
+      setProvisionalAlert({
+        questionId: qId,
+        refund
+      });
+      // Synchronize updated user profile across Navbar and other tabs
+      api.auth.getMe().then((freshUser) => {
+        window.dispatchEvent(new CustomEvent('jee_user_updated', { detail: freshUser }));
+      }).catch(() => {});
+    }
+  };
 
   useEffect(() => {
     if (!roomCode) return;
@@ -1517,17 +1557,24 @@ export default function TestAnalysisView({
                           <Clock className="w-3.5 h-3.5" />
                           <span>{Math.round(item.timeSpent)}s</span>
                         </span>
-                        <span
-                          className={`text-xs font-black px-2.5 py-0.5 rounded-full ${
-                            item.isCorrect
-                              ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
-                              : item.isAttempted
-                              ? 'bg-red-500/20 text-red-400 border border-red-500/30'
-                              : 'bg-slate-800 text-slate-400 border border-white/10'
-                          }`}
-                        >
-                          {item.isCorrect ? '+4.0 MARKS' : item.isAttempted ? '-1.0 PENALTY' : '0.0 SKIPPED'}
-                        </span>
+                        {reportedQuestionIds.has(q.id) ? (
+                          <span className="text-xs font-black px-2.5 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/40 flex items-center gap-1.5 animate-pulse">
+                            <Shield className="w-3 h-3 text-amber-400" />
+                            <span>FLAGGED • UNDER REVIEW (+15 ELO RESTORED)</span>
+                          </span>
+                        ) : (
+                          <span
+                            className={`text-xs font-black px-2.5 py-0.5 rounded-full ${
+                              item.isCorrect
+                                ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                                : item.isAttempted
+                                ? 'bg-red-500/20 text-red-400 border border-red-500/30'
+                                : 'bg-slate-800 text-slate-400 border border-white/10'
+                            }`}
+                          >
+                            {item.isCorrect ? '+4.0 MARKS' : item.isAttempted ? '-1.0 PENALTY' : '0.0 SKIPPED'}
+                          </span>
+                        )}
                       </div>
                     </div>
 
@@ -1572,11 +1619,26 @@ export default function TestAnalysisView({
                       </button>
 
                       <button
+                        type="button"
                         onClick={() => setReportTarget({ id: q.id, text: q.text })}
-                        className="text-xs font-mono text-slate-500 hover:text-slate-400 transition flex items-center gap-1 cursor-pointer"
+                        disabled={reportedQuestionIds.has(q.id)}
+                        className={`text-xs font-mono transition flex items-center gap-1.5 cursor-pointer ${
+                          reportedQuestionIds.has(q.id)
+                            ? 'text-amber-400 opacity-90 cursor-default'
+                            : 'text-slate-500 hover:text-slate-400'
+                        }`}
                       >
-                        <Flag className="w-3 h-3" />
-                        <span>Report</span>
+                        {reportedQuestionIds.has(q.id) ? (
+                          <>
+                            <Shield className="w-3.5 h-3.5 text-amber-400" />
+                            <span>Reported (Protected)</span>
+                          </>
+                        ) : (
+                          <>
+                            <Flag className="w-3 h-3" />
+                            <span>Report Question</span>
+                          </>
+                        )}
                       </button>
                     </div>
 
@@ -1649,8 +1711,33 @@ export default function TestAnalysisView({
         <ReportQuestionModal
           question={reportTarget}
           user={user}
+          mode="test_analysis"
+          canSkip={false}
           onClose={() => setReportTarget(null)}
+          onReportSuccess={handleReportSuccess}
         />
+      )}
+
+      {/* Floating Toast Notification when provisional Elo is restored */}
+      {provisionalAlert && (
+        <div className="fixed bottom-6 right-6 z-50 bg-[#1a2233] border border-amber-500/50 rounded-2xl p-4 shadow-2xl flex items-center gap-3 animate-in fade-in slide-in-from-bottom duration-200 max-w-sm">
+          <div className="w-10 h-10 rounded-xl bg-amber-500/20 border border-amber-500/40 text-amber-300 flex items-center justify-center shrink-0">
+            <Shield className="w-5 h-5 text-amber-400" />
+          </div>
+          <div className="flex-1 min-w-0 text-xs">
+            <strong className="text-white block font-bold">Provisional Rating Restored!</strong>
+            <p className="text-slate-300 mt-0.5 leading-snug">
+              +{provisionalAlert.refund.toFixed(1)} Elo credited to your rating while moderators review this question.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => setProvisionalAlert(null)}
+            className="p-1.5 text-slate-400 hover:text-white rounded-lg hover:bg-white/10 cursor-pointer"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
       )}
     </div>
   );

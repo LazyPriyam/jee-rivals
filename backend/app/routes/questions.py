@@ -352,17 +352,25 @@ def report_question(question_id: str, report_data: QuestionReportRequest, user: 
                 ORDER BY created_at DESC LIMIT 1
             """, (uid, question_id))
             att_row = c.fetchone()
+            att = dict(att_row) if att_row else None
 
-            if att_row:
-                if att_row["subject"]:
-                    rep_subject = att_row["subject"]
-                if att_row["chapter"]:
-                    rep_chapter = att_row["chapter"]
+            if att:
+                if att.get("subject"):
+                    rep_subject = att["subject"]
+                if att.get("chapter"):
+                    rep_chapter = att["chapter"]
 
                 # If question was marked wrong or user suffered an Elo penalty
-                if att_row["is_correct"] == 0 or float(att_row["elo_delta"] or 0.0) < 0:
-                    lost_val = abs(float(att_row["elo_delta"] or 0.0))
-                    provisional_elo = round(lost_val if lost_val > 0 else 15.0, 1)
+                if att.get("is_correct") == 0 or float(att.get("elo_delta") or 0.0) < 0:
+                    lost_val = abs(float(att.get("elo_delta") or 0.0))
+                    # In ADAPTIVE mode, elo_delta is the user rating drop (e.g. -14.5).
+                    # In MOCK_TEST, ROOM, or general test modes, elo_delta in activity_log
+                    # is question difficulty adjustment, so any incorrect test attempt receives
+                    # standard full +15.0 provisional Elo restitution.
+                    if att.get("mode") == "ADAPTIVE" and lost_val >= 5.0:
+                        provisional_elo = round(lost_val, 1)
+                    else:
+                        provisional_elo = 15.0
             else:
                 # 3. Check active adaptive session history
                 c.execute("""
@@ -373,10 +381,11 @@ def report_question(question_id: str, report_data: QuestionReportRequest, user: 
                 as_row = c.fetchone()
                 found_in_session = False
                 if as_row:
-                    if as_row["subject"]:
-                        rep_subject = as_row["subject"]
+                    as_dict = dict(as_row)
+                    if as_dict.get("subject"):
+                        rep_subject = as_dict["subject"]
                     try:
-                        raw_h = as_row["history"]
+                        raw_h = as_dict.get("history")
                         h_list = json.loads(raw_h) if isinstance(raw_h, str) else (raw_h or [])
                         for item in reversed(h_list):
                             if item.get("question_id") == question_id:
@@ -384,14 +393,14 @@ def report_question(question_id: str, report_data: QuestionReportRequest, user: 
                                     rep_chapter = item.get("chapter")
                                 if not item.get("is_correct") or float(item.get("elo_delta") or 0.0) < 0:
                                     lost_val = abs(float(item.get("elo_delta") or 0.0))
-                                    provisional_elo = round(lost_val if lost_val > 0 else 15.0, 1)
+                                    provisional_elo = round(lost_val if lost_val >= 5.0 else 15.0, 1)
                                 found_in_session = True
                                 break
                     except Exception:
                         pass
 
                 if not found_in_session:
-                    # 4. Check room participants if attempted in an arena or test room
+                    # 4. Check room participants if attempted in an arena, mock test, or test room
                     c.execute("""
                         SELECT rp.answers, r.id FROM room_participants rp
                         JOIN rooms r ON rp.room_id = r.id
@@ -400,6 +409,27 @@ def report_question(question_id: str, report_data: QuestionReportRequest, user: 
                     """, (uid, f"%{question_id}%"))
                     rp_row = c.fetchone()
                     if rp_row:
+                        rp_dict = dict(rp_row)
+                        raw_ans = rp_dict.get("answers") or "{}"
+                        try:
+                            p_answers = json.loads(raw_ans) if isinstance(raw_ans, str) else raw_ans
+                        except Exception:
+                            p_answers = {}
+                        q_ans = p_answers.get(question_id)
+                        if q_ans:
+                            if isinstance(q_ans, dict):
+                                is_corr = bool(q_ans.get("correct"))
+                                user_sel = q_ans.get("selected")
+                            else:
+                                is_corr = False
+                                user_sel = str(q_ans)
+                            if user_sel and user_sel not in ("NONE", "SKIPPED", "") and not is_corr:
+                                provisional_elo = 15.0
+                        else:
+                            # Question was part of this test
+                            provisional_elo = 15.0
+                    elif report_data.reason == "WRONG_ANSWER":
+                        # General fallback for questions reported as wrong key
                         provisional_elo = 15.0
 
             # Apply provisional restoration if elo lost
