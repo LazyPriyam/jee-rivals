@@ -584,25 +584,21 @@ export default function ProfileView({
   const ringStyle = divVisuals.ringStyle;
   const presence = formatLastOnline(p.last_active, p.is_online);
 
-  const cardTheme = useMemo(() => {
-    if (p.banner_image_url && extractedPalette) {
-      return extractedPalette;
-    }
-    const t = BANNER_THEMES[p.banner_theme] || BANNER_THEMES.orange_cyber;
-    const rgb = t.accentColor?.replace(/[^\d,]/g, '') || '249, 115, 22';
-    return {
-      cardGradient: t.cardGradient,
-      containerStyle: {
-        background: t.cardGradient,
-        borderColor: `rgba(${rgb}, 0.45)`,
-        boxShadow: `0 16px 50px -10px rgba(${rgb}, 0.3)`,
-      },
-      surfaceStyle: t.surfaceStyle,
-      accentColor: t.accentColor,
-      glowColor: t.glowColor,
-      bannerVignette: `linear-gradient(to bottom, transparent 30%, rgba(${rgb}, 0.25) 75%, rgba(13, 16, 25, 0.98) 100%)`,
-    };
-  }, [p.banner_image_url, p.banner_theme, extractedPalette]);
+  const defaultRgb = theme.accentColor?.replace(/[^\d,]/g, '') || '249, 115, 22';
+  const cardTheme = (p.banner_image_url && extractedPalette)
+    ? extractedPalette
+    : {
+        cardGradient: theme.cardGradient,
+        containerStyle: {
+          background: theme.cardGradient,
+          borderColor: `rgba(${defaultRgb}, 0.45)`,
+          boxShadow: `0 16px 50px -10px rgba(${defaultRgb}, 0.3)`,
+        },
+        surfaceStyle: theme.surfaceStyle,
+        accentColor: theme.accentColor,
+        glowColor: theme.glowColor,
+        bannerVignette: `linear-gradient(to bottom, transparent 30%, rgba(${defaultRgb}, 0.25) 75%, rgba(13, 16, 25, 0.98) 100%)`,
+      };
 
   // Next Milestone Logic
   const currentElo = Math.round(p.overall_elo || 1200);
