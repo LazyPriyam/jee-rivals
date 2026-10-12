@@ -958,23 +958,33 @@ export default function ProfileView({
                   className="text-base sm:text-lg font-black font-mono tracking-tight block leading-snug"
                   style={{ color: cardTheme.accentColor }}
                 >
-                  {p.predicted_air_formatted || (p.predicted_air ? `AIR ${p.predicted_air.toLocaleString()}` : (p.predicted_air_bracket || 'Foundation Aspirant'))}
+                  {p.full_mocks_count > 0
+                    ? (p.predicted_air_formatted || (p.predicted_air ? `AIR ${p.predicted_air.toLocaleString()}` : (p.predicted_air_bracket || 'Foundation Aspirant')))
+                    : 'Requires Full Mock'}
                 </span>
-                {p.predicted_percentile && (
+                {p.full_mocks_count > 0 && p.predicted_percentile ? (
                   <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-emerald-950/90 text-emerald-300 border border-emerald-500/40">
                     {p.predicted_percentile}%ile
                   </span>
+                ) : (
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-amber-950/90 text-amber-300 border border-amber-500/40">
+                    {p.full_mocks_count || 0} Full Mocks
+                  </span>
                 )}
-                {p.predicted_jee_main_marks && (
+                {p.full_mocks_count > 0 && p.predicted_jee_main_marks && (
                   <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-cyan-950/90 text-cyan-300 border border-cyan-500/40">
                     {p.predicted_jee_main_marks}/300 M
                   </span>
                 )}
               </div>
 
-              {p.predicted_air_range && (
+              {p.full_mocks_count > 0 && p.predicted_air_range ? (
                 <span className="text-[11px] font-mono text-slate-400 block mt-1">
-                  Confidence Band: <strong className="text-slate-200">{p.predicted_air_range}</strong>
+                  Confidence Band: <strong className="text-slate-200">{p.predicted_air_range}</strong> ({p.full_mocks_count} Full Mock{p.full_mocks_count > 1 ? 's' : ''})
+                </span>
+              ) : (
+                <span className="text-[11px] font-mono text-amber-400 block mt-1">
+                  Take a CBT Full Mock to calibrate national AIR
                 </span>
               )}
 
@@ -1319,25 +1329,67 @@ export default function ProfileView({
                 </div>
                 <h3 className="text-xl sm:text-2xl font-black text-white tracking-tight flex items-center gap-2">
                   <span>National All India Rank Forecast</span>
-                  <span className="text-xs font-mono font-bold px-2 py-0.5 rounded-full bg-emerald-950 border border-emerald-500/40 text-emerald-400">
-                    {p.air_confidence_label || 'Calibrating'} ({p.air_confidence_score || 25}% Confidence)
-                  </span>
+                  {p.full_mocks_count > 0 ? (
+                    <span className="text-xs font-mono font-bold px-2 py-0.5 rounded-full bg-emerald-950 border border-emerald-500/40 text-emerald-400">
+                      Calibrated ({p.full_mocks_count} Full Mock{p.full_mocks_count > 1 ? 's' : ''})
+                    </span>
+                  ) : (
+                    <span className="text-xs font-mono font-bold px-2 py-0.5 rounded-full bg-amber-950 border border-amber-500/40 text-amber-400">
+                      Uncalibrated (0 Full Mocks Taken)
+                    </span>
+                  )}
                 </h3>
                 <p className="text-xs text-slate-400 mt-1">
-                  Empirical percentile transfer curve calibrated with negative marking penalties (+4 / -1), syllabus breadth across {p.total_syllabus_chapters || 92} chapters, and PCM balance.
+                  Empirical percentile transfer curve calibrated with negative marking penalties (+4 / -1), syllabus breadth across {p.total_syllabus_chapters || 92} chapters, and full mock examination scorecards.
                 </p>
               </div>
 
               <div className="text-left md:text-right">
                 <span className="text-[11px] uppercase font-bold text-slate-400 block mb-0.5">Estimated Primary Rank</span>
                 <span className="text-2xl sm:text-3xl font-black font-mono text-orange-400 tracking-tight block">
-                  {p.predicted_air_formatted || (p.predicted_air ? `AIR ${p.predicted_air.toLocaleString()}` : (p.predicted_air_bracket || 'AIR Calculating...'))}
+                  {p.full_mocks_count > 0
+                    ? (p.predicted_air_formatted || (p.predicted_air ? `AIR ${p.predicted_air.toLocaleString()}` : (p.predicted_air_bracket || 'AIR Calculating...')))
+                    : 'Requires Full Mock'}
                 </span>
                 <span className="text-xs font-mono text-slate-300">
-                  {p.predicted_air_range || 'Provisional Baseline'}
+                  {p.full_mocks_count > 0
+                    ? (p.predicted_air_range || 'Provisional Baseline')
+                    : 'Attempt 1 Full CBT Mock to Unlock'}
                 </span>
               </div>
             </div>
+
+            {/* Uncalibrated Full Mock CTA Callout */}
+            {(!p.full_mocks_count || p.full_mocks_count === 0) && (
+              <div className="bg-gradient-to-r from-amber-950/40 via-[#261f1c] to-[#161a24] border border-amber-500/40 rounded-2xl p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                <div className="flex items-start gap-3">
+                  <div className="p-2.5 rounded-xl bg-amber-500/20 text-amber-400 border border-amber-500/30 shrink-0 mt-0.5">
+                    <AlertTriangle className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h4 className="text-sm font-bold text-white flex items-center gap-2">
+                      <span>Full Mock Test Required for Authentic AIR Forecast</span>
+                      <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30">NTA Standard</span>
+                    </h4>
+                    <p className="text-xs text-amber-200/80 mt-1 leading-relaxed">
+                      AIR prediction is calibrated exclusively against completed 300-mark Full Mock Examination papers across Physics, Chemistry, and Mathematics. Take your first official mock test in Mocks Center to calculate your authentic national percentile, predicted AIR band, and JoSAA college cutoff matrix.
+                    </p>
+                  </div>
+                </div>
+                {isOwnProfile && (
+                  <button
+                    onClick={() => {
+                      sound.click();
+                      if (onNavigateTab) onNavigateTab('mocks');
+                    }}
+                    className="px-4 py-2 rounded-xl bg-orange-500 hover:bg-orange-600 text-white text-xs font-bold font-mono transition shrink-0 cursor-pointer shadow-md shadow-orange-950/50 flex items-center gap-1.5 self-stretch sm:self-auto justify-center"
+                  >
+                    <span>Enter Mocks Center</span>
+                    <ArrowRight className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </div>
+            )}
 
             {/* Tri-Metric Calibration Cards */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -1349,10 +1401,12 @@ export default function ProfileView({
                     <Sparkles className="w-4 h-4 text-emerald-400" />
                   </div>
                   <div className="text-2xl sm:text-3xl font-black font-mono text-emerald-400">
-                    {p.predicted_percentile ? `${p.predicted_percentile}%` : '50.0%'}
+                    {p.full_mocks_count > 0 && p.predicted_percentile ? `${p.predicted_percentile}%` : '-- %'}
                   </div>
                   <p className="text-[11px] text-slate-400 mt-1 font-mono">
-                    Top {p.predicted_percentile ? (100 - p.predicted_percentile).toFixed(2) : '50.0'}% Nationwide
+                    {p.full_mocks_count > 0 && p.predicted_percentile
+                      ? `Top ${(100 - p.predicted_percentile).toFixed(2)}% Nationwide`
+                      : 'Awaiting 1st Full Mock Exam'}
                   </p>
                 </div>
                 <div className="mt-4 pt-3 border-t border-white/5 text-[10px] text-slate-400">
@@ -1369,7 +1423,7 @@ export default function ProfileView({
                   </div>
                   <div className="flex items-baseline gap-1.5">
                     <span className="text-2xl sm:text-3xl font-black font-mono text-cyan-400">
-                      {p.predicted_jee_main_marks || 0}
+                      {p.full_mocks_count > 0 ? (p.predicted_jee_main_marks || 0) : '--'}
                     </span>
                     <span className="text-xs font-bold text-slate-400 font-mono">/ 300</span>
                   </div>
@@ -1377,15 +1431,21 @@ export default function ProfileView({
                   <div className="w-full h-1.5 rounded-full bg-slate-800 overflow-hidden mt-2">
                     <div
                       className="h-full rounded-full bg-gradient-to-r from-cyan-500 to-blue-400"
-                      style={{ width: `${Math.min(100, Math.round(((p.predicted_jee_main_marks || 0) / 300) * 100))}%` }}
+                      style={{ width: `${p.full_mocks_count > 0 ? Math.min(100, Math.round(((p.predicted_jee_main_marks || 0) / 300) * 100)) : 0}%` }}
                     />
                   </div>
                 </div>
                 <div className="mt-4 pt-3 border-t border-white/5 text-[10px] text-slate-400 flex items-center justify-between">
-                  <span>Gen Cutoff: ~92</span>
-                  <span className={(p.predicted_jee_main_marks || 0) >= 92 ? 'text-emerald-400 font-bold' : 'text-amber-400 font-bold'}>
-                    {(p.predicted_jee_main_marks || 0) >= 92 ? 'Cleared (+ ' + ((p.predicted_jee_main_marks || 0) - 92) + ')' : 'Lagging (- ' + (92 - (p.predicted_jee_main_marks || 0)) + ')'}
-                  </span>
+                  {p.full_mocks_count > 0 ? (
+                    <>
+                      <span>Best Mock: <strong className="text-slate-200">{p.best_mock_marks ?? p.predicted_jee_main_marks}/300</strong></span>
+                      <span className={(p.predicted_jee_main_marks || 0) >= 92 ? 'text-emerald-400 font-bold' : 'text-amber-400 font-bold'}>
+                        {(p.predicted_jee_main_marks || 0) >= 92 ? 'Cleared Cutoff' : 'Below Cutoff'}
+                      </span>
+                    </>
+                  ) : (
+                    <span>Take Full Mock to record marks</span>
+                  )}
                 </div>
               </div>
 

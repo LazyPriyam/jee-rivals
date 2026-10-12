@@ -351,44 +351,81 @@ def calculate_chapter_diminishing_factor(
     subjects: Optional[List[str]] = None
 ) -> Tuple[float, str]:
     """
-    Computes a fair anti-farming multiplier for Overall Elo:
-    - Broad evaluation (Full Syllabus / >= 3 chapters): 100% full weight.
-    - Single-chapter practice (or <= 2 chapters):
-      Diminishes as user accumulates repeated attempts in those same chapters:
-      omega = max(0.20, 1.0 / sqrt(1.0 + prior_attempts / 12.0))
-      Ensures users cannot climb to elite Overall ranks without expanding syllabus breadth.
+    Computes authentic competitive calibration factor (0.20 to 1.0) for Overall Elo:
+    - Full Syllabus (no custom chapters specified, or 16+ canonical chapters across PCM):
+      -> 1.0x (100% full rating weight).
+    - Custom Chapter(s) selected instead of Full Syllabus:
+      Targeted chapter drills are restricted-domain practice. Scoring high on a single known chapter
+      cannot award the same national Overall Elo as facing questions from the entire 92-chapter syllabus.
+
+      Calibration Scaling based on syllabus scope:
+      - 1 Custom Chapter: 0.35x (35% rating weight for Overall Elo)
+      - 2-3 Custom Chapters: 0.50x (50% rating weight for Overall Elo)
+      - 4-6 Custom Chapters: 0.65x (65% rating weight for Overall Elo)
+      - 7-12 Custom Chapters: 0.80x (80% rating weight for Overall Elo)
+      - 13-20 Custom Chapters: 0.90x (90% rating weight for Overall Elo)
+      - 21+ chapters or Full Syllabus: 1.0x (100% full rating weight)
     """
-    chaps = [c.strip() for c in (chapters or []) if c and c.strip()]
-    subjs = [s.strip() for s in (subjects or []) if s and s.strip() and s.strip().lower() not in ("mixed", "full syllabus")]
+    chaps = [c.strip() for c in (chapters or []) if c and c.strip() and c.strip().lower() not in ("all", "any", "full syllabus", "*")]
+    subjs = [s.strip() for s in (subjects or []) if s and s.strip() and s.strip().lower() not in ("mixed", "full syllabus", "all", "any")]
 
-    if not chaps or len(chaps) >= 3 or not subjs:
-        return 1.0, "Full Syllabus / Multi-Chapter evaluation (100% Elo weight)"
+    # True Full Syllabus: no custom chapter filter AND all 3 PCM subjects
+    if not chaps:
+        if not subjs or len(subjs) >= 3:
+            return 1.0, "Full Syllabus Tri-Subject evaluation (100% Elo weight)"
+        elif len(subjs) == 2:
+            return 0.85, f"Two-Subject Full Syllabus ({'/'.join(subjs)} - 85% Elo weight)"
+        elif len(subjs) == 1:
+            return 0.75, f"Single-Subject Full Syllabus ({subjs[0]} - 75% Elo weight)"
 
+    num_chaps = len(chaps)
+    if num_chaps == 1:
+        base_factor = 0.35
+        scope_desc = f"Single custom chapter '{chaps[0]}'"
+    elif num_chaps <= 3:
+        base_factor = 0.50
+        scope_desc = f"Custom {num_chaps}-chapter bundle"
+    elif num_chaps <= 6:
+        base_factor = 0.65
+        scope_desc = f"Custom {num_chaps}-chapter module"
+    elif num_chaps <= 12:
+        base_factor = 0.80
+        scope_desc = f"Custom {num_chaps}-chapter unit"
+    elif num_chaps <= 20:
+        base_factor = 0.90
+        scope_desc = f"Multi-unit test ({num_chaps} chapters)"
+    else:
+        base_factor = 1.0
+        scope_desc = f"Comprehensive syllabus test ({num_chaps} chapters)"
+
+    # Prior repetition dampener on those specific chapters
     from backend.app.tools.jee_syllabus import normalize_chapter_name
     norm_chaps = [normalize_chapter_name(c) for c in chaps if normalize_chapter_name(c)]
+    all_query_chaps = list(set(norm_chaps + chaps))
 
-    placeholders = ','.join(['?'] * (len(norm_chaps) + len(chaps)))
-    query_params = [user_id] + norm_chaps + chaps
+    prior_attempts = 0
+    if all_query_chaps and cursor:
+        placeholders = ','.join(['?'] * len(all_query_chaps))
+        query_params = [user_id] + all_query_chaps
+        try:
+            cursor.execute(f"""
+                SELECT COUNT(*) as cnt FROM activity_log
+                WHERE user_id = ? AND (chapter IN ({placeholders}))
+            """, tuple(query_params))
+            row = cursor.fetchone()
+            prior_attempts = row["cnt"] if row else 0
+        except Exception:
+            pass
 
-    cursor.execute(f"""
-        SELECT COUNT(*) as cnt FROM activity_log
-        WHERE user_id = ? AND (chapter IN ({placeholders}))
-    """, tuple(query_params))
-    row = cursor.fetchone()
-    prior_attempts = row["cnt"] if row else 0
+    repetition_damp = max(0.60, 1.0 / math.sqrt(1.0 + (prior_attempts / 20.0)))
+    final_factor = round(max(0.20, min(1.0, base_factor * repetition_damp)), 2)
 
-    repetition_damp = max(0.20, 1.0 / math.sqrt(1.0 + (prior_attempts / 12.0)))
+    reason = f"Rating Calibrated ({int(final_factor * 100)}%): {scope_desc} selected instead of Full Syllabus"
+    return final_factor, reason
 
-    # Subject Breadth Dampener:
-    cov = get_user_syllabus_coverage(cursor, user_id)
-    if cov["active_subjects_count"] <= 1 and cov["active_count"] >= 5:
-        subject_damp = 0.8
-    else:
-        subject_damp = 1.0
 
-    factor = round(repetition_damp * subject_damp, 2)
-    reason = f"Chapter '{chaps[0]}' practice ({prior_attempts} prior attempts -> {int(factor * 100)}% Overall Elo weight)"
-    return factor, reason
+# Alias for clarity
+calculate_chapter_calibration_factor = calculate_chapter_diminishing_factor
 
 
 def calculate_subject_asymmetry_factor(
@@ -578,13 +615,19 @@ def apply_match_elo_to_user(
         overall_delta = round(raw_delta * chap_factor, 1)
         reason = chap_reason
 
-    # Determine subject delta (unrestricted domain mastery)
+    # Determine subject delta (calibrated if custom chapters selected vs full syllabus)
     subjs = [s.strip() for s in (subjects or []) if s and s.strip() and s.strip().lower() not in ("mixed", "full syllabus")]
     subj_updates = []
     now_iso = datetime.datetime.utcnow().isoformat()
 
+    subj_calibration = 1.0
+    if chapters and len(chapters) > 0:
+        valid_chaps = [c.strip() for c in chapters if c and c.strip().lower() not in ("all", "any", "full syllabus", "*")]
+        if valid_chaps:
+            subj_calibration = min(1.0, 0.40 + 0.60 * (len(valid_chaps) / 12.0))
+
     if subjs:
-        s_delta = round(raw_delta / len(subjs), 1)
+        s_delta = round((raw_delta / len(subjs)) * subj_calibration, 1)
         for s in subjs:
             s_low = s.lower()
             if "phys" in s_low:
@@ -594,7 +637,7 @@ def apply_match_elo_to_user(
             elif "math" in s_low:
                 subj_updates.append(("math_elo", s_delta))
     else:
-        third = round(raw_delta / 3.0, 1)
+        third = round((raw_delta / 3.0) * subj_calibration, 1)
         subj_updates.append(("physics_elo", third))
         subj_updates.append(("chemistry_elo", third))
         subj_updates.append(("math_elo", third))

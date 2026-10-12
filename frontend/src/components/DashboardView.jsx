@@ -350,13 +350,19 @@ export default function DashboardView({
             onClick={() => {
               if (onNavigateTab) {
                 sound.click();
-                onNavigateTab('profile');
+                if (user.full_mocks_count > 0) {
+                  onNavigateTab('profile');
+                } else {
+                  onNavigateTab('mocks');
+                }
               }
             }}
             className="bg-[#262c3c] border border-blue-500/20 hover:border-blue-400/50 rounded-2xl p-4 flex items-center gap-3 cursor-pointer transition hover:scale-[1.02] group shadow-lg"
-            title="Click to view full AIR Diagnostic & JoSAA College Predictor in Profile"
+            title={user.full_mocks_count > 0 ? "Click to view full AIR Diagnostic & JoSAA College Predictor in Profile" : "Click to enter Mock Examination Center and take a Full Mock to unlock authentic AIR"}
           >
-            <div className="p-3 rounded-xl bg-blue-950/80 text-blue-400 border border-blue-500/30 group-hover:scale-105 transition shrink-0">
+            <div className={`p-3 rounded-xl border group-hover:scale-105 transition shrink-0 ${
+              user.full_mocks_count > 0 ? 'bg-blue-950/80 text-blue-400 border-blue-500/30' : 'bg-amber-950/60 text-amber-400 border-amber-500/30'
+            }`}>
               <Sparkles className="w-5 h-5" />
             </div>
             <div className="min-w-0 flex-1">
@@ -365,18 +371,29 @@ export default function DashboardView({
                   <span>AIR Forecast</span>
                   <ArrowRight className="w-2.5 h-2.5 text-blue-400 group-hover:translate-x-0.5 transition" />
                 </span>
-                {user.predicted_percentile !== undefined && (
+                {user.full_mocks_count > 0 && user.predicted_percentile !== undefined && user.predicted_percentile !== null ? (
                   <span className="text-[9px] font-mono font-bold text-cyan-400 bg-cyan-950/60 px-1.5 py-0.2 rounded border border-cyan-500/30">
                     {user.predicted_percentile}%ile
+                  </span>
+                ) : (
+                  <span className="text-[9px] font-mono font-bold text-amber-400 bg-amber-950/60 px-1.5 py-0.2 rounded border border-amber-500/30">
+                    0 Full Mocks
                   </span>
                 )}
               </div>
               <h4 className="text-sm sm:text-base font-black font-mono text-blue-300 truncate">
-                {user.predicted_air_formatted || (user.predicted_air ? `AIR ${Number(user.predicted_air).toLocaleString()}` : user.predicted_air_bracket?.split('(')[0] || 'Calibrating...')}
+                {user.full_mocks_count > 0
+                  ? (user.predicted_air_formatted || (user.predicted_air ? `AIR ${Number(user.predicted_air).toLocaleString()}` : user.predicted_air_bracket?.split('(')[0] || 'Calibrated'))
+                  : 'Requires Full Mock'}
               </h4>
-              {user.predicted_jee_main_marks !== undefined && (
+              {user.full_mocks_count > 0 && user.predicted_jee_main_marks !== undefined && user.predicted_jee_main_marks !== null ? (
                 <div className="text-[10px] text-slate-400 truncate mt-0.5">
-                  Est. Marks: <span className="font-mono text-slate-200 font-bold">{user.predicted_jee_main_marks}</span><span className="text-slate-500">/300</span>
+                  Est. Marks: <span className="font-mono text-slate-200 font-bold">{user.predicted_jee_main_marks}</span><span className="text-slate-500">/300 ({user.full_mocks_count} Mocks)</span>
+                </div>
+              ) : (
+                <div className="text-[10px] text-amber-400/90 truncate mt-0.5 font-medium flex items-center gap-1">
+                  <span>Take Full Mock to Unlock AIR</span>
+                  <ArrowRight className="w-2.5 h-2.5" />
                 </div>
               )}
             </div>

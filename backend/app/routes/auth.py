@@ -98,7 +98,8 @@ def format_user_profile(user: dict, cursor=None) -> UserProfile:
 
     target_exam = user.get("target_exam") or "MIXED"
 
-    from backend.app.tools.air_engine import calculate_advanced_air
+    from backend.app.tools.air_engine import calculate_advanced_air, get_user_full_mock_history
+    full_mocks_metrics = get_user_full_mock_history(cursor, user_id)
     air_data = calculate_advanced_air(
         overall_elo=user.get("overall_elo", 1200.0),
         physics_elo=user.get("physics_elo", 1200.0),
@@ -108,7 +109,8 @@ def format_user_profile(user: dict, cursor=None) -> UserProfile:
         active_subjects_count=active_subjs_count,
         total_solved=solved,
         total_correct=correct,
-        target_exam=target_exam
+        target_exam=target_exam,
+        full_mocks_metrics=full_mocks_metrics
     )
     air = air_data["predicted_air_bracket"]
     air_gate = air_data["air_gate_reason"]
@@ -236,7 +238,11 @@ def format_user_profile(user: dict, cursor=None) -> UserProfile:
         daily_question_goal=daily_goal_meta["daily_question_goal"],
         daily_goal_solved=daily_goal_meta["daily_goal_solved"],
         daily_goal_date=daily_goal_meta["daily_goal_date"],
-        daily_goal_meta=daily_goal_meta
+        daily_goal_meta=daily_goal_meta,
+        full_mocks_count=air_data.get("full_mocks_count", 0),
+        best_mock_marks=air_data.get("best_mock_marks"),
+        average_mock_marks=air_data.get("average_mock_marks"),
+        is_mock_calibrated=air_data.get("is_mock_calibrated", False)
     )
     _PROFILE_OUT_CACHE[user_id] = (now, state_sig, prof_out)
     return prof_out

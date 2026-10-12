@@ -69,6 +69,10 @@ class UserProfile(BaseModel):
     daily_goal_solved: Optional[int] = 0
     daily_goal_date: Optional[str] = None
     daily_goal_meta: Optional[Dict[str, Any]] = None
+    full_mocks_count: Optional[int] = 0
+    best_mock_marks: Optional[float] = None
+    average_mock_marks: Optional[float] = None
+    is_mock_calibrated: Optional[bool] = False
 
 class ProfileUpdateRequest(BaseModel):
     target_college: Optional[str] = None

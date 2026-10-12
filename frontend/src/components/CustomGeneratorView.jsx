@@ -771,6 +771,43 @@ export default function CustomGeneratorView({ user, onRoomCreated, onOpenAuth })
               </div>
             </div>
 
+            {/* Competitive Rating Calibration Indicator */}
+            {selectedChapters.length === 0 ? (
+              <div className="bg-emerald-950/30 border border-emerald-500/30 rounded-2xl p-3.5 mb-6 flex items-center justify-between gap-3 text-xs">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-8 h-8 rounded-xl bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 flex items-center justify-center text-sm shrink-0">
+                    🛡️
+                  </div>
+                  <div>
+                    <span className="font-bold text-white block">Full Syllabus Mode Active (100% Elo Weight)</span>
+                    <span className="text-[11px] text-slate-400">Questions draw across all chapters. Full Overall and Subject Elo progression applies.</span>
+                  </div>
+                </div>
+                <span className="px-2.5 py-1 rounded-lg bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 font-mono font-bold text-[11px] shrink-0">
+                  100% Rating
+                </span>
+              </div>
+            ) : (
+              <div className="bg-amber-950/30 border border-amber-500/30 rounded-2xl p-3.5 mb-6 flex items-center justify-between gap-3 text-xs">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-8 h-8 rounded-xl bg-amber-500/20 text-amber-400 border border-amber-500/30 flex items-center justify-center text-sm shrink-0">
+                    ⚡
+                  </div>
+                  <div>
+                    <span className="font-bold text-white block">
+                      Custom Chapter Selection ({selectedChapters.length} Chapter{selectedChapters.length > 1 ? 's' : ''})
+                    </span>
+                    <span className="text-[11px] text-amber-200/80">
+                      Overall rating scaled to {selectedChapters.length === 1 ? 35 : selectedChapters.length <= 3 ? 50 : selectedChapters.length <= 6 ? 65 : selectedChapters.length <= 12 ? 80 : selectedChapters.length <= 20 ? 90 : 100}% based on syllabus breadth. Chapter-level masteries receive 100% full rating delta.
+                    </span>
+                  </div>
+                </div>
+                <span className="px-2.5 py-1 rounded-lg bg-amber-500/20 text-amber-300 border border-amber-500/40 font-mono font-bold text-[11px] shrink-0">
+                  {selectedChapters.length === 1 ? '35%' : selectedChapters.length <= 3 ? '50%' : selectedChapters.length <= 6 ? '65%' : selectedChapters.length <= 12 ? '80%' : selectedChapters.length <= 20 ? '90%' : '100%'} Rating Weight
+                </span>
+              </div>
+            )}
+
             {/* Subject Navigation Tabs (Physics, Chemistry, Maths) */}
             <div className="flex items-center gap-2 border-b border-white/10 pb-4 mb-6 overflow-x-auto">
               {[

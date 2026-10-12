@@ -93,6 +93,17 @@ export default function ResultsView({ roomCode, user, onReturnArena, onRematch, 
             <p className="text-xs uppercase tracking-widest text-slate-400 mt-1 font-mono">
               Room #{results.room_code} • {results.mode === 'MOCK_TEST' ? 'Common NTA Mock Examination (Identical Question Paper)' : results.mode}
             </p>
+            {results.calibration_factor !== undefined && results.calibration_factor < 0.99 ? (
+              <div className="mt-3 inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-amber-500/15 border border-amber-500/30 text-amber-300 text-xs font-mono max-w-xl mx-auto shadow-sm">
+                <span>⚡</span>
+                <span><strong>Rating Calibrated ({Math.round(results.calibration_factor * 100)}%):</strong> {results.calibration_reason || 'Custom chapter selected instead of full syllabus'}</span>
+              </div>
+            ) : results.calibration_factor !== undefined ? (
+              <div className="mt-3 inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 text-xs font-mono max-w-xl mx-auto shadow-sm">
+                <span>🛡️</span>
+                <span><strong>Full Syllabus Evaluation:</strong> 100% Full Competitive Rating Applied</span>
+              </div>
+            ) : null}
           </div>
 
           {/* Podium Display (1st, 2nd, 3rd) */}

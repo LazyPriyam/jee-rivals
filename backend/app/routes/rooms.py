@@ -1203,6 +1203,12 @@ async def submit_bulk_mock(code: str, req: BulkSubmissionRequest, user: dict = D
                 apply_match_elo_to_user(c, uid, delta, r_subjs, r_chaps)
                 invalidate_user_cache(uid)
 
+    r_subjs_all = json.loads(room["subjects"]) if isinstance(room.get("subjects"), str) else (room.get("subjects") or [])
+    r_chaps_all = json.loads(room["chapters"]) if isinstance(room.get("chapters"), str) else (room.get("chapters") or [])
+    from backend.app.tools.elo_engine import calculate_chapter_calibration_factor
+    calib_factor, calib_reason = calculate_chapter_calibration_factor(c, user["id"], r_chaps_all, r_subjs_all)
+    is_full_syllabus = bool(calib_factor >= 0.99)
+
     conn.commit()
     conn.close()
 
@@ -1219,7 +1225,10 @@ async def submit_bulk_mock(code: str, req: BulkSubmissionRequest, user: dict = D
     return {
         "score": total_score,
         "marks": total_marks,
-        "match_completed": match_completed
+        "match_completed": match_completed,
+        "calibration_factor": calib_factor,
+        "calibration_reason": calib_reason,
+        "is_full_syllabus": is_full_syllabus
     }
 
 
@@ -1571,6 +1580,12 @@ def get_room_results(code: str, user: dict = Depends(get_current_user)):
                 "solution": sol_out.dict()
             })
 
+    r_subjs_all = json.loads(room["subjects"]) if isinstance(room.get("subjects"), str) else (room.get("subjects") or [])
+    r_chaps_all = json.loads(room["chapters"]) if isinstance(room.get("chapters"), str) else (room.get("chapters") or [])
+    from backend.app.tools.elo_engine import calculate_chapter_calibration_factor
+    calib_factor, calib_reason = calculate_chapter_calibration_factor(c, user["id"], r_chaps_all, r_subjs_all)
+    is_full_syllabus = bool(calib_factor >= 0.99)
+
     conn.close()
 
     total_q = room.get("total_questions") or len(q_ids) or 1
@@ -1612,6 +1627,9 @@ def get_room_results(code: str, user: dict = Depends(get_current_user)):
         "status": room["status"],
         "total_questions": total_q,
         "max_marks": float(total_q * 4),
+        "calibration_factor": calib_factor,
+        "calibration_reason": calib_reason,
+        "is_full_syllabus": is_full_syllabus,
         "participants": participants_summary,
         "questions": questions_data
     }
