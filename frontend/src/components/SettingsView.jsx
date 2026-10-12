@@ -122,6 +122,7 @@ export default function SettingsView({
   const [targetExamDate, setTargetExamDate] = useState(user?.target_exam_date || 'JEE Main Jan 2026');
   const [bio, setBio] = useState(user?.bio || '');
   const [bannerTheme, setBannerTheme] = useState(user?.banner_theme || 'orange_cyber');
+  const [dailyQuestionGoal, setDailyQuestionGoal] = useState(user?.daily_question_goal || 60);
 
   // Security PIN states
   const [currentPin, setCurrentPin] = useState('');
@@ -206,6 +207,7 @@ export default function SettingsView({
       setTargetExamDate(user.target_exam_date || 'JEE Main Jan 2026');
       setBio(user.bio || '');
       setBannerTheme(user.banner_theme || 'orange_cyber');
+      setDailyQuestionGoal(user.daily_question_goal || 60);
 
       const cs = user.chat_settings || {};
       setQuickChatEnabled(cs.quick_chat_enabled !== false);
@@ -326,6 +328,7 @@ export default function SettingsView({
         target_exam_date: targetExamDate,
         bio,
         banner_theme: bannerTheme,
+        daily_question_goal: dailyQuestionGoal,
       };
 
       const updated = await api.auth.updateProfile(payload);
@@ -825,6 +828,79 @@ export default function SettingsView({
                     </button>
                   );
                 })}
+              </div>
+            </div>
+
+            {/* Daily Question Target Goal */}
+            <div className="space-y-3 pt-3 border-t border-white/5">
+              <div className="flex items-center justify-between">
+                <div>
+                  <label className="text-xs font-bold text-slate-300 flex items-center gap-1.5">
+                    <Target className="w-3.5 h-3.5 text-orange-400" />
+                    Daily Question Target Goal
+                  </label>
+                  <p className="text-[11px] text-slate-400 mt-0.5">
+                    Calibrate your daily problem solving volume shown on the Dashboard milestone track.
+                  </p>
+                </div>
+                <span className="text-xs font-mono font-bold text-orange-400 bg-orange-950/60 px-2.5 py-1 rounded-xl border border-orange-500/30">
+                  {dailyQuestionGoal} Qs / day
+                </span>
+              </div>
+
+              {/* Quick Presets */}
+              <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
+                {[
+                  { count: 20, label: 'Casual', desc: 'Warmup' },
+                  { count: 40, label: 'Focused', desc: 'Steady' },
+                  { count: 60, label: 'Kota Grind', desc: 'Standard' },
+                  { count: 80, label: 'Intense', desc: 'Heavy' },
+                  { count: 100, label: 'Apex Titan', desc: 'Extreme' },
+                ].map((preset) => (
+                  <button
+                    key={preset.count}
+                    type="button"
+                    onClick={() => {
+                      sound.click();
+                      setDailyQuestionGoal(preset.count);
+                    }}
+                    className={`p-2.5 rounded-xl border text-center transition cursor-pointer flex flex-col items-center gap-0.5 ${
+                      dailyQuestionGoal === preset.count
+                        ? 'bg-orange-500/25 border-orange-500 text-orange-300 shadow-md shadow-orange-950/40 font-bold'
+                        : 'bg-[#0a0d14] border-white/10 text-slate-400 hover:text-white hover:border-white/20'
+                    }`}
+                  >
+                    <span className="text-xs font-black font-mono text-white">{preset.count} Qs</span>
+                    <span className="text-[10px] text-orange-400/90 font-medium">{preset.label}</span>
+                  </button>
+                ))}
+              </div>
+
+              {/* Slider & Custom Input */}
+              <div className="flex items-center gap-4 bg-[#0a0d14] border border-white/10 rounded-xl p-3">
+                <input
+                  type="range"
+                  min={10}
+                  max={150}
+                  step={5}
+                  value={dailyQuestionGoal}
+                  onChange={(e) => setDailyQuestionGoal(Number(e.target.value))}
+                  className="flex-1 accent-orange-500 cursor-pointer h-2 bg-slate-800 rounded-lg"
+                />
+                <div className="flex items-center gap-1.5 shrink-0">
+                  <input
+                    type="number"
+                    min={5}
+                    max={300}
+                    value={dailyQuestionGoal}
+                    onChange={(e) => {
+                      const val = Math.max(5, Math.min(300, Number(e.target.value) || 5));
+                      setDailyQuestionGoal(val);
+                    }}
+                    className="w-16 px-2 py-1.5 bg-[#121622] border border-white/15 focus:border-orange-500 rounded-lg text-white font-mono text-xs font-bold text-center focus:outline-none"
+                  />
+                  <span className="text-xs text-slate-400 font-mono">Qs</span>
+                </div>
               </div>
             </div>
 

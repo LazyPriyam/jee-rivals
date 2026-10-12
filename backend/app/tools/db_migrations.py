@@ -569,6 +569,22 @@ def migration_008_provisional_report_reconciliation(conn: sqlite3.Connection):
         c.execute("ALTER TABLE question_reports ADD COLUMN provisional_subject TEXT DEFAULT NULL;")
 
 
+def migration_009_daily_question_goal(conn: sqlite3.Connection):
+    """
+    Safely adds daily_question_goal, daily_goal_solved, and daily_goal_date columns to users table.
+    Enables user-configurable daily problem-solving targets, dashboard runner milestones, and daily tracking.
+    """
+    c = conn.cursor()
+    c.execute("PRAGMA table_info(users);")
+    existing_cols = {row[1] for row in c.fetchall()}
+    if "daily_question_goal" not in existing_cols:
+        c.execute("ALTER TABLE users ADD COLUMN daily_question_goal INTEGER DEFAULT 60;")
+    if "daily_goal_solved" not in existing_cols:
+        c.execute("ALTER TABLE users ADD COLUMN daily_goal_solved INTEGER DEFAULT 0;")
+    if "daily_goal_date" not in existing_cols:
+        c.execute("ALTER TABLE users ADD COLUMN daily_goal_date TEXT DEFAULT NULL;")
+
+
 # Master migration registry (ordered sequentially)
 MIGRATIONS: List[Dict[str, Any]] = [
     {
@@ -610,6 +626,11 @@ MIGRATIONS: List[Dict[str, Any]] = [
         "version": 8,
         "name": "provisional_report_reconciliation",
         "func": migration_008_provisional_report_reconciliation,
+    },
+    {
+        "version": 9,
+        "name": "daily_question_goal",
+        "func": migration_009_daily_question_goal,
     },
 ]
 

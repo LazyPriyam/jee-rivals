@@ -1151,6 +1151,12 @@ async def submit_bulk_mock(code: str, req: BulkSubmissionRequest, user: dict = D
         WHERE id = ?
     """, (len(q_ids), total_correct, max(10, total_score if total_score > 0 else 10), now, user["id"]))
 
+    try:
+        from backend.app.tools.daily_goal_engine import record_daily_question_solved
+        record_daily_question_solved(user["id"], c, count=len(q_ids))
+    except Exception:
+        pass
+
     # Check if everyone finished
     c.execute("SELECT COUNT(*) as unfinished FROM room_participants WHERE room_id = ? AND is_finished = 0", (room_id,))
     unfinished_count = c.fetchone()["unfinished"]
@@ -1378,6 +1384,11 @@ async def submit_answer(
             try:
                 from backend.app.tools.streaks_engine import record_daily_activity
                 record_daily_activity(u_id, bg_c)
+            except Exception:
+                pass
+            try:
+                from backend.app.tools.daily_goal_engine import record_daily_question_solved
+                record_daily_question_solved(u_id, bg_c, count=1)
             except Exception:
                 pass
             bg_conn.commit()

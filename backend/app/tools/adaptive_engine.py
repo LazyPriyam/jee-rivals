@@ -658,3 +658,10 @@ def apply_adaptive_result_to_profile(
         record_daily_activity(user_id, cursor)
     except Exception:
         pass
+
+    # 7. Record Daily Question Goal Progress
+    try:
+        from backend.app.tools.daily_goal_engine import record_daily_question_solved
+        record_daily_question_solved(user_id, cursor, count=1)
+    except Exception:
+        pass

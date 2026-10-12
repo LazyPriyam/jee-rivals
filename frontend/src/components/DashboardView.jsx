@@ -6,6 +6,7 @@ import OngoingMatchCard from './OngoingMatchCard';
 import DivisionGuideModal from './DivisionGuideModal';
 import StreakModal from './StreakModal';
 import GrowthTriadRadar from './GrowthTriadRadar';
+import DailyGoalCard from './DailyGoalCard';
 import { clearActiveTestRoom } from '../utils/storageGuardian';
 
 export default function DashboardView({
@@ -217,6 +218,15 @@ export default function DashboardView({
           )}
         </div>
       </div>
+
+      {/* Daily Question Goal Progress Circuit */}
+      {user && (
+        <DailyGoalCard
+          user={user}
+          onUpdateUser={onUpdateUser}
+          onNavigateTab={onNavigateTab}
+        />
+      )}
 
       {/* Adaptive Practice AI Banner */}
       <div

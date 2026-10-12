@@ -57,6 +57,9 @@ def format_user_profile(user: dict, cursor=None) -> UserProfile:
         user.get("pinned_badges"),
         user.get("chat_settings"),
         user.get("current_streak"),
+        user.get("daily_question_goal"),
+        user.get("daily_goal_solved"),
+        user.get("daily_goal_date"),
     )
     cached_prof = _PROFILE_OUT_CACHE.get(user_id)
     if cached_prof and (now - cached_prof[0] < 45.0) and cached_prof[1] == state_sig:
@@ -172,6 +175,9 @@ def format_user_profile(user: dict, cursor=None) -> UserProfile:
     from backend.app.tools.growth_triad_engine import calculate_growth_triad
     triad_meta = calculate_growth_triad(user, cursor)
 
+    from backend.app.tools.daily_goal_engine import get_user_daily_goal_status
+    daily_goal_meta = get_user_daily_goal_status(user)
+
     prof_out = UserProfile(
         id=user["id"],
         username=user["username"],
@@ -226,7 +232,11 @@ def format_user_profile(user: dict, cursor=None) -> UserProfile:
         is_online=room_hub.is_user_online(user["id"], user.get("last_active")),
         growth_triad=triad_meta,
         avatar_image_url=user.get("avatar_image_url"),
-        banner_image_url=user.get("banner_image_url")
+        banner_image_url=user.get("banner_image_url"),
+        daily_question_goal=daily_goal_meta["daily_question_goal"],
+        daily_goal_solved=daily_goal_meta["daily_goal_solved"],
+        daily_goal_date=daily_goal_meta["daily_goal_date"],
+        daily_goal_meta=daily_goal_meta
     )
     _PROFILE_OUT_CACHE[user_id] = (now, state_sig, prof_out)
     return prof_out
@@ -402,6 +412,13 @@ def update_profile(data: dict, user: dict = Depends(get_current_user)):
         else:
             fields.append("banner_image_url = ?")
             values.append(None)
+    if "daily_question_goal" in data and data["daily_question_goal"] is not None:
+        try:
+            goal_val = max(5, min(300, int(data["daily_question_goal"])))
+            fields.append("daily_question_goal = ?")
+            values.append(goal_val)
+        except (ValueError, TypeError):
+            pass
 
     if not fields:
         return format_user_profile(user)
@@ -438,6 +455,29 @@ def update_learnt_chapters(data: dict, user: dict = Depends(get_current_user)):
     conn = get_connection()
     c = conn.cursor()
     c.execute("UPDATE users SET learnt_chapters = ? WHERE id = ?", (json.dumps(chapters), user["id"]))
+    conn.commit()
+    conn.close()
+
+    invalidate_user_cache(user["id"])
+    invalidate_coverage_cache(user["id"])
+    updated = get_user_by_id(user["id"])
+    return format_user_profile(updated)
+
+
+@router.put("/daily-goal", response_model=UserProfile)
+def update_daily_goal(data: dict, user: dict = Depends(get_current_user)):
+    """
+    Updates the aspirant's daily question solving goal (between 5 and 300 Qs).
+    """
+    raw_goal = data.get("goal") or data.get("daily_question_goal") or 60
+    try:
+        goal = max(5, min(300, int(raw_goal)))
+    except (ValueError, TypeError):
+        goal = 60
+
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute("UPDATE users SET daily_question_goal = ? WHERE id = ?", (goal, user["id"]))
     conn.commit()
     conn.close()
 

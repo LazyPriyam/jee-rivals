@@ -65,6 +65,10 @@ class UserProfile(BaseModel):
     growth_triad: Optional[Dict[str, Any]] = None
     avatar_image_url: Optional[str] = None
     banner_image_url: Optional[str] = None
+    daily_question_goal: Optional[int] = 60
+    daily_goal_solved: Optional[int] = 0
+    daily_goal_date: Optional[str] = None
+    daily_goal_meta: Optional[Dict[str, Any]] = None
 
 class ProfileUpdateRequest(BaseModel):
     target_college: Optional[str] = None
@@ -79,6 +83,7 @@ class ProfileUpdateRequest(BaseModel):
     banner_image_url: Optional[str] = None
     learnt_chapters: Optional[List[str]] = None
     chat_settings: Optional[Dict[str, Any]] = None
+    daily_question_goal: Optional[int] = None
 
 class ChangeUsernameRequest(BaseModel):
     new_username: str = Field(..., min_length=3, max_length=20)

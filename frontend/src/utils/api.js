@@ -261,6 +261,11 @@ export const api = {
         method: "PUT",
         body: JSON.stringify({ chapters }),
       }),
+    updateDailyGoal: (goal) =>
+      request("/api/auth/daily-goal", {
+        method: "PUT",
+        body: JSON.stringify({ goal }),
+      }),
     changeUsername: (new_username) =>
       request("/api/auth/change-username", {
         method: "POST",
