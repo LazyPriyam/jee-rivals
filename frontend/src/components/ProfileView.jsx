@@ -11,7 +11,7 @@ import {
 } from '../utils/imageCompressor';
 import {
   User, Trophy, Shield, Activity, Target, Zap, Clock, CheckCircle2,
-  XCircle, ArrowLeft, RefreshCw, Flame, Edit3, BookOpen, Award,
+  XCircle, ArrowLeft, ArrowRight, AlertTriangle, RefreshCw, Flame, Edit3, BookOpen, Award,
   Swords, TrendingUp, Sparkles, Calendar, GraduationCap, Pin, PinOff,
   ChevronRight, Lock, Check, Layers, BarChart2, Star, Send,
   Share2, Eye, FileText, Search, Upload, Image as ImageIcon, Trash2,
