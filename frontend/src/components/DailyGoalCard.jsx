@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { createPortal } from 'react-dom';
 import { ChevronRight, Target, CheckCircle2, X, Sliders, Sparkles, Award } from 'lucide-react';
 import { api, setCachedUser } from '../utils/api';
 import { sound } from '../utils/sound';
@@ -219,9 +220,18 @@ export default function DailyGoalCard({ user, onUpdateUser, onNavigateTab }) {
       </div>
 
       {/* Goal Adjustment Modal */}
-      {modalOpen && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-[#161c28] border border-orange-500/40 rounded-3xl p-6 sm:p-7 max-w-md w-full shadow-2xl relative animate-in fade-in zoom-in-95 duration-200">
+      {modalOpen && typeof document !== 'undefined' && createPortal(
+        <div
+          className="fixed inset-0 z-[100] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto"
+          onClick={() => {
+            sound.click();
+            setModalOpen(false);
+          }}
+        >
+          <div
+            className="bg-[#161c28] border border-orange-500/40 rounded-3xl p-6 sm:p-7 max-w-md w-full shadow-2xl relative animate-in fade-in zoom-in-95 duration-200 my-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
             {/* Close Button */}
             <button
               onClick={() => {
@@ -342,7 +352,8 @@ export default function DailyGoalCard({ user, onUpdateUser, onNavigateTab }) {
               </p>
             )}
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </>
   );

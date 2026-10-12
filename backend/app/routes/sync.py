@@ -524,3 +524,48 @@ def get_admin_season_status(
     from backend.app.tools.season_engine import get_current_season_meta
     return get_current_season_meta()
 
+
+@router.post("/daily-goal/reconcile")
+def reconcile_admin_daily_goals(
+    x_sync_token: Optional[str] = Header(None, alias="X-Sync-Token")
+):
+    if not x_sync_token or x_sync_token != ADMIN_SYNC_TOKEN:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or missing sync authentication token."
+        )
+    from backend.app.tools.daily_goal_engine import reconcile_all_users_daily_goal
+    res = reconcile_all_users_daily_goal()
+    return {"success": True, "result": res}
+
+
+@router.get("/daily-goal/inspect")
+def inspect_admin_daily_goals(
+    x_sync_token: Optional[str] = Header(None, alias="X-Sync-Token")
+):
+    if not x_sync_token or x_sync_token != ADMIN_SYNC_TOKEN:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or missing sync authentication token."
+        )
+    conn = get_connection()
+    c = conn.cursor()
+    from backend.app.tools.daily_goal_engine import get_ist_today_boundaries, compute_today_solved_count
+    today_str, start_utc_iso = get_ist_today_boundaries()
+    c.execute("SELECT id, username, total_solved, daily_question_goal, daily_goal_solved, daily_goal_date, last_active FROM users")
+    users = [dict(r) for r in c.fetchall()]
+    dossier = []
+    for u in users:
+        detected = compute_today_solved_count(u["id"], c)
+        dossier.append({
+            "username": u["username"],
+            "daily_question_goal": u.get("daily_question_goal") or 60,
+            "current_daily_goal_solved": u.get("daily_goal_solved") or 0,
+            "detected_today_solved": detected,
+            "daily_goal_date": u.get("daily_goal_date"),
+            "last_active": u.get("last_active")
+        })
+    conn.close()
+    return {"today_ist": today_str, "start_utc_iso": start_utc_iso, "users": dossier}
+
+

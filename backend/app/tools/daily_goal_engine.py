@@ -9,9 +9,11 @@ Features:
    - Tracks questions solved across Speed Duels, Mock Tests, Custom Blueprints, and Adaptive Practice.
 3. IST Day-Boundary Roll:
    - Automatically rolls over at 00:00:00 IST (UTC+5:30) for each new daily sprint.
-4. Milestone Progression:
+4. Historical & Mid-day Auto-Reconciliation:
+   - Accurately captures problems already solved today from activity logs, room participants, and adaptive sessions.
+5. Milestone Progression:
    - 0% (Ready), 25% (Pacing), 50% (Halfway), 75% (Turbo Sprint), 100% (Goal Smashed).
-5. Celebratory Notifications:
+6. Celebratory Notifications:
    - Dispatches in-app notification when daily goal is reached.
 """
 
@@ -19,33 +21,155 @@ import uuid
 import json
 import datetime
 import logging
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Tuple
 
 logger = logging.getLogger("jee_rivals.daily_goal")
 
 
-def get_ist_today() -> str:
-    """Returns today's date formatted as YYYY-MM-DD aligned with IST (UTC+5:30)."""
+def get_ist_today_boundaries() -> Tuple[str, str]:
+    """
+    Returns (today_date_str, start_utc_iso) aligned with IST (UTC+5:30).
+    Today starts at 00:00:00 IST (which is previous day 18:30:00 UTC).
+    """
     now_utc = datetime.datetime.now(datetime.timezone.utc)
     ist_now = now_utc + datetime.timedelta(hours=5, minutes=30)
-    return ist_now.date().isoformat()
+    ist_today_str = ist_now.date().isoformat()
+
+    # Midnight IST in UTC
+    ist_midnight = datetime.datetime(ist_now.year, ist_now.month, ist_now.day, 0, 0, 0)
+    start_utc = ist_midnight - datetime.timedelta(hours=5, minutes=30)
+    start_utc_iso = start_utc.isoformat()
+    return ist_today_str, start_utc_iso
 
 
-def get_user_daily_goal_status(user: dict) -> Dict[str, Any]:
+def get_ist_today() -> str:
+    """Returns today's date formatted as YYYY-MM-DD aligned with IST (UTC+5:30)."""
+    today_str, _ = get_ist_today_boundaries()
+    return today_str
+
+
+def compute_today_solved_count(user_id: str, cursor) -> int:
+    """
+    Accurately calculates total questions attempted/solved today (since 00:00:00 IST)
+    by inspecting activity_log, room_participants, and adaptive_sessions.
+    """
+    today_str, start_utc_iso = get_ist_today_boundaries()
+
+    # 1. Activity Log (captures individual duel and adaptive questions)
+    count_activity = 0
+    try:
+        cursor.execute("""
+            SELECT COUNT(*) FROM activity_log
+            WHERE user_id = ? AND (created_at >= ? OR created_at LIKE ?)
+        """, (user_id, start_utc_iso, f"{today_str}%"))
+        r = cursor.fetchone()
+        if r:
+            count_activity = int(r[0] or 0)
+    except Exception as e:
+        logger.warning(f"[DAILY_GOAL] activity_log query note: {e}")
+
+    # 2. Room Participants (captures completed mock tests, arena duels, and custom blueprints)
+    count_rooms = 0
+    try:
+        cursor.execute("""
+            SELECT answers, current_question_index FROM room_participants
+            WHERE user_id = ? AND (finished_at >= ? OR finished_at LIKE ?)
+        """, (user_id, start_utc_iso, f"{today_str}%"))
+        for row in cursor.fetchall():
+            row_dict = dict(row)
+            raw_answers = row_dict.get("answers")
+            if raw_answers:
+                try:
+                    ans = json.loads(raw_answers) if isinstance(raw_answers, str) else raw_answers
+                    if isinstance(ans, dict):
+                        q_keys = [k for k in ans.keys() if not k.startswith("__")]
+                        count_rooms += max(len(q_keys), int(row_dict.get("current_question_index") or 0))
+                    else:
+                        count_rooms += int(row_dict.get("current_question_index") or 0)
+                except Exception:
+                    count_rooms += int(row_dict.get("current_question_index") or 0)
+            else:
+                count_rooms += int(row_dict.get("current_question_index") or 0)
+    except Exception as e:
+        logger.warning(f"[DAILY_GOAL] room_participants query note: {e}")
+
+    # 3. Adaptive Sessions (captures adaptive questions completed today)
+    count_adaptive = 0
+    try:
+        cursor.execute("""
+            SELECT total_attempted, history FROM adaptive_sessions
+            WHERE user_id = ? AND (created_at >= ? OR completed_at >= ? OR created_at LIKE ? OR completed_at LIKE ?)
+        """, (user_id, start_utc_iso, start_utc_iso, f"{today_str}%", f"{today_str}%"))
+        for row in cursor.fetchall():
+            row_dict = dict(row)
+            att = int(row_dict.get("total_attempted") or 0)
+            if att > 0:
+                count_adaptive += att
+            else:
+                hist_raw = row_dict.get("history")
+                if hist_raw:
+                    try:
+                        hist = json.loads(hist_raw) if isinstance(hist_raw, str) else hist_raw
+                        if isinstance(hist, list):
+                            count_adaptive += len(hist)
+                    except Exception:
+                        pass
+    except Exception as e:
+        logger.warning(f"[DAILY_GOAL] adaptive_sessions query note: {e}")
+
+    return max(count_activity, count_rooms + count_adaptive)
+
+
+def get_user_daily_goal_status(user: dict, cursor=None) -> Dict[str, Any]:
     """
     Computes today's daily question goal metadata, current solved count,
     percentage completed, and milestone stage for the given user.
+    Auto-reconciles/restores questions solved earlier today if daily_goal_solved is 0.
     """
-    today_str = get_ist_today()
+    today_str, _ = get_ist_today_boundaries()
     goal = int(user.get("daily_question_goal") or 60)
     if goal <= 0:
         goal = 60
 
     saved_date = user.get("daily_goal_date")
-    if saved_date == today_str:
-        solved = int(user.get("daily_goal_solved") or 0)
-    else:
-        solved = 0
+    solved = int(user.get("daily_goal_solved") or 0) if saved_date == today_str else 0
+
+    # Auto-reconcile questions solved today if currently 0 or from an older date
+    user_id = user.get("id")
+    if (solved == 0 or saved_date != today_str) and user_id:
+        should_close = False
+        conn = None
+        work_cursor = cursor
+        if work_cursor is None:
+            try:
+                from backend.app.database import get_connection
+                conn = get_connection()
+                work_cursor = conn.cursor()
+                should_close = True
+            except Exception:
+                work_cursor = None
+
+        if work_cursor is not None:
+            try:
+                detected_today = compute_today_solved_count(user_id, work_cursor)
+                if detected_today > 0:
+                    solved = detected_today
+                    work_cursor.execute("""
+                        UPDATE users
+                        SET daily_goal_solved = ?,
+                            daily_goal_date = ?
+                        WHERE id = ?
+                    """, (solved, today_str, user_id))
+                    if should_close and conn:
+                        conn.commit()
+            except Exception as e:
+                logger.warning(f"[DAILY_GOAL] Auto-reconciliation note: {e}")
+            finally:
+                if should_close and conn:
+                    try:
+                        conn.close()
+                    except Exception:
+                        pass
 
     pct = min(100.0, round((solved / goal * 100.0), 1)) if goal > 0 else 0.0
 
@@ -87,7 +211,7 @@ def record_daily_question_solved(user_id: str, cursor, count: int = 1) -> Dict[s
     if count <= 0:
         return {}
 
-    today_str = get_ist_today()
+    today_str, _ = get_ist_today_boundaries()
 
     cursor.execute("SELECT daily_question_goal, daily_goal_solved, daily_goal_date FROM users WHERE id = ?", (user_id,))
     row = cursor.fetchone()
@@ -144,3 +268,62 @@ def record_daily_question_solved(user_id: str, cursor, count: int = 1) -> Dict[s
         "daily_goal_reached": new_solved >= goal,
         "goal_newly_achieved": goal_newly_achieved
     }
+
+
+def reconcile_all_users_daily_goal(conn=None) -> Dict[str, Any]:
+    """
+    Iterates through all users in the system and computes their questions solved today (IST).
+    If higher than their current daily_goal_solved, updates the database.
+    """
+    should_close = False
+    if conn is None:
+        from backend.app.database import get_connection
+        conn = get_connection()
+        should_close = True
+
+    try:
+        c = conn.cursor()
+        today_str, _ = get_ist_today_boundaries()
+        c.execute("SELECT id, username, daily_question_goal, daily_goal_solved, daily_goal_date FROM users")
+        users = [dict(r) for r in c.fetchall()]
+
+        updated_users = []
+        for u in users:
+            uid = u["id"]
+            curr_solved = int(u.get("daily_goal_solved") or 0) if u.get("daily_goal_date") == today_str else 0
+            detected = compute_today_solved_count(uid, c)
+            if detected > curr_solved:
+                c.execute("""
+                    UPDATE users
+                    SET daily_goal_solved = ?,
+                        daily_goal_date = ?
+                    WHERE id = ?
+                """, (detected, today_str, uid))
+                updated_users.append({
+                    "username": u["username"],
+                    "previous_solved": curr_solved,
+                    "reconciled_solved": detected,
+                    "goal": u.get("daily_question_goal") or 60
+                })
+
+        conn.commit()
+
+        # Invalidate in-memory user caches so clients see updated counts immediately
+        try:
+            from backend.app.auth import invalidate_user_cache
+            invalidate_user_cache()
+        except Exception:
+            pass
+
+        return {
+            "status": "SUCCESS",
+            "date": today_str,
+            "reconciled_count": len(updated_users),
+            "updated_users": updated_users
+        }
+    finally:
+        if should_close:
+            try:
+                conn.close()
+            except Exception:
+                pass
