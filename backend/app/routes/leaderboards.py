@@ -60,6 +60,12 @@ def get_my_division_details(current_user: dict = Depends(get_current_user)):
     Returns the calling player's rich division status, sub-tier progress,
     promotion/relegation zone, and all divisional tier milestones.
     """
+    try:
+        from backend.app.tools.season_engine import check_and_execute_season_rollover
+        check_and_execute_season_rollover()
+    except Exception:
+        pass
+
     conn = get_connection()
     c = conn.cursor()
     c.execute("SELECT COUNT(*) as higher FROM users WHERE weekly_rp > ?", (current_user.get("weekly_rp", 0),))
@@ -99,6 +105,12 @@ def get_weekly_leaderboard(limit: int = Query(50, ge=1, le=100)):
     cached = _WEEKLY_LB_CACHE.get(limit)
     if cached and (now - cached[0] < 15.0):
         return cached[1]
+
+    try:
+        from backend.app.tools.season_engine import check_and_execute_season_rollover
+        check_and_execute_season_rollover()
+    except Exception:
+        pass
 
     conn = get_connection()
     c = conn.cursor()

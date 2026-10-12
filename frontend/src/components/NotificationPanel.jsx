@@ -509,32 +509,69 @@ export default function NotificationPanel({
                         {data.moderation_updates.map((m) => {
                           const isProvisional = m.type === 'PROVISIONAL_ELO_RESTORED';
                           const isDismissed = m.type === 'REPORT_DISMISSED';
+                          const isSeasonPodium = m.type === 'SEASON_PODIUM';
+                          const isSeasonPromotion = m.type === 'SEASON_PROMOTION';
+                          const isSeasonWrap = m.type === 'SEASON_WRAP';
 
                           const cardClass = isDismissed
                             ? 'bg-rose-950/25 border-rose-500/35'
+                            : isSeasonPodium
+                            ? 'bg-amber-950/40 border-amber-500/50 shadow-amber-500/10'
+                            : isSeasonPromotion
+                            ? 'bg-emerald-950/40 border-emerald-500/50 shadow-emerald-500/10'
+                            : isSeasonWrap
+                            ? 'bg-blue-950/30 border-blue-500/40'
                             : isProvisional
                             ? 'bg-amber-950/30 border-amber-500/40'
                             : 'bg-emerald-950/30 border-emerald-500/40';
 
                           const iconClass = isDismissed
                             ? 'bg-rose-500/20 border-rose-500/40 text-rose-300'
+                            : isSeasonPodium
+                            ? 'bg-amber-500/25 border-amber-500/50 text-amber-300'
+                            : isSeasonPromotion
+                            ? 'bg-emerald-500/25 border-emerald-500/50 text-emerald-300'
+                            : isSeasonWrap
+                            ? 'bg-blue-500/20 border-blue-500/40 text-blue-300'
                             : isProvisional
                             ? 'bg-amber-500/20 border-amber-500/40 text-amber-300'
                             : 'bg-emerald-500/20 border-emerald-500/40 text-emerald-300';
 
                           const badgeText = isDismissed
                             ? 'Report Dismissed • Credit Reverted'
+                            : isSeasonPodium
+                            ? 'Season Podium Medal Winner'
+                            : isSeasonPromotion
+                            ? 'Weekly Promotion Zone'
+                            : isSeasonWrap
+                            ? 'Weekly Season Concluded'
                             : isProvisional
                             ? 'Provisional Safeguard • Pending Review'
                             : 'System Verified & Credited';
 
                           const badgeColor = isDismissed
                             ? 'text-rose-400/90'
+                            : isSeasonPodium
+                            ? 'text-amber-400 font-bold'
+                            : isSeasonPromotion
+                            ? 'text-emerald-400 font-bold'
+                            : isSeasonWrap
+                            ? 'text-blue-400/90'
                             : isProvisional
                             ? 'text-amber-400/90'
                             : 'text-emerald-400/80';
 
-                          const iconEmoji = isDismissed ? '⚖️' : isProvisional ? '🛡️' : '✨';
+                          const iconEmoji = isDismissed
+                            ? '⚖️'
+                            : isSeasonPodium
+                            ? '🏆'
+                            : isSeasonPromotion
+                            ? '🟢'
+                            : isSeasonWrap
+                            ? '📅'
+                            : isProvisional
+                            ? '🛡️'
+                            : '✨';
 
                           return (
                             <div

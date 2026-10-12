@@ -496,3 +496,31 @@ def admin_delete_user_post(payload: AdminDeleteUserPayload, x_sync_token: Option
         "deleted_username": uname
     }
 
+
+@router.post("/season/trigger-reset")
+def trigger_admin_season_reset(
+    force: bool = False,
+    x_sync_token: Optional[str] = Header(None, alias="X-Sync-Token")
+):
+    if not x_sync_token or x_sync_token != ADMIN_SYNC_TOKEN:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or missing sync authentication token."
+        )
+    from backend.app.tools.season_engine import check_and_execute_season_rollover
+    res = check_and_execute_season_rollover(force=force)
+    return {"success": True, "result": res}
+
+
+@router.get("/season/status")
+def get_admin_season_status(
+    x_sync_token: Optional[str] = Header(None, alias="X-Sync-Token")
+):
+    if not x_sync_token or x_sync_token != ADMIN_SYNC_TOKEN:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or missing sync authentication token."
+        )
+    from backend.app.tools.season_engine import get_current_season_meta
+    return get_current_season_meta()
+

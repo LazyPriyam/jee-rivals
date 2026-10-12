@@ -39,6 +39,16 @@ async def start_background_tasks():
     asyncio.create_task(run_abandoned_room_cleaner())
     asyncio.create_task(run_periodic_accounts_backup())
     asyncio.create_task(run_question_cache_warmup())
+    asyncio.create_task(run_periodic_season_checker())
+
+async def run_periodic_season_checker():
+    while True:
+        try:
+            from backend.app.tools.season_engine import check_and_execute_season_rollover
+            await asyncio.to_thread(check_and_execute_season_rollover)
+        except Exception:
+            pass
+        await asyncio.sleep(60)
 
 async def run_question_cache_warmup():
     try:
