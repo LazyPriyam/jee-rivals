@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { ChevronRight, Target, CheckCircle2, X, Sliders, Sparkles, Award } from 'lucide-react';
 import { api, setCachedUser } from '../utils/api';
@@ -117,6 +117,24 @@ export default function DailyGoalCard({ user, onUpdateUser, onNavigateTab }) {
     },
   ];
 
+  // Lock document scroll when modal is open & listen for ESC key
+  useEffect(() => {
+    if (!modalOpen) return;
+    const originalOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape') {
+        sound.click();
+        setModalOpen(false);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.body.style.overflow = originalOverflow;
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [modalOpen]);
+
   const handleOpenModal = () => {
     sound.click();
     setTargetGoal(currentGoal);
@@ -178,16 +196,16 @@ export default function DailyGoalCard({ user, onUpdateUser, onNavigateTab }) {
 
           {/* Right Runner Milestones Track */}
           <div className="w-full sm:w-[480px] md:w-[540px] relative flex items-center justify-between py-2 px-3">
-            {/* Background connecting track line */}
-            <div className="absolute left-6 right-6 top-1/2 -translate-y-1/2 h-1 bg-slate-800/90 rounded-full -z-0" />
-
-            {/* Filled progress track line */}
-            <div
-              className="absolute left-6 top-1/2 -translate-y-1/2 h-1 bg-gradient-to-r from-orange-500 via-amber-500 to-emerald-400 rounded-full transition-all duration-700 -z-0"
-              style={{
-                width: `calc(${percent}% * (100% - 48px) / 100)`,
-              }}
-            />
+            {/* Background connecting track line spanning from center of first milestone to center of last milestone */}
+            <div className="absolute left-[30px] right-[30px] top-1/2 -translate-y-1/2 h-2 bg-slate-800/90 rounded-full overflow-hidden z-0 shadow-inner pointer-events-none">
+              {/* Filled progress bar */}
+              <div
+                className="h-full bg-gradient-to-r from-orange-500 via-amber-400 to-emerald-400 rounded-full transition-all duration-700 shadow-sm shadow-orange-500/50"
+                style={{
+                  width: `${Math.min(100, Math.max(0, percent))}%`,
+                }}
+              />
+            </div>
 
             {/* 5 Milestone Checkpoint Circles */}
             {stages.map((stage) => {
@@ -221,15 +239,19 @@ export default function DailyGoalCard({ user, onUpdateUser, onNavigateTab }) {
 
       {/* Goal Adjustment Modal */}
       {modalOpen && typeof document !== 'undefined' && createPortal(
-        <div
-          className="fixed inset-0 z-[100] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto"
-          onClick={() => {
-            sound.click();
-            setModalOpen(false);
-          }}
-        >
+        <div className="fixed inset-0 w-screen h-screen z-[9999] flex items-center justify-center p-4">
+          {/* Viewport Backdrop */}
           <div
-            className="bg-[#161c28] border border-orange-500/40 rounded-3xl p-6 sm:p-7 max-w-md w-full shadow-2xl relative animate-in fade-in zoom-in-95 duration-200 my-auto"
+            className="fixed inset-0 bg-black/80 backdrop-blur-sm"
+            onClick={() => {
+              sound.click();
+              setModalOpen(false);
+            }}
+          />
+
+          {/* Centered Modal Card */}
+          <div
+            className="relative z-10 bg-[#161c28] border border-orange-500/40 rounded-3xl p-6 sm:p-7 max-w-md w-full shadow-2xl max-h-[90vh] overflow-y-auto animate-in fade-in zoom-in-95 duration-200"
             onClick={(e) => e.stopPropagation()}
           >
             {/* Close Button */}
