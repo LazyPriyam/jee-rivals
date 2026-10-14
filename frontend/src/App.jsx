@@ -482,12 +482,17 @@ export default function App() {
               <MockTestView
                 room={currentRoom}
                 user={user}
-                onMatchComplete={async () => {
+                onMatchComplete={async (bulkRes) => {
+                  const isSolo = !currentRoom.participants || currentRoom.participants.length <= 1;
+                  if (isSolo || bulkRes?.match_completed) {
+                    setRoomViewMode('results');
+                    refreshUser();
+                    return;
+                  }
                   try {
                     const latest = await api.rooms.get(currentRoom.code);
-                    const isSolo = !latest.participants || latest.participants.length <= 1;
                     const allFinished = latest.status === 'COMPLETED' || (latest.participants && latest.participants.every((p) => p.is_finished));
-                    if (isSolo || allFinished) {
+                    if (allFinished) {
                       setRoomViewMode('results');
                     } else {
                       setRoomViewMode('waiting');

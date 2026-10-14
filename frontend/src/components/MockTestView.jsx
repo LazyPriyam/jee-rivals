@@ -337,8 +337,8 @@ export default function MockTestView({ room, user, onMatchComplete, onExitToDash
 
     const totalTime = Math.round((Date.now() - startTimeRef.current) / 1000);
     try {
-      await api.rooms.submitBulk(room.code, answers, totalTime, questionTimes, timelineEvents);
-      onMatchComplete();
+      const res = await api.rooms.submitBulk(room.code, answers, totalTime, questionTimes, timelineEvents);
+      onMatchComplete(res);
     } catch (err) {
       console.error(err);
       onMatchComplete();
@@ -1026,6 +1026,29 @@ export default function MockTestView({ room, user, onMatchComplete, onExitToDash
                   Submit & Exit
                 </button>
               </div>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
+
+      {/* 8. Full-screen Final Submission Loading Screen */}
+      {submitting && typeof document !== 'undefined' && createPortal(
+        <div className="fixed inset-0 z-[10000] bg-slate-950/85 backdrop-blur-md flex flex-col items-center justify-center p-4 select-none animate-fadeIn">
+          <div className="bg-white rounded-3xl shadow-2xl p-6 sm:p-8 max-w-sm w-full text-center flex flex-col items-center border border-slate-200">
+            <div className="relative mb-5 flex items-center justify-center">
+              <div className="w-16 h-16 rounded-full border-4 border-orange-100 border-t-orange-600 animate-spin" />
+              <div className="absolute inset-0 flex items-center justify-center text-xl">
+                ⚡
+              </div>
+            </div>
+            <h3 className="text-lg font-black text-slate-800">Finalizing Mock Test</h3>
+            <p className="text-xs text-slate-500 mt-2 leading-relaxed">
+              Locking your responses and generating your NTA scorecard...
+            </p>
+            <div className="mt-5 flex items-center gap-2 text-[11px] font-mono text-orange-700 bg-orange-50 px-3.5 py-1.5 rounded-full border border-orange-200 shadow-sm">
+              <span className="w-2 h-2 rounded-full bg-orange-500 animate-pulse" />
+              <span>Syncing examination metrics</span>
             </div>
           </div>
         </div>,

@@ -1106,7 +1106,12 @@ class BulkSubmissionRequest(BaseModel):
     timeline: Optional[List[Dict[str, Any]]] = None
 
 @router.post("/{code}/submit_bulk")
-async def submit_bulk_mock(code: str, req: BulkSubmissionRequest, user: dict = Depends(get_current_user)):
+async def submit_bulk_mock(
+    code: str,
+    req: BulkSubmissionRequest,
+    background_tasks: BackgroundTasks,
+    user: dict = Depends(get_current_user)
+):
     """Submits entire mock test at once upon completion."""
     code = code.strip().upper()
     conn = get_connection()
@@ -1139,19 +1144,14 @@ async def submit_bulk_mock(code: str, req: BulkSubmissionRequest, user: dict = D
     now = datetime.datetime.utcnow().isoformat()
     total_correct = 0
     attempted_count = 0
+    telemetry_items = []
 
     base_score = room.get("base_correct_score", 100.0)
     neg_penalty = room.get("negative_marking", -25.0)
 
     from backend.app.tools.question_cache import get_question_cached
     for q_id in q_ids:
-        q = get_question_cached(q_id, cursor=c)
-        if not q:
-            continue
         user_choice = req.answers.get(q_id, "NONE")
-        correct_ans = q["correct_answer"]
-        q_type = q.get("question_type", "MCQ")
-
         q_time = (req.question_times.get(q_id) if req.question_times else None)
         if q_time is None or q_time <= 0:
             q_time = max(1, req.total_time_seconds // max(1, len(q_ids)))
@@ -1161,6 +1161,12 @@ async def submit_bulk_mock(code: str, req: BulkSubmissionRequest, user: dict = D
             delta_marks = 0.0
             is_corr = False
         else:
+            q = get_question_cached(q_id, cursor=c)
+            if not q:
+                continue
+            correct_ans = q["correct_answer"]
+            q_type = q.get("question_type", "MCQ")
+
             attempted_count += 1
             is_corr = is_answer_correct(user_choice, correct_ans, q_type)
             if is_corr:
@@ -1171,28 +1177,13 @@ async def submit_bulk_mock(code: str, req: BulkSubmissionRequest, user: dict = D
                 delta_score = int(neg_penalty)
                 delta_marks = -1.0
 
-            # Record question attempt with anti-guess / anti-spam guardrails
-            from backend.app.tools.elo_engine import update_question_elo_from_attempt
-            q_elo_delta, _ = update_question_elo_from_attempt(
-                c,
-                user["id"],
+            telemetry_items.append((
                 q["id"],
+                q.get("subject"),
+                q.get("chapter"),
                 is_corr,
-                q_time,
-                float(user.get("overall_elo", 1200.0)),
-                now
-            )
-            c.execute("""
-                INSERT INTO activity_log (user_id, question_id, subject, chapter, is_correct, time_spent_seconds, elo_delta, mode, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (user["id"], q["id"], q["subject"], q["chapter"], 1 if is_corr else 0, q_time, q_elo_delta, room["mode"], now))
-            from backend.app.tools.elo_engine import record_chapter_attempt
-            record_chapter_attempt(c, user["id"], q["subject"], q["chapter"], is_corr)
-            try:
-                from backend.app.tools.streaks_engine import record_daily_activity
-                record_daily_activity(user["id"], c)
-            except Exception:
-                pass
+                q_time
+            ))
 
         total_score += delta_score
         total_marks += delta_marks
@@ -1286,6 +1277,49 @@ async def submit_bulk_mock(code: str, req: BulkSubmissionRequest, user: dict = D
 
     conn.commit()
     conn.close()
+
+    def _bg_record_bulk_mock_telemetry(u_id, items, r_mode, overall_e, ts_now):
+        bg_conn = get_connection()
+        try:
+            bg_c = bg_conn.cursor()
+            from backend.app.tools.elo_engine import update_question_elo_from_attempt, record_chapter_attempt
+            for q_id, q_sub, q_ch, is_cor, t_spent in items:
+                try:
+                    q_delta, _ = update_question_elo_from_attempt(
+                        bg_c, u_id, q_id, is_cor, t_spent, overall_e, ts_now
+                    )
+                    bg_c.execute("""
+                        INSERT INTO activity_log (user_id, question_id, subject, chapter, is_correct, time_spent_seconds, elo_delta, mode, created_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """, (u_id, q_id, q_sub, q_ch, 1 if is_cor else 0, t_spent, q_delta, r_mode, ts_now))
+                    record_chapter_attempt(bg_c, u_id, q_sub, q_ch, is_cor)
+                except Exception as item_err:
+                    print(f"[BULK_MOCK_BG] Telemetry item error {q_id}: {item_err}")
+
+            try:
+                from backend.app.tools.streaks_engine import record_daily_activity
+                record_daily_activity(u_id, bg_c)
+            except Exception:
+                pass
+
+            bg_conn.commit()
+        except Exception as e:
+            print(f"[BULK_MOCK_BG] Telemetry bulk recording note: {e}")
+        finally:
+            try:
+                bg_conn.close()
+            except Exception:
+                pass
+
+    if telemetry_items:
+        background_tasks.add_task(
+            _bg_record_bulk_mock_telemetry,
+            user["id"],
+            telemetry_items,
+            room["mode"],
+            float(user.get("overall_elo", 1200.0)),
+            now
+        )
 
     await room_hub.broadcast_to_room(code, "PLAYER_PROGRESS", {
         "user_id": user["id"],
