@@ -417,6 +417,8 @@ def select_mock_and_room_questions(
     mode: str = "MOCK_TEST",
     user_ids: Optional[List[str]] = None,
     exclude_room_id: Optional[str] = None,
+    cumulative_mode: Optional[bool] = False,
+    cumulative_buckets: Optional[Dict[str, List[str]]] = None,
 ) -> List[dict]:
     """
     Master question selector for Mock Tests and Battle Rooms:
@@ -515,6 +517,25 @@ def select_mock_and_room_questions(
     seen_passages: Set[str] = set()
     final_questions: List[dict] = []
 
+    # Resolve cumulative retention buckets if cumulative_mode is active
+    bucket_recent_set: Set[str] = set()
+    bucket_consol_set: Set[str] = set()
+    bucket_fortress_set: Set[str] = set()
+
+    if cumulative_mode:
+        if cumulative_buckets and isinstance(cumulative_buckets, dict):
+            bucket_recent_set = {normalize_chapter_name(str(c)).lower() for c in (cumulative_buckets.get("recent") or []) if c}
+            bucket_consol_set = {normalize_chapter_name(str(c)).lower() for c in (cumulative_buckets.get("consolidation") or []) if c}
+            bucket_fortress_set = {normalize_chapter_name(str(c)).lower() for c in (cumulative_buckets.get("fortress") or []) if c}
+
+        if not (bucket_recent_set or bucket_consol_set or bucket_fortress_set) and user_ids and cursor:
+            from backend.app.tools.cumulative_engine import classify_user_chapters_cumulative
+            cls = classify_user_chapters_cumulative(cursor, user_ids[0], chapters=norm_chapters, subjects=norm_subjects)
+            b = cls.get("buckets", {})
+            bucket_recent_set = {normalize_chapter_name(it["chapter"]).lower() for it in b.get("recent", [])}
+            bucket_consol_set = {normalize_chapter_name(it["chapter"]).lower() for it in b.get("consolidation", [])}
+            bucket_fortress_set = {normalize_chapter_name(it["chapter"]).lower() for it in b.get("fortress", [])}
+
     for s in active_subjects:
         s_target = subj_targets.get(s, 0)
         if s_target <= 0:
@@ -536,6 +557,18 @@ def select_mock_and_room_questions(
             avail_chapters = sorted({normalize_chapter_name(q.get("chapter") or "") for q in s_pool_fallback if q.get("chapter")})
 
         weights_map = {ch: get_chapter_weightage(ch) for ch in avail_chapters}
+        if cumulative_mode and (bucket_recent_set or bucket_consol_set or bucket_fortress_set):
+            for ch in avail_chapters:
+                norm_c = normalize_chapter_name(ch).lower()
+                b_mult = 1.0
+                if norm_c in bucket_recent_set:
+                    b_mult = 4.0  # ~60% weight
+                elif norm_c in bucket_consol_set:
+                    b_mult = 1.7  # ~25% weight
+                elif norm_c in bucket_fortress_set:
+                    b_mult = 1.0  # ~15% weight
+                weights_map[ch] = max(0.1, weights_map[ch] * b_mult)
+
         ch_quotas = distribute_weighted_counts(s_target, weights_map)
 
         # Apply optional difficulty preference

@@ -400,6 +400,11 @@ export const api = {
     getMyHistory: () => request("/api/rooms/my/history"),
     getUserHistory: (username) => request(`/api/rooms/user/${encodeURIComponent(username)}/history`),
     getActive: () => request("/api/rooms/user/active"),
+    classifyCumulative: (chapters = null, subjects = null) =>
+      request("/api/rooms/classify-cumulative", {
+        method: "POST",
+        body: JSON.stringify({ chapters, subjects }),
+      }),
     forfeit: (code) =>
       request(`/api/rooms/${code}/forfeit`, {
         method: "POST",

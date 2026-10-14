@@ -17,7 +17,8 @@ from backend.app.models import (
     ParticipantScore,
     QuestionOut,
     QuestionOptionModel,
-    QuestionSolutionOut
+    QuestionSolutionOut,
+    ClassifyCumulativeRequest
 )
 from backend.app.database import get_connection, get_user_by_id
 from backend.app.auth import get_current_user, get_user_by_username, invalidate_user_cache
@@ -305,6 +306,29 @@ def get_user_test_history_by_username(username: str):
 
 
 
+@router.post("/classify-cumulative")
+def classify_chapters_for_cumulative_test(
+    req: ClassifyCumulativeRequest,
+    user: dict = Depends(get_current_user)
+):
+    """
+    Classifies target chapters into 3 cumulative retention buckets
+    (Recent ~60%, Consolidation ~25%, Fortress Audit ~15%) based on the student's activity timeline.
+    """
+    conn = get_connection()
+    c = conn.cursor()
+    from backend.app.tools.cumulative_engine import classify_user_chapters_cumulative
+    res = classify_user_chapters_cumulative(
+        cursor=c,
+        user_id=user["id"],
+        chapters=req.chapters,
+        subjects=req.subjects
+    )
+    conn.close()
+    return res
+
+
+
 @router.post("/create", response_model=RoomState)
 def create_room(req: RoomCreateRequest, user: dict = Depends(get_current_user)):
     conn = get_connection()
@@ -313,6 +337,9 @@ def create_room(req: RoomCreateRequest, user: dict = Depends(get_current_user)):
     # Determine multi-subject & multi-chapter filters
     filter_subjects = req.subjects or ([req.subject] if req.subject and req.subject.lower() not in ("all", "any") else [])
     filter_chapters = req.chapters or ([req.chapter] if req.chapter and req.chapter.lower() not in ("all", "any") else [])
+
+    if req.cumulative_mode and not req.preset_name:
+        req.preset_name = "Cumulative Retention Exam (60/25/15)"
 
     # Explicit question IDs specified (e.g. Graveyard Re-Duel or Curated Sets)
     if req.question_ids and len(req.question_ids) > 0:
@@ -350,6 +377,8 @@ def create_room(req: RoomCreateRequest, user: dict = Depends(get_current_user)):
             question_type_filter=req.question_type_filter,
             mode=req.mode,
             user_ids=[user["id"]],
+            cumulative_mode=req.cumulative_mode,
+            cumulative_buckets=req.cumulative_buckets,
         )
 
     if not q_rows:

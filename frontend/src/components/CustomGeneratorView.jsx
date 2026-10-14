@@ -21,6 +21,7 @@ import {
   CheckCircle2,
   Layers,
   ChevronRight,
+  ChevronLeft,
   RotateCcw,
   HelpCircle,
   Hash,
@@ -51,6 +52,12 @@ export default function CustomGeneratorView({ user, onRoomCreated, onOpenAuth })
   const [selectedChapters, setSelectedChapters] = useState([]);
   const [chapterSearch, setChapterSearch] = useState('');
 
+  // Cumulative 3-Bucket Retention Mode
+  const [cumulativeMode, setCumulativeMode] = useState(false);
+  const [cumulativeBuckets, setCumulativeBuckets] = useState({ recent: [], consolidation: [], fortress: [] });
+  const [cumulativeCounts, setCumulativeCounts] = useState({ recent: 0, consolidation: 0, fortress: 0, total: 0 });
+  const [cumulativeLoading, setCumulativeLoading] = useState(false);
+
   // Step 3: Question Count & Timers
   const [questionCount, setQuestionCount] = useState(10);
   const [timePerQuestion, setTimePerQuestion] = useState(60); // for Speed Duel (seconds)
@@ -75,12 +82,68 @@ export default function CustomGeneratorView({ user, onRoomCreated, onOpenAuth })
       .catch(() => {});
   }, []);
 
+  // Fetch / update cumulative classification from user's actual activity timeline
+  useEffect(() => {
+    if (!cumulativeMode) return;
+    let isCancelled = false;
+    setCumulativeLoading(true);
+
+    const chaptersToClassify = selectedChapters.length > 0 ? selectedChapters : null;
+    api.rooms.classifyCumulative(chaptersToClassify, selectedSubjects)
+      .then((res) => {
+        if (!isCancelled && res?.buckets) {
+          setCumulativeBuckets(res.buckets);
+          setCumulativeCounts(res.counts || { recent: 0, consolidation: 0, fortress: 0, total: 0 });
+        }
+      })
+      .catch((err) => {
+        console.error('Cumulative classification fetch failed:', err);
+      })
+      .finally(() => {
+        if (!isCancelled) setCumulativeLoading(false);
+      });
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [cumulativeMode, selectedChapters, selectedSubjects]);
+
+  const handleMoveBucket = (chapterName, fromKey, toKey) => {
+    sound.click();
+    setCumulativeBuckets((prev) => {
+      const fromList = [...(prev[fromKey] || [])];
+      const toList = [...(prev[toKey] || [])];
+      const targetIdx = fromList.findIndex((item) => item.chapter === chapterName);
+      if (targetIdx === -1) return prev;
+
+      const [item] = fromList.splice(targetIdx, 1);
+      toList.push(item);
+
+      const nextBuckets = {
+        ...prev,
+        [fromKey]: fromList,
+        [toKey]: toList,
+      };
+
+      setCumulativeCounts({
+        recent: nextBuckets.recent?.length || 0,
+        consolidation: nextBuckets.consolidation?.length || 0,
+        fortress: nextBuckets.fortress?.length || 0,
+        total: (nextBuckets.recent?.length || 0) + (nextBuckets.consolidation?.length || 0) + (nextBuckets.fortress?.length || 0),
+      });
+
+      return nextBuckets;
+    });
+  };
+
   // Set default room title based on selected settings
   useEffect(() => {
     const examLabel = targetExam === 'MAIN' ? 'JEE Main' : targetExam === 'ADVANCED' ? 'JEE Advanced' : 'JEE';
-    const modeLabel = 'Speed Duel';
+    const modeLabel = mode === 'MOCK_TEST' ? 'Mock Test' : 'Speed Duel';
     let topicLabel = 'Full Syllabus';
-    if (selectedChapters.length === 1) {
+    if (cumulativeMode) {
+      topicLabel = 'Cumulative (60/25/15)';
+    } else if (selectedChapters.length === 1) {
       topicLabel = selectedChapters[0];
     } else if (selectedChapters.length > 1) {
       topicLabel = `${selectedChapters.length} Chapters Special`;
@@ -88,7 +151,7 @@ export default function CustomGeneratorView({ user, onRoomCreated, onOpenAuth })
       topicLabel = `${selectedSubjects[0]} Blitz`;
     }
     setRoomTitle(`${examLabel} ${topicLabel} ${modeLabel}`);
-  }, [targetExam, selectedChapters, selectedSubjects]);
+  }, [targetExam, selectedChapters, selectedSubjects, cumulativeMode, mode]);
 
   // Compute total available questions in currently selected chapters/subjects
   const availableChaptersAll = Object.entries(chaptersMap || {})
@@ -212,9 +275,12 @@ export default function CustomGeneratorView({ user, onRoomCreated, onOpenAuth })
 
     try {
       const isMock = mode === 'MOCK_TEST';
+      const defaultTitle = isMock
+        ? (cumulativeMode ? 'Cumulative Retention Mock (60/25/15)' : 'Custom Blueprint Mock Test')
+        : (cumulativeMode ? 'Cumulative Retention Duel (60/25/15)' : 'Custom Battle Blueprint');
       const room = await api.rooms.create({
         mode,
-        preset_name: roomTitle.trim() || (isMock ? 'Custom Blueprint Mock Test' : 'Custom Battle Blueprint'),
+        preset_name: roomTitle.trim() || defaultTitle,
         subjects: selectedSubjects,
         chapters: selectedChapters.length > 0 ? selectedChapters : null,
         difficulty_tier: difficulty,
@@ -230,6 +296,12 @@ export default function CustomGeneratorView({ user, onRoomCreated, onOpenAuth })
         negative_marking: isMock ? -1.0 : parseFloat(negativePenalty),
         base_correct_score: isMock ? 100.0 : 100.0,
         speed_bonus_enabled: isMock ? false : speedBonusEnabled,
+        cumulative_mode: cumulativeMode,
+        cumulative_buckets: cumulativeMode ? {
+          recent: (cumulativeBuckets.recent || []).map((c) => c.chapter),
+          consolidation: (cumulativeBuckets.consolidation || []).map((c) => c.chapter),
+          fortress: (cumulativeBuckets.fortress || []).map((c) => c.chapter),
+        } : null,
       });
 
       if ((isMock || startInstantly) && room?.code) {
@@ -934,6 +1006,204 @@ export default function CustomGeneratorView({ user, onRoomCreated, onOpenAuth })
                   );
                 })
               )}
+            </div>
+
+            {/* Cumulative 3-Bucket Distribution Card & Timeline Inspector */}
+            <div className="mt-6 pt-5 border-t border-white/10">
+              <div className={`rounded-2xl border p-4 sm:p-5 transition-all ${
+                cumulativeMode 
+                  ? 'bg-gradient-to-br from-[#1e2433] via-[#1a233a] to-[#1e2433] border-cyan-500/40 shadow-xl shadow-cyan-950/20'
+                  : 'bg-[#1e2433]/60 border-white/10 hover:border-white/20'
+              }`}>
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div className="flex items-start gap-3">
+                    <div className={`w-9 h-9 rounded-xl flex items-center justify-center text-lg shrink-0 ${
+                      cumulativeMode ? 'bg-cyan-500/20 border border-cyan-500/40 text-cyan-400' : 'bg-white/5 text-slate-400'
+                    }`}>
+                      ⚡
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <h4 className="text-sm font-black text-white">Cumulative 3-Bucket Mode</h4>
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-cyan-500/20 text-cyan-300 border border-cyan-500/30">
+                          60 / 25 / 15 Rule
+                        </span>
+                      </div>
+                      <p className="text-xs text-slate-400 mt-1 leading-relaxed">
+                        Spaces questions according to your forgetting curve: <strong>60% Recent Focus</strong>, <strong>25% Consolidation</strong>, and <strong>15% Fortress Audit</strong> from your activity history.
+                      </p>
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      sound.click();
+                      setCumulativeMode(!cumulativeMode);
+                    }}
+                    className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-2 cursor-pointer shrink-0 border ${
+                      cumulativeMode
+                        ? 'bg-cyan-500 text-black border-cyan-400 font-black shadow-lg shadow-cyan-500/30'
+                        : 'bg-white/10 text-white border-white/20 hover:bg-white/15'
+                    }`}
+                  >
+                    <span>{cumulativeMode ? 'Cumulative Active' : 'Enable Cumulative Mode'}</span>
+                    <span className={`w-2 h-2 rounded-full ${cumulativeMode ? 'bg-black animate-pulse' : 'bg-slate-400'}`} />
+                  </button>
+                </div>
+
+                {/* Classification Inspector (Visible when cumulativeMode is true) */}
+                {cumulativeMode && (
+                  <div className="mt-5 pt-4 border-t border-white/10 space-y-4">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
+                      <span className="text-slate-300 font-bold flex items-center gap-1.5">
+                        <Sparkles className="w-3.5 h-3.5 text-cyan-400" />
+                        <span>Timeline Classification Matrix (Click arrows to tweak bucket placement):</span>
+                      </span>
+                      <span className="text-[11px] font-mono text-cyan-400">
+                        {cumulativeCounts.recent} Recent • {cumulativeCounts.consolidation} Consolidation • {cumulativeCounts.fortress} Fortress
+                      </span>
+                    </div>
+
+                    {cumulativeLoading ? (
+                      <div className="py-6 flex items-center justify-center gap-2 text-xs font-mono text-cyan-400 animate-pulse">
+                        <div className="w-4 h-4 rounded-full border-2 border-cyan-400 border-t-transparent animate-spin" />
+                        <span>Inspecting activity log & classifying syllabus by retention...</span>
+                      </div>
+                    ) : (
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-3.5">
+                        {/* Bucket A: Recent Focus */}
+                        <div className="bg-[#151c28] border border-emerald-500/30 rounded-xl p-3.5 flex flex-col justify-between">
+                          <div>
+                            <div className="flex items-center justify-between mb-2">
+                              <div className="flex items-center gap-1.5">
+                                <span className="w-2 h-2 rounded-full bg-emerald-400" />
+                                <span className="text-xs font-black text-emerald-400">Recent Focus (~60%)</span>
+                              </div>
+                              <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-emerald-950 text-emerald-300 border border-emerald-500/30">
+                                {cumulativeBuckets.recent?.length || 0} Ch
+                              </span>
+                            </div>
+                            <p className="text-[10px] text-slate-400 mb-2.5">
+                              Practiced within the last 14 days. Tests current comprehension.
+                            </p>
+                            <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
+                              {cumulativeBuckets.recent?.length === 0 ? (
+                                <div className="text-[11px] text-slate-500 italic py-2 text-center">No chapters in 14-day window</div>
+                              ) : (
+                                cumulativeBuckets.recent?.map((item) => (
+                                  <div key={item.chapter} className="bg-slate-900/80 border border-white/5 rounded-lg p-1.5 px-2 flex items-center justify-between text-xs">
+                                    <div className="truncate mr-1">
+                                      <span className="text-white font-medium text-[11px] block truncate">{item.chapter}</span>
+                                      <span className="text-[9px] font-mono text-emerald-400/90">{item.label}</span>
+                                    </div>
+                                    <button
+                                      type="button"
+                                      title="Move to Consolidation"
+                                      onClick={() => handleMoveBucket(item.chapter, 'recent', 'consolidation')}
+                                      className="p-1 hover:bg-white/10 rounded text-slate-400 hover:text-white transition cursor-pointer shrink-0"
+                                    >
+                                      <ChevronRight className="w-3.5 h-3.5" />
+                                    </button>
+                                  </div>
+                                ))
+                              )}
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Bucket B: Consolidation Review */}
+                        <div className="bg-[#151c28] border border-amber-500/30 rounded-xl p-3.5 flex flex-col justify-between">
+                          <div>
+                            <div className="flex items-center justify-between mb-2">
+                              <div className="flex items-center gap-1.5">
+                                <span className="w-2 h-2 rounded-full bg-amber-400" />
+                                <span className="text-xs font-black text-amber-400">Consolidation (~25%)</span>
+                              </div>
+                              <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-amber-950 text-amber-300 border border-amber-500/30">
+                                {cumulativeBuckets.consolidation?.length || 0} Ch
+                              </span>
+                            </div>
+                            <p className="text-[10px] text-slate-400 mb-2.5">
+                              Practiced 15–45 days ago. Prevents memory decay.
+                            </p>
+                            <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
+                              {cumulativeBuckets.consolidation?.length === 0 ? (
+                                <div className="text-[11px] text-slate-500 italic py-2 text-center">No chapters in 15–45d window</div>
+                              ) : (
+                                cumulativeBuckets.consolidation?.map((item) => (
+                                  <div key={item.chapter} className="bg-slate-900/80 border border-white/5 rounded-lg p-1.5 px-2 flex items-center justify-between text-xs">
+                                    <button
+                                      type="button"
+                                      title="Move to Recent Focus"
+                                      onClick={() => handleMoveBucket(item.chapter, 'consolidation', 'recent')}
+                                      className="p-1 hover:bg-white/10 rounded text-slate-400 hover:text-white transition cursor-pointer shrink-0 mr-1"
+                                    >
+                                      <ChevronLeft className="w-3.5 h-3.5" />
+                                    </button>
+                                    <div className="truncate flex-1 text-center">
+                                      <span className="text-white font-medium text-[11px] block truncate">{item.chapter}</span>
+                                      <span className="text-[9px] font-mono text-amber-400/90">{item.label}</span>
+                                    </div>
+                                    <button
+                                      type="button"
+                                      title="Move to Fortress Audit"
+                                      onClick={() => handleMoveBucket(item.chapter, 'consolidation', 'fortress')}
+                                      className="p-1 hover:bg-white/10 rounded text-slate-400 hover:text-white transition cursor-pointer shrink-0 ml-1"
+                                    >
+                                      <ChevronRight className="w-3.5 h-3.5" />
+                                    </button>
+                                  </div>
+                                ))
+                              )}
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Bucket C: Fortress Audit */}
+                        <div className="bg-[#151c28] border border-cyan-500/30 rounded-xl p-3.5 flex flex-col justify-between">
+                          <div>
+                            <div className="flex items-center justify-between mb-2">
+                              <div className="flex items-center gap-1.5">
+                                <span className="w-2 h-2 rounded-full bg-cyan-400" />
+                                <span className="text-xs font-black text-cyan-400">Fortress Audit (~15%)</span>
+                              </div>
+                              <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-cyan-950 text-cyan-300 border border-cyan-500/30">
+                                {cumulativeBuckets.fortress?.length || 0} Ch
+                              </span>
+                            </div>
+                            <p className="text-[10px] text-slate-400 mb-2.5">
+                              Practiced &gt;45 days ago or unattempted. Retains foundational skills.
+                            </p>
+                            <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
+                              {cumulativeBuckets.fortress?.length === 0 ? (
+                                <div className="text-[11px] text-slate-500 italic py-2 text-center">No chapters in fortress window</div>
+                              ) : (
+                                cumulativeBuckets.fortress?.map((item) => (
+                                  <div key={item.chapter} className="bg-slate-900/80 border border-white/5 rounded-lg p-1.5 px-2 flex items-center justify-between text-xs">
+                                    <button
+                                      type="button"
+                                      title="Move to Consolidation"
+                                      onClick={() => handleMoveBucket(item.chapter, 'fortress', 'consolidation')}
+                                      className="p-1 hover:bg-white/10 rounded text-slate-400 hover:text-white transition cursor-pointer shrink-0"
+                                    >
+                                      <ChevronLeft className="w-3.5 h-3.5" />
+                                    </button>
+                                    <div className="truncate ml-1 text-right">
+                                      <span className="text-white font-medium text-[11px] block truncate">{item.chapter}</span>
+                                      <span className="text-[9px] font-mono text-cyan-400/90">{item.label}</span>
+                                    </div>
+                                  </div>
+                                ))
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
             </div>
 
             {/* Floating Selection Summary Drawer */}

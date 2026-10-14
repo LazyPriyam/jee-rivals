@@ -179,6 +179,12 @@ class RoomCreateRequest(BaseModel):
     negative_marking: float = -25.0
     speed_bonus_enabled: bool = True
     question_ids: Optional[List[str]] = None
+    cumulative_mode: Optional[bool] = False
+    cumulative_buckets: Optional[Dict[str, List[str]]] = None
+
+class ClassifyCumulativeRequest(BaseModel):
+    chapters: Optional[List[str]] = None
+    subjects: Optional[List[str]] = None
 
 class RemovePlayerRequest(BaseModel):
     user_id: str
