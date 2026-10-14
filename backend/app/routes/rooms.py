@@ -1138,6 +1138,7 @@ async def submit_bulk_mock(code: str, req: BulkSubmissionRequest, user: dict = D
     total_marks = 0.0
     now = datetime.datetime.utcnow().isoformat()
     total_correct = 0
+    attempted_count = 0
 
     base_score = room.get("base_correct_score", 100.0)
     neg_penalty = room.get("negative_marking", -25.0)
@@ -1160,6 +1161,7 @@ async def submit_bulk_mock(code: str, req: BulkSubmissionRequest, user: dict = D
             delta_marks = 0.0
             is_corr = False
         else:
+            attempted_count += 1
             is_corr = is_answer_correct(user_choice, correct_ans, q_type)
             if is_corr:
                 delta_score = int(base_score)
@@ -1211,7 +1213,7 @@ async def submit_bulk_mock(code: str, req: BulkSubmissionRequest, user: dict = D
         UPDATE room_participants
         SET score = ?, marks = ?, current_question_index = ?, answers = ?, is_finished = 1, finished_at = ?
         WHERE room_id = ? AND user_id = ?
-    """, (total_score, total_marks, len(q_ids), json.dumps(answers_dict), now, room_id, user["id"]))
+    """, (total_score, total_marks, attempted_count, json.dumps(answers_dict), now, room_id, user["id"]))
 
     # Update user stats
     c.execute("""
@@ -1221,13 +1223,14 @@ async def submit_bulk_mock(code: str, req: BulkSubmissionRequest, user: dict = D
             weekly_rp = weekly_rp + ?,
             last_active = ?
         WHERE id = ?
-    """, (len(q_ids), total_correct, max(10, total_score if total_score > 0 else 10), now, user["id"]))
+    """, (attempted_count, total_correct, max(10, total_score if total_score > 0 else 10), now, user["id"]))
 
-    try:
-        from backend.app.tools.daily_goal_engine import record_daily_question_solved
-        record_daily_question_solved(user["id"], c, count=len(q_ids))
-    except Exception:
-        pass
+    if attempted_count > 0:
+        try:
+            from backend.app.tools.daily_goal_engine import record_daily_question_solved
+            record_daily_question_solved(user["id"], c, count=attempted_count)
+        except Exception:
+            pass
 
     # Check if everyone finished
     c.execute("SELECT COUNT(*) as unfinished FROM room_participants WHERE room_id = ? AND is_finished = 0", (room_id,))

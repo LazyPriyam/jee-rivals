@@ -68,28 +68,41 @@ def compute_today_solved_count(user_id: str, cursor) -> int:
     except Exception as e:
         logger.warning(f"[DAILY_GOAL] activity_log query note: {e}")
 
-    # 2. Room Participants (captures completed mock tests, arena duels, and custom blueprints)
+    # 2. Room Participants (captures answered questions in duels and mock tests)
     count_rooms = 0
     try:
         cursor.execute("""
-            SELECT answers, current_question_index FROM room_participants
-            WHERE user_id = ? AND (finished_at >= ? OR finished_at LIKE ?)
+            SELECT rp.answers, rp.current_question_index, r.mode
+            FROM room_participants rp
+            LEFT JOIN rooms r ON rp.room_id = r.id
+            WHERE rp.user_id = ? AND (rp.finished_at >= ? OR rp.finished_at LIKE ?)
         """, (user_id, start_utc_iso, f"{today_str}%"))
         for row in cursor.fetchall():
             row_dict = dict(row)
             raw_answers = row_dict.get("answers")
+            valid_attempts = 0
             if raw_answers:
                 try:
                     ans = json.loads(raw_answers) if isinstance(raw_answers, str) else raw_answers
                     if isinstance(ans, dict):
-                        q_keys = [k for k in ans.keys() if not k.startswith("__")]
-                        count_rooms += max(len(q_keys), int(row_dict.get("current_question_index") or 0))
-                    else:
-                        count_rooms += int(row_dict.get("current_question_index") or 0)
+                        for k, v in ans.items():
+                            if k.startswith("__"):
+                                continue
+                            sel = None
+                            if isinstance(v, dict):
+                                sel = v.get("selected")
+                            elif isinstance(v, (str, int)):
+                                sel = v
+                            if sel is not None and str(sel).strip().upper() not in ("NONE", "SKIPPED", ""):
+                                valid_attempts += 1
                 except Exception:
-                    count_rooms += int(row_dict.get("current_question_index") or 0)
-            else:
-                count_rooms += int(row_dict.get("current_question_index") or 0)
+                    pass
+
+            # Only fallback to current_question_index for SPEED_DUEL where questions are sequentially answered
+            if valid_attempts == 0 and row_dict.get("mode") == "SPEED_DUEL":
+                valid_attempts = int(row_dict.get("current_question_index") or 0)
+
+            count_rooms += valid_attempts
     except Exception as e:
         logger.warning(f"[DAILY_GOAL] room_participants query note: {e}")
 
@@ -124,7 +137,8 @@ def get_user_daily_goal_status(user: dict, cursor=None) -> Dict[str, Any]:
     """
     Computes today's daily question goal metadata, current solved count,
     percentage completed, and milestone stage for the given user.
-    Auto-reconciles/restores questions solved earlier today if daily_goal_solved is 0.
+    Auto-reconciles/restores questions solved earlier today and auto-heals any
+    erroneous inflation from unattempted mock tests.
     """
     today_str, _ = get_ist_today_boundaries()
     goal = int(user.get("daily_question_goal") or 60)
@@ -134,9 +148,10 @@ def get_user_daily_goal_status(user: dict, cursor=None) -> Dict[str, Any]:
     saved_date = user.get("daily_goal_date")
     solved = int(user.get("daily_goal_solved") or 0) if saved_date == today_str else 0
 
-    # Auto-reconcile questions solved today if currently 0 or from an older date
+    # Auto-reconcile / Auto-heal questions solved today:
+    # Restores solved count if 0/expired, and auto-heals down if solved in DB was inflated by unattempted mock tests.
     user_id = user.get("id")
-    if (solved == 0 or saved_date != today_str) and user_id:
+    if user_id:
         should_close = False
         conn = None
         work_cursor = cursor
@@ -152,7 +167,7 @@ def get_user_daily_goal_status(user: dict, cursor=None) -> Dict[str, Any]:
         if work_cursor is not None:
             try:
                 detected_today = compute_today_solved_count(user_id, work_cursor)
-                if detected_today > 0:
+                if saved_date != today_str or solved != detected_today:
                     solved = detected_today
                     work_cursor.execute("""
                         UPDATE users

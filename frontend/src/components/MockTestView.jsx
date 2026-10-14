@@ -408,7 +408,7 @@ export default function MockTestView({ room, user, onMatchComplete, onExitToDash
                   : 'JEE (Main) 2026 Examination - Computer Based Test'}
               </h1>
               <p className="text-[9px] sm:text-[10px] text-slate-300 font-mono truncate">
-                Room #{room.code} • Equal Subject Split • Chapter-Weighted Blueprint
+                Room #{room.code} • Equal Subject Split • NTA Exam Pattern
               </p>
             </div>
           </div>
@@ -516,8 +516,6 @@ export default function MockTestView({ room, user, onMatchComplete, onExitToDash
                 </span>
                 <span className="text-slate-400">|</span>
                 <span className="text-slate-600 font-semibold">{currentQ.subject}</span>
-                <span className="text-slate-400">|</span>
-                <span className="text-slate-500 text-[11px] truncate max-w-[180px]">{currentQ.chapter}</span>
                 <span className="text-slate-400">|</span>
                 <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-orange-100 text-orange-800 font-bold uppercase">
                   {currentCompGroup?.isPassage
@@ -857,7 +855,6 @@ export default function MockTestView({ room, user, onMatchComplete, onExitToDash
                   <div className="flex items-center gap-2 font-bold text-xs text-orange-600 mb-2">
                     <span>Q{idx + 1}</span>
                     <span>• {q.subject}</span>
-                    <span className="text-slate-500">• {q.chapter}</span>
                     {q.passage_text && (
                       <span className="text-[10px] font-mono px-1.5 py-0.2 bg-blue-100 text-blue-800 rounded">
                         Sub-Q {q.subquestion_index || 1}

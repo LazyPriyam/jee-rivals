@@ -92,8 +92,10 @@ def get_participants_seen_question_map(
     of participants in user_ids who have previously encountered or attempted the question.
     A question is considered seen by a user if:
       1. It appears in `activity_log` for that user.
-      2. It was included in `rooms.question_ids` or `room_participants.answers` for any room
-         that the user participated in (excluding `exclude_room_id`).
+      2. It was answered in `room_participants.answers` for any room that the user
+         participated in (excluding `exclude_room_id`) where the user actually selected
+         an answer (selected not in ("NONE", "SKIPPED", "", None)).
+      Unattempted / skipped questions in generated mock tests are NEVER marked as seen.
     """
     if not cursor or not user_ids:
         return {}
@@ -112,17 +114,24 @@ def get_participants_seen_question_map(
             valid_uids,
         )
         for row in cursor.fetchall():
-            uid = row[0] if isinstance(row, (list, tuple)) else (row.get("user_id") if hasattr(row, "get") else row["user_id"])
-            qid = row[1] if isinstance(row, (list, tuple)) else (row.get("question_id") if hasattr(row, "get") else row["question_id"])
+            try:
+                uid = row["user_id"]
+            except Exception:
+                uid = row[0] if hasattr(row, "__getitem__") else None
+            try:
+                qid = row["question_id"]
+            except Exception:
+                qid = row[1] if hasattr(row, "__getitem__") else None
+
             if uid in user_seen and qid:
                 user_seen[uid].add(str(qid).strip())
     except Exception as e:
         logger.warning(f"Error querying activity_log for seen questions: {e}")
 
-    # 2. Fetch questions from rooms the user participated in
+    # 2. Fetch actually attempted questions from room_participants answers
     try:
         sql = f"""
-            SELECT DISTINCT rp.user_id, r.question_ids, rp.answers
+            SELECT rp.user_id, rp.answers
             FROM room_participants rp
             JOIN rooms r ON rp.room_id = r.id
             WHERE rp.user_id IN ({placeholders})
@@ -134,34 +143,35 @@ def get_participants_seen_question_map(
 
         cursor.execute(sql, params)
         for row in cursor.fetchall():
-            uid = row[0] if isinstance(row, (list, tuple)) else (row.get("user_id") if hasattr(row, "get") else row["user_id"])
-            qids_raw = row[1] if isinstance(row, (list, tuple)) else (row.get("question_ids") if hasattr(row, "get") else row["question_ids"])
-            answers_raw = row[2] if isinstance(row, (list, tuple)) else (row.get("answers") if hasattr(row, "get") else None)
+            try:
+                uid = row["user_id"]
+            except Exception:
+                uid = row[0] if hasattr(row, "__getitem__") else None
+            try:
+                answers_raw = row["answers"]
+            except Exception:
+                answers_raw = row[1] if hasattr(row, "__getitem__") else None
 
-            if uid not in user_seen:
+            if uid not in user_seen or not answers_raw:
                 continue
 
-            # Parse question_ids from room
-            if qids_raw:
-                try:
-                    qids_list = json.loads(qids_raw) if isinstance(qids_raw, str) else qids_raw
-                    if isinstance(qids_list, list):
-                        for qid in qids_list:
-                            if qid:
-                                user_seen[uid].add(str(qid).strip())
-                except Exception:
-                    pass
+            # Parse answers dict from room_participants: ONLY count questions the user actually attempted/answered
+            try:
+                ans_map = json.loads(answers_raw) if isinstance(answers_raw, str) else answers_raw
+                if isinstance(ans_map, dict):
+                    for qid, ans_val in ans_map.items():
+                        if not qid or str(qid).startswith("__"):
+                            continue
+                        selected = None
+                        if isinstance(ans_val, dict):
+                            selected = ans_val.get("selected")
+                        elif isinstance(ans_val, (str, int)):
+                            selected = ans_val
 
-            # Parse answers dict from room_participants
-            if answers_raw:
-                try:
-                    ans_map = json.loads(answers_raw) if isinstance(answers_raw, str) else answers_raw
-                    if isinstance(ans_map, dict):
-                        for qid in ans_map.keys():
-                            if qid:
-                                user_seen[uid].add(str(qid).strip())
-                except Exception:
-                    pass
+                        if selected is not None and str(selected).strip().upper() not in ("NONE", "SKIPPED", ""):
+                            user_seen[uid].add(str(qid).strip())
+            except Exception:
+                pass
     except Exception as e:
         logger.warning(f"Error querying room_participants for seen questions: {e}")
 
@@ -333,8 +343,8 @@ def _pick_from_chapters_weighted(
 def order_subject_questions_jee_main(subj_qs: List[dict]) -> List[dict]:
     """
     Orders a single subject's questions in authentic NTA JEE Main sequence:
-      - Section A: Single Choice Questions (SINGLE_CHOICE)
-      - Section B: Numerical Value Questions (NUMERICAL / INTEGER)
+      - Section A: Single Choice Questions (SINGLE_CHOICE), shuffled across chapters
+      - Section B: Numerical Value Questions (NUMERICAL / INTEGER), shuffled across chapters
     """
     sec_a = []
     sec_b = []
@@ -343,6 +353,11 @@ def order_subject_questions_jee_main(subj_qs: List[dict]) -> List[dict]:
             sec_b.append(q)
         else:
             sec_a.append(q)
+
+    # Shuffle within each section so questions from the same chapter are not clustered together
+    random.shuffle(sec_a)
+    random.shuffle(sec_b)
+
     return sec_a + sec_b
 
 
@@ -376,6 +391,13 @@ def order_subject_questions_jee_advanced(subj_qs: List[dict]) -> List[dict]:
             sec_mat.append(q)
         else:
             sec_other.append(q)
+
+    # Shuffle non-passage sections so chapters are not clustered
+    random.shuffle(sec_multi)
+    random.shuffle(sec_single)
+    random.shuffle(sec_num)
+    random.shuffle(sec_mat)
+    random.shuffle(sec_other)
 
     # Ensure comprehension passages stay strictly contiguous by passage_id and subquestion_index
     sec_comp.sort(key=lambda x: (x.get("passage_id") or x.get("id") or "", x.get("subquestion_index") or 0))
