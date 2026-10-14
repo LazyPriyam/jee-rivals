@@ -185,6 +185,7 @@ class RoomCreateRequest(BaseModel):
 class ClassifyCumulativeRequest(BaseModel):
     chapters: Optional[List[str]] = None
     subjects: Optional[List[str]] = None
+    pinned_recent_chapters: Optional[List[str]] = None
 
 class RemovePlayerRequest(BaseModel):
     user_id: str

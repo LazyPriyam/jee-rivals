@@ -322,7 +322,8 @@ def classify_chapters_for_cumulative_test(
         cursor=c,
         user_id=user["id"],
         chapters=req.chapters,
-        subjects=req.subjects
+        subjects=req.subjects,
+        pinned_recent_chapters=req.pinned_recent_chapters
     )
     conn.close()
     return res

@@ -400,10 +400,10 @@ export const api = {
     getMyHistory: () => request("/api/rooms/my/history"),
     getUserHistory: (username) => request(`/api/rooms/user/${encodeURIComponent(username)}/history`),
     getActive: () => request("/api/rooms/user/active"),
-    classifyCumulative: (chapters = null, subjects = null) =>
+    classifyCumulative: (chapters = null, subjects = null, pinned_recent_chapters = null) =>
       request("/api/rooms/classify-cumulative", {
         method: "POST",
-        body: JSON.stringify({ chapters, subjects }),
+        body: JSON.stringify({ chapters, subjects, pinned_recent_chapters }),
       }),
     forfeit: (code) =>
       request(`/api/rooms/${code}/forfeit`, {
