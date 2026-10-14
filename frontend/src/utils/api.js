@@ -309,6 +309,13 @@ export const api = {
         method: "POST",
         body: JSON.stringify(data),
       }),
+    voteReport: (reportId, vote) =>
+      request(`/api/questions/reports/${reportId}/vote`, {
+        method: "POST",
+        body: JSON.stringify({ vote }),
+      }),
+    getRoomReports: (roomCode) =>
+      request(`/api/questions/reports/room/${encodeURIComponent(roomCode)}`),
     getReports: (params = {}) => {
       let q = "";
       if (typeof params === "string") {

@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Flag, X, AlertTriangle, CheckCircle, Send, Loader2, Shield } from 'lucide-react';
+import { Flag, X, AlertTriangle, CheckCircle, Send, Loader2, Shield, Users } from 'lucide-react';
 import { api } from '../utils/api';
 import sound from '../utils/sound';
 
@@ -21,7 +21,9 @@ export default function ReportQuestionModal({
   mode = 'general', // 'adaptive' | 'mock_test' | 'arena' | 'general'
   canSkip = false,
   onSkip = null,
-  onReportSuccess = null
+  onReportSuccess = null,
+  roomCode = null,
+  isMultiplayer = false
 }) {
   const activeQuestionId = questionId || question?.id;
   const activeQuestionText = questionText || question?.text;
@@ -49,7 +51,8 @@ export default function ReportQuestionModal({
     try {
       const res = await api.questions.report(activeQuestionId, {
         reason: selectedReason,
-        notes: notes.trim()
+        notes: notes.trim(),
+        room_code: roomCode || null
       });
 
       const refunded = Number(res?.provisional_elo_refunded || 0);
@@ -129,7 +132,9 @@ export default function ReportQuestionModal({
               )}
             </div>
             <h3 className="text-xl font-black text-white">
-              {wasSkipped
+              {isMultiplayer
+                ? 'Dispute Dispatched for Contender Voting!'
+                : wasSkipped
                 ? 'Reported & Replaced!'
                 : provisionalRefund > 0
                 ? 'Provisional Elo Restored!'
@@ -141,7 +146,9 @@ export default function ReportQuestionModal({
               </div>
             )}
             <p className="text-sm text-slate-400 max-w-xs leading-relaxed">
-              {provisionalRefund > 0
+              {isMultiplayer
+                ? 'Your report has been shared with fellow contenders in this room. Everyone who took this test can now vote to verify the defect in their test analysis.'
+                : provisionalRefund > 0
                 ? 'As an anti-frustration safeguard, your lost Elo has been provisionally credited back to your rating while moderators review the issue. If confirmed, this is locked in permanently with a bounty. If dismissed, the credit will be reverted.'
                 : wasSkipped
                 ? 'Your report was dispatched to the moderation hub. This question was skipped with zero Elo penalty, and a fresh question has been drawn.'
@@ -163,6 +170,17 @@ export default function ReportQuestionModal({
                 Question ID: <span className="font-mono text-amber-400 font-bold">{activeQuestionId}</span>
               </p>
             </div>
+
+            {/* Multiplayer Contender Review Notice */}
+            {isMultiplayer && (
+              <div className="p-3 bg-purple-500/15 border border-purple-500/30 rounded-2xl text-[11px] text-purple-200 flex items-center gap-2.5">
+                <Users className="w-4 h-4 text-purple-400 shrink-0" />
+                <div className="leading-relaxed">
+                  <strong className="text-white block font-bold">Multiplayer Room Dispute:</strong>
+                  Because this test was taken with fellow contenders, reporting will initiate a contender consensus vote in room <span className="font-mono text-purple-300 font-bold">{roomCode}</span>.
+                </div>
+              </div>
+            )}
 
             {/* Provisional Elo Safeguard Feature Callout */}
             {selectedReason === 'WRONG_ANSWER' && (

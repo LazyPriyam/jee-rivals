@@ -147,6 +147,10 @@ class ScoringRules(BaseModel):
 class QuestionReportRequest(BaseModel):
     reason: str
     notes: Optional[str] = ""
+    room_code: Optional[str] = None
+
+class QuestionReportVoteRequest(BaseModel):
+    vote: str  # "AGREE" or "DISAGREE"
 
 class FixQuestionKeyRequest(BaseModel):
     correct_answer: str

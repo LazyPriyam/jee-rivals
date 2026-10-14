@@ -5,7 +5,7 @@ import uuid
 from typing import List, Optional
 from fastapi import APIRouter, HTTPException, Query, Depends, Header, status
 
-from backend.app.models import QuestionOut, QuestionSolutionOut, QuestionOptionModel, QuestionReportRequest, FixQuestionKeyRequest
+from backend.app.models import QuestionOut, QuestionSolutionOut, QuestionOptionModel, QuestionReportRequest, FixQuestionKeyRequest, QuestionReportVoteRequest
 from backend.app.database import get_connection
 from backend.app.auth import get_current_user, get_optional_user
 from backend.app.config import ADMIN_SYNC_TOKEN
@@ -496,32 +496,283 @@ def report_question(question_id: str, report_data: QuestionReportRequest, user: 
                     VALUES (?, ?, 'PROVISIONAL_ELO_RESTORED', ?, ?, ?, 0, ?)
                 """, (notif_id, uid, notif_title, notif_msg, details_json, now))
 
+    # Check if this report is from a multiplayer test room
+    room_code = report_data.room_code.strip().upper() if report_data.room_code else None
+    participant_ids: List[str] = []
+    is_multiplayer = False
+
+    if room_code:
+        c.execute("SELECT id FROM rooms WHERE code = ?", (room_code,))
+        r_row = c.fetchone()
+        if r_row:
+            r_id = r_row[0] if isinstance(r_row, (list, tuple)) else r_row["id"]
+            c.execute("SELECT user_id FROM room_participants WHERE room_id = ?", (r_id,))
+            p_rows = c.fetchall()
+            participant_ids = [
+                row[0] if isinstance(row, (list, tuple)) else (row.get("user_id") if hasattr(row, "get") else row["user_id"])
+                for row in p_rows
+            ]
+            if len(participant_ids) > 1:
+                is_multiplayer = True
+
+    votes = {}
+    consensus_status = "PENDING"
+    if is_multiplayer:
+        # Reporter's vote is recorded as AGREE
+        votes[reporter_id] = {
+            "vote": "AGREE",
+            "username": reporter_name,
+            "voted_at": now
+        }
+        consensus_status = "VOTING_IN_PROGRESS"
+
+        # Dispatch vote request notification to all other contenders
+        for other_uid in participant_ids:
+            if other_uid != reporter_id:
+                notif_id = f"notif_{uuid.uuid4().hex[:12]}"
+                notif_title = f"🗳️ Question Dispute Vote: Room #{room_code}"
+                notif_msg = (
+                    f"{reporter_name} reported Question #{question_id[:8]} ({report_data.reason}) in Room #{room_code}. "
+                    f"As a fellow contender, your vote is required in Test Analysis to confirm or dispute this report."
+                )
+                details_json = json.dumps({
+                    "report_id": report_id,
+                    "question_id": question_id,
+                    "room_code": room_code,
+                    "action": "ROOM_REPORT_VOTE"
+                })
+                c.execute("""
+                    INSERT INTO user_notifications (id, user_id, type, title, message, details, is_read, created_at)
+                    VALUES (?, ?, 'ROOM_REPORT_VOTE_REQUEST', ?, ?, ?, 0, ?)
+                """, (notif_id, other_uid, notif_title, notif_msg, details_json, now))
+
     # Insert question report record
     c.execute("""
         INSERT INTO question_reports (
             id, question_id, reporter_id, reporter_username, reason, notes,
-            status, created_at, provisional_elo_refunded, provisional_subject
+            status, created_at, provisional_elo_refunded, provisional_subject,
+            room_code, votes, participant_ids, consensus_status
         )
-        VALUES (?, ?, ?, ?, ?, ?, 'PENDING', ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, 'PENDING', ?, ?, ?, ?, ?, ?, ?)
     """, (
         report_id, question_id, reporter_id, reporter_name,
         report_data.reason, report_data.notes or "", now,
-        provisional_elo, rep_subject
+        provisional_elo, rep_subject,
+        room_code, json.dumps(votes), json.dumps(participant_ids), consensus_status
     ))
     conn.commit()
     conn.close()
 
-    success_msg = (
-        f"Report submitted. +{provisional_elo:.1f} Elo provisionally restored pending review."
-        if provisional_elo > 0
-        else "Report submitted successfully."
-    )
+    if is_multiplayer:
+        success_msg = f"Report submitted for Contender Review in Room #{room_code}. Other test participants have been requested to cast their vote."
+    elif provisional_elo > 0:
+        success_msg = f"Report submitted. +{provisional_elo:.1f} Elo provisionally restored pending review."
+    else:
+        success_msg = "Report submitted successfully."
+
     return {
         "success": True,
         "message": success_msg,
         "report_id": report_id,
-        "provisional_elo_refunded": provisional_elo
+        "provisional_elo_refunded": provisional_elo,
+        "is_multiplayer": is_multiplayer,
+        "room_code": room_code,
+        "consensus_status": consensus_status
     }
+
+
+@router.post("/reports/{report_id}/vote")
+def vote_on_report(
+    report_id: str,
+    payload: QuestionReportVoteRequest,
+    user: dict = Depends(get_current_user)
+):
+    """
+    Submits a contender vote (AGREE / DISAGREE) on a question reported in a multiplayer test.
+    When consensus is reached among contenders, updates consensus_status and notifies participants.
+    """
+    vote_val = payload.vote.strip().upper()
+    if vote_val not in ("AGREE", "DISAGREE"):
+        raise HTTPException(status_code=400, detail="Vote must be 'AGREE' or 'DISAGREE'.")
+
+    conn = get_connection()
+    c = conn.cursor()
+
+    c.execute("SELECT * FROM question_reports WHERE id = ?", (report_id,))
+    rep_row = c.fetchone()
+    if not rep_row:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Question report not found.")
+
+    rep = dict(rep_row)
+    now = datetime.datetime.utcnow().isoformat()
+    uid = user["id"]
+    username = user.get("username", "Contender")
+
+    raw_parts = rep.get("participant_ids") or "[]"
+    try:
+        parts = json.loads(raw_parts) if isinstance(raw_parts, str) else raw_parts
+    except Exception:
+        parts = []
+
+    if parts and uid not in parts:
+        conn.close()
+        raise HTTPException(status_code=403, detail="Only contenders who took this test can vote on this report.")
+
+    raw_votes = rep.get("votes") or "{}"
+    try:
+        votes = json.loads(raw_votes) if isinstance(raw_votes, str) else raw_votes
+    except Exception:
+        votes = {}
+
+    votes[uid] = {
+        "vote": vote_val,
+        "username": username,
+        "voted_at": now
+    }
+
+    total_participants = len(parts) if parts else max(2, len(votes))
+    agree_votes = sum(1 for v in votes.values() if (v.get("vote") if isinstance(v, dict) else v) == "AGREE")
+    disagree_votes = sum(1 for v in votes.values() if (v.get("vote") if isinstance(v, dict) else v) == "DISAGREE")
+
+    # Determine consensus:
+    # 2 participants: both must agree for defect to be confirmed. If 1 disagrees, rejected.
+    # >2 participants: majority threshold (> 50%) decides consensus.
+    old_consensus = rep.get("consensus_status") or "VOTING_IN_PROGRESS"
+    if total_participants == 2:
+        if agree_votes == 2:
+            consensus_status = "CONSENSUS_AGREED"
+        elif disagree_votes >= 1:
+            consensus_status = "CONSENSUS_REJECTED"
+        else:
+            consensus_status = "VOTING_IN_PROGRESS"
+    else:
+        majority_threshold = (total_participants // 2) + 1
+        if agree_votes >= majority_threshold:
+            consensus_status = "CONSENSUS_AGREED"
+        elif disagree_votes >= majority_threshold or (agree_votes + disagree_votes == total_participants and agree_votes <= disagree_votes):
+            consensus_status = "CONSENSUS_REJECTED"
+        else:
+            consensus_status = "VOTING_IN_PROGRESS"
+
+    c.execute("""
+        UPDATE question_reports
+        SET votes = ?, consensus_status = ?
+        WHERE id = ?
+    """, (json.dumps(votes), consensus_status, report_id))
+
+    # Dispatch notification to all participants if consensus was just achieved
+    if consensus_status == "CONSENSUS_AGREED" and old_consensus != "CONSENSUS_AGREED":
+        for p_uid in parts:
+            notif_id = f"notif_{uuid.uuid4().hex[:12]}"
+            notif_title = f"✅ Report Verified by Contenders: Question #{rep['question_id'][:8]}"
+            notif_msg = (
+                f"Contenders in Room #{rep.get('room_code', '')} voted to confirm the defect for Question #{rep['question_id'][:8]}. "
+                f"Consensus reached ({agree_votes}/{total_participants} agreed)."
+            )
+            details_json = json.dumps({
+                "report_id": report_id,
+                "question_id": rep["question_id"],
+                "room_code": rep.get("room_code"),
+                "status": "CONSENSUS_AGREED"
+            })
+            c.execute("""
+                INSERT INTO user_notifications (id, user_id, type, title, message, details, is_read, created_at)
+                VALUES (?, ?, 'REPORT_CONSENSUS_REACHED', ?, ?, ?, 0, ?)
+            """, (notif_id, p_uid, notif_title, notif_msg, details_json, now))
+    elif consensus_status == "CONSENSUS_REJECTED" and old_consensus != "CONSENSUS_REJECTED":
+        # Notify reporter that contenders rejected the dispute
+        notif_id = f"notif_{uuid.uuid4().hex[:12]}"
+        notif_title = f"⚖️ Report Rejected by Contenders: Question #{rep['question_id'][:8]}"
+        notif_msg = (
+            f"Fellow contenders in Room #{rep.get('room_code', '')} reviewed Question #{rep['question_id'][:8]} "
+            f"and voted that the question and answer key are correct ({disagree_votes}/{total_participants} voted correct)."
+        )
+        details_json = json.dumps({
+            "report_id": report_id,
+            "question_id": rep["question_id"],
+            "room_code": rep.get("room_code"),
+            "status": "CONSENSUS_REJECTED"
+        })
+        c.execute("""
+            INSERT INTO user_notifications (id, user_id, type, title, message, details, is_read, created_at)
+            VALUES (?, ?, 'REPORT_CONSENSUS_REJECTED', ?, ?, ?, 0, ?)
+        """, (notif_id, rep["reporter_id"], notif_title, notif_msg, details_json, now))
+
+    conn.commit()
+    conn.close()
+
+    return {
+        "success": True,
+        "report_id": report_id,
+        "vote": vote_val,
+        "votes": votes,
+        "agree_votes": agree_votes,
+        "disagree_votes": disagree_votes,
+        "total_participants": total_participants,
+        "consensus_status": consensus_status
+    }
+
+
+@router.get("/reports/room/{room_code}")
+def get_room_reports(room_code: str, user: Optional[dict] = Depends(get_optional_user)):
+    """
+    Returns all reports and contender voting statuses for questions in a specific room.
+    """
+    code = room_code.strip().upper()
+    conn = get_connection()
+    c = conn.cursor()
+
+    c.execute("""
+        SELECT * FROM question_reports
+        WHERE room_code = ?
+        ORDER BY created_at ASC
+    """, (code,))
+    rows = [dict(r) for r in c.fetchall()]
+    conn.close()
+
+    result = {}
+    for r in rows:
+        qid = r["question_id"]
+        raw_votes = r.get("votes") or "{}"
+        try:
+            votes = json.loads(raw_votes) if isinstance(raw_votes, str) else raw_votes
+        except Exception:
+            votes = {}
+
+        raw_parts = r.get("participant_ids") or "[]"
+        try:
+            parts = json.loads(raw_parts) if isinstance(raw_parts, str) else raw_parts
+        except Exception:
+            parts = []
+
+        agree_cnt = sum(1 for v in votes.values() if (v.get("vote") if isinstance(v, dict) else v) == "AGREE")
+        disagree_cnt = sum(1 for v in votes.values() if (v.get("vote") if isinstance(v, dict) else v) == "DISAGREE")
+
+        user_vote = None
+        if user and user.get("id"):
+            u_entry = votes.get(user["id"])
+            if u_entry:
+                user_vote = u_entry.get("vote") if isinstance(u_entry, dict) else u_entry
+
+        result[qid] = {
+            "id": r["id"],
+            "question_id": qid,
+            "reporter_id": r.get("reporter_id"),
+            "reporter_username": r.get("reporter_username"),
+            "reason": r.get("reason"),
+            "notes": r.get("notes"),
+            "status": r.get("status"),
+            "consensus_status": r.get("consensus_status") or "PENDING",
+            "votes": votes,
+            "agree_count": agree_cnt,
+            "disagree_count": disagree_cnt,
+            "total_participants": len(parts) if parts else max(2, len(votes)),
+            "user_vote": user_vote,
+            "created_at": r.get("created_at")
+        }
+
+    return {"room_code": code, "reports": result}
 
 
 @router.get("/reports/summary")

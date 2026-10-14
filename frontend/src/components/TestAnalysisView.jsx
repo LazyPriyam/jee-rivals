@@ -39,7 +39,10 @@ import {
   Activity,
   ChevronLeft,
   Calendar,
-  Sparkles
+  Sparkles,
+  Users,
+  ThumbsUp,
+  ThumbsDown
 } from 'lucide-react';
 import ReportQuestionModal from './ReportQuestionModal';
 
@@ -66,10 +69,25 @@ export default function TestAnalysisView({
   const [reportedQuestionIds, setReportedQuestionIds] = useState(new Set());
   const [provisionalAlert, setProvisionalAlert] = useState(null);
   const [launchingDrill, setLaunchingDrill] = useState(false);
+  const [roomReports, setRoomReports] = useState({});
+  const [votingSubmitting, setVotingSubmitting] = useState({});
 
   // Filters for Chapter Matrix (Page 5)
   const [chapterSubjFilter, setChapterSubjFilter] = useState('ALL');
   const [chapterSortBy, setChapterSortBy] = useState('MARKS_LOST');
+
+  const fetchRoomReports = () => {
+    if (!roomCode) return;
+    api.questions.getRoomReports(roomCode)
+      .then((res) => {
+        if (res?.reports) {
+          setRoomReports(res.reports);
+          const reportedIds = Object.keys(res.reports);
+          setReportedQuestionIds((prev) => new Set([...prev, ...reportedIds]));
+        }
+      })
+      .catch(() => {});
+  };
 
   // Load existing user reports to badge flagged questions automatically
   useEffect(() => {
@@ -89,12 +107,31 @@ export default function TestAnalysisView({
     }
   }, [user?.id]);
 
+  useEffect(() => {
+    fetchRoomReports();
+  }, [roomCode]);
+
+  const handleVoteReport = async (reportId, voteType, questionId) => {
+    if (!reportId) return;
+    sound.click();
+    setVotingSubmitting((prev) => ({ ...prev, [questionId]: true }));
+    try {
+      await api.questions.voteReport(reportId, voteType);
+      fetchRoomReports();
+    } catch (err) {
+      alert(err.message || 'Failed to submit vote');
+    } finally {
+      setVotingSubmitting((prev) => ({ ...prev, [questionId]: false }));
+    }
+  };
+
   const handleReportSuccess = (reportInfo) => {
     const qId = reportInfo?.questionId;
     const refund = Number(reportInfo?.provisional_elo_refunded || 0);
     if (qId) {
       setReportedQuestionIds((prev) => new Set(prev).add(qId));
     }
+    fetchRoomReports();
     if (refund > 0) {
       if (sound.levelUp) sound.levelUp();
       setProvisionalAlert({
@@ -236,6 +273,7 @@ export default function TestAnalysisView({
       {}
     : (data.participants || []).find((p) => p.user_id === user?.id) || (data.participants || [])[0] || {};
 
+  const isMultiplayer = (data.participants || []).length > 1;
   const userAnswers = myParticipant.answers || {};
   const questionsList = data.questions || [];
   const totalQuestions = questionsList.length;
@@ -1528,6 +1566,7 @@ export default function TestAnalysisView({
                 const q = item.q;
                 const sol = item.sol;
                 const isExpanded = Boolean(expandedSolutions[q.id]);
+                const roomReport = roomReports[q.id];
 
                 return (
                   <div
@@ -1557,10 +1596,24 @@ export default function TestAnalysisView({
                           <Clock className="w-3.5 h-3.5" />
                           <span>{Math.round(item.timeSpent)}s</span>
                         </span>
-                        {reportedQuestionIds.has(q.id) ? (
-                          <span className="text-xs font-black px-2.5 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/40 flex items-center gap-1.5 animate-pulse">
+                        {reportedQuestionIds.has(q.id) || roomReport ? (
+                          <span className={`text-xs font-black px-2.5 py-0.5 rounded-full flex items-center gap-1.5 animate-pulse border ${
+                            roomReport?.consensus_status === 'CONSENSUS_AGREED'
+                              ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
+                              : roomReport?.consensus_status === 'CONSENSUS_REJECTED'
+                              ? 'bg-slate-800 text-slate-300 border-white/20'
+                              : 'bg-amber-500/20 text-amber-300 border-amber-500/40'
+                          }`}>
                             <Shield className="w-3 h-3 text-amber-400" />
-                            <span>FLAGGED • UNDER REVIEW (+15 ELO RESTORED)</span>
+                            <span>
+                              {roomReport?.consensus_status === 'CONSENSUS_AGREED'
+                                ? 'DEFECT CONFIRMED BY CONTENDERS'
+                                : roomReport?.consensus_status === 'CONSENSUS_REJECTED'
+                                ? 'DISPUTE REJECTED BY CONTENDERS'
+                                : isMultiplayer
+                                ? 'CONTENDER VOTING IN PROGRESS'
+                                : 'FLAGGED • UNDER REVIEW (+15 ELO RESTORED)'}
+                            </span>
                           </span>
                         ) : (
                           <span
@@ -1608,6 +1661,106 @@ export default function TestAnalysisView({
                       </div>
                     </div>
 
+                    {/* Contender Review Voting Card */}
+                    {roomReport && (
+                      <div className={`mt-3 p-3.5 rounded-2xl border text-xs leading-relaxed transition ${
+                        roomReport.consensus_status === 'CONSENSUS_AGREED'
+                          ? 'bg-emerald-950/30 border-emerald-500/40 text-emerald-200'
+                          : roomReport.consensus_status === 'CONSENSUS_REJECTED'
+                          ? 'bg-rose-950/20 border-rose-500/30 text-rose-300'
+                          : 'bg-amber-950/30 border-amber-500/40 text-amber-200'
+                      }`}>
+                        <div className="flex flex-wrap items-center justify-between gap-2 mb-2 pb-2 border-b border-white/10">
+                          <div className="flex items-center gap-2 font-bold">
+                            <span className="text-base">
+                              {roomReport.consensus_status === 'CONSENSUS_AGREED' ? '✅' : roomReport.consensus_status === 'CONSENSUS_REJECTED' ? '❌' : '⚖️'}
+                            </span>
+                            <span className="text-white">
+                              {roomReport.consensus_status === 'CONSENSUS_AGREED'
+                                ? 'Defect Verified by Room Contenders'
+                                : roomReport.consensus_status === 'CONSENSUS_REJECTED'
+                                ? 'Dispute Rejected by Contenders (Question Valid)'
+                                : 'Contender Consensus Review'}
+                            </span>
+                            <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-black/40 border border-white/10 text-slate-300">
+                              {roomReport.agree_count} Agree • {roomReport.disagree_count} Disagree / {roomReport.total_participants} Contenders
+                            </span>
+                          </div>
+                          <div className="text-[11px] font-mono text-slate-400">
+                            Reported by <strong className="text-white">{roomReport.reporter_username || 'Contender'}</strong> ({roomReport.reason})
+                          </div>
+                        </div>
+
+                        {roomReport.notes && (
+                          <div className="mb-2.5 text-[11px] text-slate-300 italic bg-black/40 p-2.5 rounded-xl border border-white/5">
+                            "{roomReport.notes}"
+                          </div>
+                        )}
+
+                        {/* Interactive Contender Voting Controls */}
+                        {isMultiplayer && (
+                          <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
+                            <div className="text-[11px] text-slate-300">
+                              {roomReport.user_vote ? (
+                                <span className="flex items-center gap-1.5 font-bold">
+                                  <span>Your Contender Vote:</span>
+                                  <span className={`px-2 py-0.5 rounded font-mono text-[10px] ${
+                                    roomReport.user_vote === 'AGREE'
+                                      ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                                      : 'bg-rose-500/20 text-rose-400 border border-rose-500/30'
+                                  }`}>
+                                    {roomReport.user_vote === 'AGREE' ? '👍 Agreed (Confirmed Defect)' : '👎 Disagreed (Question is Correct)'}
+                                  </span>
+                                </span>
+                              ) : (
+                                <span>Vote on whether you encountered an error with this question:</span>
+                              )}
+                            </div>
+
+                            <div className="flex items-center gap-2">
+                              <button
+                                type="button"
+                                disabled={Boolean(roomReport.user_vote) || votingSubmitting[q.id]}
+                                onClick={() => handleVoteReport(roomReport.id, 'AGREE', q.id)}
+                                className={`px-3 py-1.5 rounded-xl font-bold text-xs flex items-center gap-1.5 transition cursor-pointer ${
+                                  roomReport.user_vote === 'AGREE'
+                                    ? 'bg-emerald-600 text-white shadow-sm ring-1 ring-emerald-400'
+                                    : roomReport.user_vote
+                                    ? 'opacity-30 cursor-not-allowed bg-slate-800 text-slate-400'
+                                    : 'bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/40 hover:border-emerald-400'
+                                }`}
+                              >
+                                <ThumbsUp className="w-3.5 h-3.5" />
+                                <span>Agree (Defect)</span>
+                                <span className="font-mono text-[10px] bg-black/40 px-1.5 py-0.2 rounded font-black">
+                                  {roomReport.agree_count}
+                                </span>
+                              </button>
+
+                              <button
+                                type="button"
+                                disabled={Boolean(roomReport.user_vote) || votingSubmitting[q.id]}
+                                onClick={() => handleVoteReport(roomReport.id, 'DISAGREE', q.id)}
+                                className={`px-3 py-1.5 rounded-xl font-bold text-xs flex items-center gap-1.5 transition cursor-pointer ${
+                                  roomReport.user_vote === 'DISAGREE'
+                                    ? 'bg-rose-600 text-white shadow-sm ring-1 ring-rose-400'
+                                    : roomReport.user_vote
+                                    ? 'opacity-30 cursor-not-allowed bg-slate-800 text-slate-400'
+                                    : 'bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 border border-rose-500/40 hover:border-rose-400'
+                                }`}
+                              >
+                                <ThumbsDown className="w-3.5 h-3.5" />
+                                <span>Disagree (Valid)</span>
+                                <span className="font-mono text-[10px] bg-black/40 px-1.5 py-0.2 rounded font-black">
+                                  {roomReport.disagree_count}
+                                </span>
+                              </button>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
                     {/* Solution Toggle & Report Button */}
                     <div className="mt-4 flex items-center justify-between pt-2">
                       <button
@@ -1618,28 +1771,41 @@ export default function TestAnalysisView({
                         <ChevronDown className={`w-3.5 h-3.5 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
                       </button>
 
-                      <button
-                        type="button"
-                        onClick={() => setReportTarget({ id: q.id, text: q.text })}
-                        disabled={reportedQuestionIds.has(q.id)}
-                        className={`text-xs font-mono transition flex items-center gap-1.5 cursor-pointer ${
-                          reportedQuestionIds.has(q.id)
-                            ? 'text-amber-400 opacity-90 cursor-default'
-                            : 'text-slate-500 hover:text-slate-400'
-                        }`}
-                      >
-                        {reportedQuestionIds.has(q.id) ? (
-                          <>
-                            <Shield className="w-3.5 h-3.5 text-amber-400" />
-                            <span>Reported (Protected)</span>
-                          </>
-                        ) : (
-                          <>
-                            <Flag className="w-3 h-3" />
-                            <span>Report Question</span>
-                          </>
-                        )}
-                      </button>
+                      {roomReport ? (
+                        <div className="text-xs font-mono flex items-center gap-1.5 text-amber-400">
+                          <Shield className="w-3.5 h-3.5 text-amber-400" />
+                          <span>
+                            {roomReport.consensus_status === 'CONSENSUS_AGREED'
+                              ? 'Defect Confirmed'
+                              : roomReport.consensus_status === 'CONSENSUS_REJECTED'
+                              ? 'Dispute Rejected'
+                              : 'Dispute in Review'}
+                          </span>
+                        </div>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => setReportTarget({ id: q.id, text: q.text })}
+                          disabled={reportedQuestionIds.has(q.id)}
+                          className={`text-xs font-mono transition flex items-center gap-1.5 cursor-pointer ${
+                            reportedQuestionIds.has(q.id)
+                              ? 'text-amber-400 opacity-90 cursor-default'
+                              : 'text-slate-500 hover:text-slate-400'
+                          }`}
+                        >
+                          {reportedQuestionIds.has(q.id) ? (
+                            <>
+                              <Shield className="w-3.5 h-3.5 text-amber-400" />
+                              <span>Reported (Protected)</span>
+                            </>
+                          ) : (
+                            <>
+                              <Flag className="w-3 h-3" />
+                              <span>Report Question</span>
+                            </>
+                          )}
+                        </button>
+                      )}
                     </div>
 
                     {/* Solution Panel */}
@@ -1713,6 +1879,8 @@ export default function TestAnalysisView({
           user={user}
           mode="test_analysis"
           canSkip={false}
+          roomCode={roomCode}
+          isMultiplayer={isMultiplayer}
           onClose={() => setReportTarget(null)}
           onReportSuccess={handleReportSuccess}
         />

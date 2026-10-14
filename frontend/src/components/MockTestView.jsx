@@ -3,17 +3,14 @@ import { createPortal } from 'react-dom';
 import { api } from '../utils/api';
 import MathRenderer from './MathRenderer';
 import { sound } from '../utils/sound';
-import ReportQuestionModal from './ReportQuestionModal';
-import { Clock, AlertTriangle, FileText, X, Image as ImageIcon, CheckCircle, ChevronLeft, ChevronRight, User, Flag, BookOpen } from 'lucide-react';
+import { Clock, AlertTriangle, FileText, X, Image as ImageIcon, CheckCircle, ChevronLeft, ChevronRight, User, BookOpen } from 'lucide-react';
 import { normalizeQuestionsWithComprehensions, buildComprehensionGroupMap } from '../utils/comprehension';
 import {
   setActiveTestRoom,
   clearActiveTestRoom,
   getMockTestDraftProgress,
   setMockTestDraftProgress,
-  clearMockTestDraftProgress,
-  getReportedQuestions,
-  addReportedQuestion
+  clearMockTestDraftProgress
 } from '../utils/storageGuardian';
 
   const sortQuestionsBySubject = (raw) => {
@@ -48,18 +45,6 @@ export default function MockTestView({ room, user, onMatchComplete, onExitToDash
   const [submitModalOpen, setSubmitModalOpen] = useState(false);
   const [exitWarningModalOpen, setExitWarningModalOpen] = useState(false);
   const [questionPaperModalOpen, setQuestionPaperModalOpen] = useState(false);
-  const [reportModalOpen, setReportModalOpen] = useState(false);
-  const [reportedQuestions, setReportedQuestions] = useState(() => getReportedQuestions(user?.id, room.code));
-
-  const handleReportSuccess = ({ questionId }) => {
-    if (!questionId) return;
-    addReportedQuestion(user?.id, room.code, questionId);
-    setReportedQuestions((prev) => {
-      const next = new Set(prev);
-      next.add(questionId);
-      return next;
-    });
-  };
   const [selectedSubject, setSelectedSubject] = useState(() => {
     const sorted = sortQuestionsBySubject(room.all_questions || []);
     return sorted[savedProgress?.currentIndex || 0]?.subject || sorted[0]?.subject || 'Physics';
@@ -553,22 +538,6 @@ export default function MockTestView({ room, user, onMatchComplete, onExitToDash
                 <span className="text-rose-700 font-bold bg-rose-50 px-2 py-0.5 rounded border border-rose-200">
                   Negative: -1
                 </span>
-                <button
-                  type="button"
-                  onClick={() => {
-                    sound.click();
-                    setReportModalOpen(true);
-                  }}
-                  className={`font-sans font-bold flex items-center gap-1 px-2 py-0.5 rounded transition cursor-pointer ${
-                    reportedQuestions.has(currentQ?.id)
-                      ? 'bg-amber-100 text-amber-900 border border-amber-300 shadow-xs'
-                      : 'text-slate-500 hover:text-amber-700 bg-amber-50/80 hover:bg-amber-100 border border-amber-200/80'
-                  }`}
-                  title={reportedQuestions.has(currentQ?.id) ? 'Question reported (flagged for review)' : 'Report Defective Question'}
-                >
-                  <Flag className={`w-3 h-3 ${reportedQuestions.has(currentQ?.id) ? 'text-amber-700 fill-amber-500' : 'text-amber-600'}`} />
-                  <span>{reportedQuestions.has(currentQ?.id) ? 'Reported 🚩' : 'Report'}</span>
-                </button>
               </div>
             </div>
 
@@ -819,18 +788,6 @@ export default function MockTestView({ room, user, onMatchComplete, onExitToDash
                   Ans & Marked Review (will be evaluated)
                 </span>
               </div>
-
-              {reportedQuestions.size > 0 && (
-                <div className="col-span-2 flex items-center justify-between mt-1 pt-1 border-t border-slate-200 bg-amber-50/80 -mx-1 px-2 py-1 rounded text-[10px] text-amber-900 font-bold">
-                  <span className="flex items-center gap-1">
-                    <span>🚩</span>
-                    <span>Reported / Flagged</span>
-                  </span>
-                  <span className="font-mono bg-amber-200/80 text-amber-900 px-1.5 py-0.2 rounded text-[10px]">
-                    {reportedQuestions.size}
-                  </span>
-                </div>
-              )}
             </div>
 
             {/* Questions Number Grid */}
@@ -852,10 +809,7 @@ export default function MockTestView({ room, user, onMatchComplete, onExitToDash
                       <button
                         key={q.id}
                         onClick={() => goToQuestion(idx)}
-                        title={
-                          (groupInfo?.isPassage ? `${groupInfo.groupLabel} (Sub-question ${groupInfo.subIndex})` : `Question ${idx + 1}`) +
-                          (reportedQuestions.has(q.id) ? ' [Reported 🚩]' : '')
-                        }
+                        title={groupInfo?.isPassage ? `${groupInfo.groupLabel} (Sub-question ${groupInfo.subIndex})` : `Question ${idx + 1}`}
                         className={`h-9 w-9 text-xs font-mono font-bold flex flex-col items-center justify-center cursor-pointer transition relative ${shapeClass} ${
                           isCurrent ? 'ring-2 ring-blue-600 ring-offset-2 scale-105' : 'hover:opacity-90'
                         }`}
@@ -863,9 +817,6 @@ export default function MockTestView({ room, user, onMatchComplete, onExitToDash
                         <span>{idx + 1}</span>
                         {groupInfo?.isPassage && (
                           <span className="text-[7px] leading-none opacity-85 font-sans font-black tracking-tighter text-blue-200">¶</span>
-                        )}
-                        {reportedQuestions.has(q.id) && (
-                          <span className="absolute -top-1.5 -right-1.5 text-[10px] leading-none filter drop-shadow pointer-events-none">🚩</span>
                         )}
                       </button>
                     );
@@ -907,11 +858,6 @@ export default function MockTestView({ room, user, onMatchComplete, onExitToDash
                     <span>Q{idx + 1}</span>
                     <span>• {q.subject}</span>
                     <span className="text-slate-500">• {q.chapter}</span>
-                    {reportedQuestions.has(q.id) && (
-                      <span className="text-[10px] font-mono px-1.5 py-0.5 bg-amber-100 text-amber-900 border border-amber-200 rounded font-bold flex items-center gap-1">
-                        🚩 Reported
-                      </span>
-                    )}
                     {q.passage_text && (
                       <span className="text-[10px] font-mono px-1.5 py-0.2 bg-blue-100 text-blue-800 rounded">
                         Sub-Q {q.subquestion_index || 1}
@@ -1088,17 +1034,6 @@ export default function MockTestView({ room, user, onMatchComplete, onExitToDash
         </div>,
         document.body
       )}
-
-      {/* Report Question Modal */}
-      <ReportQuestionModal
-        isOpen={reportModalOpen}
-        onClose={() => setReportModalOpen(false)}
-        questionId={currentQ?.id}
-        questionText={currentQ?.text}
-        mode="mock_test"
-        canSkip={false}
-        onReportSuccess={handleReportSuccess}
-      />
     </div>
   );
 }

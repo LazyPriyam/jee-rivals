@@ -585,6 +585,24 @@ def migration_009_daily_question_goal(conn: sqlite3.Connection):
         c.execute("ALTER TABLE users ADD COLUMN daily_goal_date TEXT DEFAULT NULL;")
 
 
+def migration_010_room_question_report_voting(conn: sqlite3.Connection):
+    """
+    Extends question_reports to support room-scoped collaborative reporting and multi-participant voting.
+    """
+    c = conn.cursor()
+    c.execute("PRAGMA table_info(question_reports);")
+    existing_cols = {row[1] for row in c.fetchall()}
+    if "room_code" not in existing_cols:
+        c.execute("ALTER TABLE question_reports ADD COLUMN room_code TEXT DEFAULT NULL;")
+    if "votes" not in existing_cols:
+        c.execute("ALTER TABLE question_reports ADD COLUMN votes TEXT DEFAULT '{}';")
+    if "participant_ids" not in existing_cols:
+        c.execute("ALTER TABLE question_reports ADD COLUMN participant_ids TEXT DEFAULT '[]';")
+    if "consensus_status" not in existing_cols:
+        c.execute("ALTER TABLE question_reports ADD COLUMN consensus_status TEXT DEFAULT 'PENDING';")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_question_reports_room ON question_reports(room_code);")
+
+
 # Master migration registry (ordered sequentially)
 MIGRATIONS: List[Dict[str, Any]] = [
     {
@@ -631,6 +649,11 @@ MIGRATIONS: List[Dict[str, Any]] = [
         "version": 9,
         "name": "daily_question_goal",
         "func": migration_009_daily_question_goal,
+    },
+    {
+        "version": 10,
+        "name": "room_question_report_voting",
+        "func": migration_010_room_question_report_voting,
     },
 ]
 
