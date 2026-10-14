@@ -9,8 +9,12 @@ Enforces:
   5. 0ms In-Memory selection from hot question cache with real-time structural verification.
 """
 
+import json
+import logging
 import random
 from typing import List, Dict, Optional, Set, Any, Tuple
+
+logger = logging.getLogger("jee_rivals.mock_selector")
 
 from backend.app.tools.jee_syllabus import (
     JEE_SYLLABUS,
@@ -78,6 +82,98 @@ def _build_passage_groups(pool: List[dict]) -> Dict[str, List[dict]]:
     return groups
 
 
+def get_participants_seen_question_map(
+    cursor,
+    user_ids: Optional[List[str]],
+    exclude_room_id: Optional[str] = None,
+) -> Dict[str, int]:
+    """
+    Returns a mapping of {question_id: seen_count} where seen_count is the number
+    of participants in user_ids who have previously encountered or attempted the question.
+    A question is considered seen by a user if:
+      1. It appears in `activity_log` for that user.
+      2. It was included in `rooms.question_ids` or `room_participants.answers` for any room
+         that the user participated in (excluding `exclude_room_id`).
+    """
+    if not cursor or not user_ids:
+        return {}
+
+    valid_uids = list({str(u).strip() for u in user_ids if u and str(u).strip()})
+    if not valid_uids:
+        return {}
+
+    user_seen: Dict[str, Set[str]] = {uid: set() for uid in valid_uids}
+    placeholders = ",".join("?" for _ in valid_uids)
+
+    # 1. Fetch attempted questions from activity_log
+    try:
+        cursor.execute(
+            f"SELECT user_id, question_id FROM activity_log WHERE user_id IN ({placeholders})",
+            valid_uids,
+        )
+        for row in cursor.fetchall():
+            uid = row[0] if isinstance(row, (list, tuple)) else (row.get("user_id") if hasattr(row, "get") else row["user_id"])
+            qid = row[1] if isinstance(row, (list, tuple)) else (row.get("question_id") if hasattr(row, "get") else row["question_id"])
+            if uid in user_seen and qid:
+                user_seen[uid].add(str(qid).strip())
+    except Exception as e:
+        logger.warning(f"Error querying activity_log for seen questions: {e}")
+
+    # 2. Fetch questions from rooms the user participated in
+    try:
+        sql = f"""
+            SELECT DISTINCT rp.user_id, r.question_ids, rp.answers
+            FROM room_participants rp
+            JOIN rooms r ON rp.room_id = r.id
+            WHERE rp.user_id IN ({placeholders})
+        """
+        params: List[Any] = list(valid_uids)
+        if exclude_room_id:
+            sql += " AND r.id != ?"
+            params.append(exclude_room_id)
+
+        cursor.execute(sql, params)
+        for row in cursor.fetchall():
+            uid = row[0] if isinstance(row, (list, tuple)) else (row.get("user_id") if hasattr(row, "get") else row["user_id"])
+            qids_raw = row[1] if isinstance(row, (list, tuple)) else (row.get("question_ids") if hasattr(row, "get") else row["question_ids"])
+            answers_raw = row[2] if isinstance(row, (list, tuple)) else (row.get("answers") if hasattr(row, "get") else None)
+
+            if uid not in user_seen:
+                continue
+
+            # Parse question_ids from room
+            if qids_raw:
+                try:
+                    qids_list = json.loads(qids_raw) if isinstance(qids_raw, str) else qids_raw
+                    if isinstance(qids_list, list):
+                        for qid in qids_list:
+                            if qid:
+                                user_seen[uid].add(str(qid).strip())
+                except Exception:
+                    pass
+
+            # Parse answers dict from room_participants
+            if answers_raw:
+                try:
+                    ans_map = json.loads(answers_raw) if isinstance(answers_raw, str) else answers_raw
+                    if isinstance(ans_map, dict):
+                        for qid in ans_map.keys():
+                            if qid:
+                                user_seen[uid].add(str(qid).strip())
+                except Exception:
+                    pass
+    except Exception as e:
+        logger.warning(f"Error querying room_participants for seen questions: {e}")
+
+    # Aggregate seen_counts: question_id -> count of participants who have seen it
+    seen_counts: Dict[str, int] = {}
+    for uid, qids in user_seen.items():
+        for qid in qids:
+            seen_counts[qid] = seen_counts.get(qid, 0) + 1
+
+    return seen_counts
+
+
 def _pick_from_chapters_weighted(
     candidates: List[dict],
     quota: int,
@@ -87,16 +183,28 @@ def _pick_from_chapters_weighted(
     seen_passages: Set[str],
     passage_groups: Dict[str, List[dict]],
     prefer_advanced: bool = False,
+    seen_counts: Optional[Dict[str, int]] = None,
 ) -> List[dict]:
     """
     Selects up to `quota` questions from `candidates`, guided by `ch_quotas` and `weights_map`.
     Decrements `ch_quotas[ch]` as questions are picked so total chapter allocation stays true to weightage.
     Preserves comprehension passage groups atomically.
+    Soft-forces unseen questions (seen_count == 0 across participants) before smoothly falling back
+    to questions seen by the fewest participants if unseen bank supply is exhausted.
     """
     if quota <= 0 or not candidates:
         return []
 
     picked: List[dict] = []
+
+    def _get_q_seen(q: dict) -> int:
+        if not seen_counts:
+            return 0
+        pid = q.get("passage_id")
+        if pid and pid in passage_groups:
+            # Maximum seen count among all siblings of this passage
+            return max(seen_counts.get(s["id"], 0) for s in passage_groups[pid])
+        return seen_counts.get(q["id"], 0)
 
     # Group candidates by normalized chapter
     by_chapter: Dict[str, List[dict]] = {}
@@ -114,10 +222,13 @@ def _pick_from_chapters_weighted(
             exam_rank = {"JEE_ADVANCED": 0, "ADVANCED": 0, "MIXED": 1, "JEE_MAIN": 2, "MAIN": 2}
             shuffled.sort(
                 key=lambda x: (
+                    _get_q_seen(x),
                     exam_rank.get((x.get("target_exam") or "").upper(), 2),
                     diff_rank.get((x.get("difficulty_tier") or "MEDIUM").upper(), 1),
                 )
             )
+        else:
+            shuffled.sort(key=lambda x: _get_q_seen(x))
         return shuffled
 
     for ch_k in by_chapter:
@@ -147,11 +258,14 @@ def _pick_from_chapters_weighted(
             picked.append(q)
             return 1
 
-    # Pass 1: Draw from chapters that currently have positive remaining chapter quota (ch_quotas[ch] > 0)
-    # Order chapters by their weightage + slight randomness
+    # Pass 1A: Draw UNSEEN questions (_get_q_seen == 0) from chapters that have positive quota (ch_quotas[ch] > 0)
     ordered_chapters = sorted(
         by_chapter.keys(),
-        key=lambda c: (ch_quotas.get(c, 0) > 0, weights_map.get(c, 2.0) + random.uniform(0, 0.3)),
+        key=lambda c: (
+            ch_quotas.get(c, 0) > 0,
+            any(_get_q_seen(q) == 0 for q in by_chapter[c] if q["id"] not in seen_ids),
+            weights_map.get(c, 2.0) + random.uniform(0, 0.3),
+        ),
         reverse=True,
     )
 
@@ -165,17 +279,42 @@ def _pick_from_chapters_weighted(
         for q in by_chapter[ch]:
             if len(picked) >= quota or added_in_ch >= ch_rem:
                 break
+            # In Pass 1A, only draw questions unseen by all participants
+            if _get_q_seen(q) > 0:
+                continue
             added = _try_add_question(q, quota)
             if added > 0:
                 added_in_ch += added
                 ch_quotas[ch] = max(0, ch_quotas.get(ch, 0) - added)
 
-    # Pass 2: If we still need questions to meet `quota` (e.g. a chapter didn't have enough of this specific question type),
-    # draw from any chapter in `by_chapter` ordered by weightage
+    # Pass 1B: If quota still not met, draw remaining UNSEEN questions from other chapters ordered by weightage
+    if len(picked) < quota:
+        unseen_chapters = sorted(
+            [c for c in by_chapter.keys() if any(_get_q_seen(q) == 0 for q in by_chapter[c] if q["id"] not in seen_ids)],
+            key=lambda c: weights_map.get(c, 2.0) + random.uniform(0, 0.5),
+            reverse=True,
+        )
+        for ch in unseen_chapters:
+            if len(picked) >= quota:
+                break
+            for q in by_chapter[ch]:
+                if len(picked) >= quota:
+                    break
+                if _get_q_seen(q) > 0:
+                    continue
+                added = _try_add_question(q, quota)
+                if added > 0:
+                    ch_quotas[ch] = max(0, ch_quotas.get(ch, 0) - added)
+
+    # Pass 2: Soft force fallback when bank supply of unseen questions is exhausted.
+    # Draw from remaining candidates (which are sorted by least seen count first).
     if len(picked) < quota:
         fallback_chapters = sorted(
             by_chapter.keys(),
-            key=lambda c: weights_map.get(c, 2.0) + random.uniform(0, 0.5),
+            key=lambda c: (
+                ch_quotas.get(c, 0) > 0,
+                weights_map.get(c, 2.0) + random.uniform(0, 0.5),
+            ),
             reverse=True,
         )
         for ch in fallback_chapters:
@@ -254,6 +393,8 @@ def select_mock_and_room_questions(
     question_types: Optional[List[str]] = None,
     question_type_filter: Optional[str] = "ALL",
     mode: str = "MOCK_TEST",
+    user_ids: Optional[List[str]] = None,
+    exclude_room_id: Optional[str] = None,
 ) -> List[dict]:
     """
     Master question selector for Mock Tests and Battle Rooms:
@@ -263,10 +404,19 @@ def select_mock_and_room_questions(
       3. Enforces JEE Main Format (80% Single Choice Section A + 20% Numerical Section B)
          or JEE Advanced Format (Multi-Correct, Numerical, Comprehension Passages, Matrix Match,
          with intelligent chapter-weighted Advanced backfill).
+      4. Soft-forces unseen questions so that solo tests and multiplayer rooms prioritize questions
+         that none of the participants have previously seen, falling back seamlessly if bank is exhausted.
     """
     all_cached = get_all_questions_cached(cursor=cursor)
     if not all_cached:
         return []
+
+    # Build participant seen counts map for soft-force prioritization
+    seen_counts = get_participants_seen_question_map(
+        cursor=cursor,
+        user_ids=user_ids,
+        exclude_room_id=exclude_room_id,
+    )
 
     # 1. Resolve active subjects in canonical order (Physics -> Chemistry -> Mathematics)
     norm_chapters: List[str] = []
@@ -418,6 +568,7 @@ def select_mock_and_room_questions(
                 seen_passages=seen_passages,
                 passage_groups=passage_groups,
                 prefer_advanced=False,
+                seen_counts=seen_counts,
             )
 
             # Backfill any NVQ shortfall into Section A (Single Choice)
@@ -434,6 +585,7 @@ def select_mock_and_room_questions(
                 seen_passages=seen_passages,
                 passage_groups=passage_groups,
                 prefer_advanced=False,
+                seen_counts=seen_counts,
             )
 
             subj_selected.extend(picked_scq)
@@ -452,6 +604,7 @@ def select_mock_and_room_questions(
                     seen_passages=seen_passages,
                     passage_groups=passage_groups,
                     prefer_advanced=False,
+                    seen_counts=seen_counts,
                 )
                 subj_selected.extend(extra)
 
@@ -484,6 +637,7 @@ def select_mock_and_room_questions(
                     seen_passages=seen_passages,
                     passage_groups=passage_groups,
                     prefer_advanced=True,
+                    seen_counts=seen_counts,
                 )
                 subj_selected.extend(picked_custom)
             else:
@@ -508,6 +662,7 @@ def select_mock_and_room_questions(
                     seen_passages=seen_passages,
                     passage_groups=passage_groups,
                     prefer_advanced=True,
+                    seen_counts=seen_counts,
                 )
                 subj_selected.extend(picked_comp)
 
@@ -521,6 +676,7 @@ def select_mock_and_room_questions(
                     seen_passages=seen_passages,
                     passage_groups=passage_groups,
                     prefer_advanced=True,
+                    seen_counts=seen_counts,
                 )
                 subj_selected.extend(picked_multi)
 
@@ -534,6 +690,7 @@ def select_mock_and_room_questions(
                     seen_passages=seen_passages,
                     passage_groups=passage_groups,
                     prefer_advanced=True,
+                    seen_counts=seen_counts,
                 )
                 subj_selected.extend(picked_mat)
 
@@ -550,6 +707,7 @@ def select_mock_and_room_questions(
                     seen_passages=seen_passages,
                     passage_groups=passage_groups,
                     prefer_advanced=True,
+                    seen_counts=seen_counts,
                 )
                 subj_selected.extend(picked_num)
 
@@ -567,6 +725,7 @@ def select_mock_and_room_questions(
                     seen_passages=seen_passages,
                     passage_groups=passage_groups,
                     prefer_advanced=True,
+                    seen_counts=seen_counts,
                 )
                 subj_selected.extend(picked_adv_rem)
 
@@ -582,6 +741,7 @@ def select_mock_and_room_questions(
                     seen_passages=seen_passages,
                     passage_groups=passage_groups,
                     prefer_advanced=True,
+                    seen_counts=seen_counts,
                 )
                 subj_selected.extend(picked_scq_adv)
 
@@ -596,6 +756,7 @@ def select_mock_and_room_questions(
                     seen_passages=seen_passages,
                     passage_groups=passage_groups,
                     prefer_advanced=True,
+                    seen_counts=seen_counts,
                 )
                 subj_selected.extend(picked_fb)
 

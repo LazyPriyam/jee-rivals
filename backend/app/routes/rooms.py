@@ -316,6 +316,10 @@ def create_room(req: RoomCreateRequest, user: dict = Depends(get_current_user)):
 
     # Explicit question IDs specified (e.g. Graveyard Re-Duel or Curated Sets)
     if req.question_ids and len(req.question_ids) > 0:
+        if not req.preset_name:
+            req.preset_name = "Curated Question Set"
+        elif "curated" not in req.preset_name.lower() and "graveyard" not in req.preset_name.lower():
+            req.preset_name = f"Curated: {req.preset_name}"
         from backend.app.tools.question_cache import get_question_cached
         verified_rows = []
         for qid in req.question_ids:
@@ -345,6 +349,7 @@ def create_room(req: RoomCreateRequest, user: dict = Depends(get_current_user)):
             question_types=req.question_types,
             question_type_filter=req.question_type_filter,
             mode=req.mode,
+            user_ids=[user["id"]],
         )
 
     if not q_rows:
@@ -1013,6 +1018,73 @@ async def start_room(code: str, user: dict = Depends(get_current_user)):
     if room["status"] != "LOBBY":
         conn.close()
         raise HTTPException(status_code=400, detail="Match has already started or completed.")
+
+    # Retrieve all participants currently in the room
+    c.execute("SELECT user_id FROM room_participants WHERE room_id = ?", (room_id,))
+    participant_rows = c.fetchall()
+    participant_ids = [
+        r[0] if isinstance(r, (list, tuple)) else (r.get("user_id") if hasattr(r, "get") else r["user_id"])
+        for r in participant_rows
+    ]
+
+    is_explicit_set = bool(
+        room.get("preset_name")
+        and any(k in str(room.get("preset_name")).lower() for k in ("curated", "graveyard"))
+    )
+
+    # For multiplayer rooms (more than 1 participant) with dynamic question selection,
+    # re-select questions taking into account all participants' seen history so that
+    # the test soft-forces questions unseen by ANY of the participants.
+    if len(participant_ids) > 1 and not is_explicit_set:
+        filter_subjects = []
+        if room.get("subjects"):
+            try:
+                filter_subjects = json.loads(room["subjects"])
+            except Exception:
+                pass
+        if not filter_subjects and room.get("subject") and room.get("subject").lower() not in ("mixed", "all", "any"):
+            filter_subjects = [room["subject"]]
+
+        filter_chapters = []
+        if room.get("chapters"):
+            try:
+                filter_chapters = json.loads(room["chapters"])
+            except Exception:
+                pass
+        if not filter_chapters and room.get("chapter") and room.get("chapter").lower() not in ("mixed", "all", "any"):
+            filter_chapters = [room["chapter"]]
+
+        target_count = room.get("total_questions") or 0
+        if target_count < 3:
+            try:
+                existing_qids = json.loads(room.get("question_ids") or "[]")
+                target_count = len(existing_qids)
+            except Exception:
+                target_count = 25
+
+        if target_count >= 3:
+            from backend.app.tools.mock_selector import select_mock_and_room_questions
+            q_rows = select_mock_and_room_questions(
+                cursor=c,
+                target_count=target_count,
+                filter_subjects=filter_subjects,
+                filter_chapters=filter_chapters,
+                target_exam=room.get("target_exam") or ("MAIN" if room.get("mode") == "MOCK_TEST" else "MIXED"),
+                difficulty_tier=room.get("difficulty_tier") or "MIXED",
+                question_type_filter=room.get("question_type_filter") or "ALL",
+                mode=room.get("mode") or "MOCK_TEST",
+                user_ids=participant_ids,
+                exclude_room_id=room_id,
+            )
+            if q_rows and len(q_rows) == target_count:
+                new_q_ids = [r["id"] for r in q_rows]
+                c.execute(
+                    "UPDATE rooms SET question_ids = ?, total_questions = ? WHERE id = ?",
+                    (json.dumps(new_q_ids), len(new_q_ids), room_id),
+                )
+                conn.commit()
+                room["question_ids"] = json.dumps(new_q_ids)
+                room["total_questions"] = len(new_q_ids)
 
     now = datetime.datetime.utcnow().isoformat()
     c.execute("UPDATE rooms SET status = 'IN_PROGRESS', started_at = ? WHERE id = ?", (now, room_id))

@@ -551,16 +551,27 @@ def challenge_friend(friend_id: str, req: ChallengeFriendModel, user: dict = Dep
     conn = get_connection()
     c = conn.cursor()
 
-    # Pick 5 questions for fast 1-on-1 duel
-    q_query = """
-        SELECT id FROM questions
-        WHERE (validation_status IS NULL OR validation_status NOT IN ('QUARANTINED', 'SUPERSEDED_BY_SUBQUESTIONS'))
-          AND text IS NOT NULL AND text != ''
-        ORDER BY RANDOM() LIMIT ?
-    """
-    c.execute(q_query, (req.question_count or 5,))
-    q_rows = c.fetchall()
-    question_ids = [r[0] for r in q_rows]
+    # Pick questions for fast 1-on-1 duel, prioritizing questions unseen by both participants
+    from backend.app.tools.mock_selector import select_mock_and_room_questions
+    q_rows = select_mock_and_room_questions(
+        cursor=c,
+        target_count=req.question_count or 5,
+        target_exam="MAIN",
+        difficulty_tier="MIXED",
+        mode="SPEED_DUEL",
+        user_ids=[user["id"], friend_id],
+    )
+    if q_rows:
+        question_ids = [r["id"] for r in q_rows]
+    else:
+        q_query = """
+            SELECT id FROM questions
+            WHERE (validation_status IS NULL OR validation_status NOT IN ('QUARANTINED', 'SUPERSEDED_BY_SUBQUESTIONS'))
+              AND text IS NOT NULL AND text != ''
+            ORDER BY RANDOM() LIMIT ?
+        """
+        c.execute(q_query, (req.question_count or 5,))
+        question_ids = [r[0] for r in c.fetchall()]
 
     code = generate_room_code()
     room_id = str(uuid.uuid4())
@@ -906,16 +917,27 @@ def send_chat_challenge(friend_id: str, req: ChatChallengeModel, user: dict = De
     conn = get_connection()
     c = conn.cursor()
 
-    # Pick 5 questions for fast 1-on-1 duel
-    q_query = """
-        SELECT id FROM questions
-        WHERE (validation_status IS NULL OR validation_status NOT IN ('QUARANTINED', 'SUPERSEDED_BY_SUBQUESTIONS'))
-          AND text IS NOT NULL AND text != ''
-        ORDER BY RANDOM() LIMIT ?
-    """
-    c.execute(q_query, (req.question_count or 5,))
-    q_rows = c.fetchall()
-    question_ids = [r[0] for r in q_rows]
+    # Pick questions for fast 1-on-1 duel, prioritizing questions unseen by both participants
+    from backend.app.tools.mock_selector import select_mock_and_room_questions
+    q_rows = select_mock_and_room_questions(
+        cursor=c,
+        target_count=req.question_count or 5,
+        target_exam="MAIN",
+        difficulty_tier="MIXED",
+        mode="SPEED_DUEL",
+        user_ids=[user["id"], friend_id],
+    )
+    if q_rows:
+        question_ids = [r["id"] for r in q_rows]
+    else:
+        q_query = """
+            SELECT id FROM questions
+            WHERE (validation_status IS NULL OR validation_status NOT IN ('QUARANTINED', 'SUPERSEDED_BY_SUBQUESTIONS'))
+              AND text IS NOT NULL AND text != ''
+            ORDER BY RANDOM() LIMIT ?
+        """
+        c.execute(q_query, (req.question_count or 5,))
+        question_ids = [r[0] for r in c.fetchall()]
 
     code = generate_room_code()
     room_id = str(uuid.uuid4())
