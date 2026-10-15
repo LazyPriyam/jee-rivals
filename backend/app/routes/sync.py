@@ -142,6 +142,8 @@ def sync_data(payload: SyncPayload, x_sync_token: Optional[str] = Header(None, a
     except Exception as e:
         print(f"[SYNC] Error invalidating question cache: {e}")
 
+    invalidate_manifest_cache()
+
     return {
         "success": True,
         "synced_questions": saved_questions,
@@ -154,6 +156,67 @@ class QuestionBatchDeletePayload(BaseModel):
     clean_diagrams: bool = True
 
 
+_MANIFEST_CACHE: Optional[Dict[str, Any]] = None
+
+def invalidate_manifest_cache():
+    """Invalidates the in-memory manifest cache so subsequent requests re-compute from database."""
+    global _MANIFEST_CACHE
+    _MANIFEST_CACHE = None
+
+
+def get_or_build_manifest() -> Dict[str, Any]:
+    """Returns the cached complete manifest dictionary, building it from sqlite if not yet cached."""
+    global _MANIFEST_CACHE
+    if _MANIFEST_CACHE is not None:
+        return _MANIFEST_CACHE
+
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute("""
+        SELECT id, text, correct_answer, options, solution_text, chapter, unit, subject,
+               difficulty_tier, target_exam, question_type, has_diagram, diagram_urls
+        FROM questions
+    """)
+    rows = c.fetchall()
+    conn.close()
+
+    import hashlib
+    from backend.app.tools.sync_solution_keys import clean_derivation_text
+
+    ids = []
+    hashes = {}
+    for r in rows:
+        qid = r["id"]
+        ids.append(qid)
+        sol = clean_derivation_text(r["solution_text"] or "")
+        parts = [
+            str(r["text"] or "").strip(),
+            str(r["correct_answer"] or "").strip().upper(),
+            str(r["options"] or "").strip(),
+            str(sol).strip(),
+            str(r["chapter"] or "").strip(),
+            str(r["unit"] or "").strip(),
+            str(r["subject"] or "").strip(),
+            str(r["difficulty_tier"] or "").strip().upper(),
+            str(r["target_exam"] or "").strip().upper(),
+            str(r["question_type"] or "").strip().upper(),
+            str(1 if r["has_diagram"] else 0),
+            str(r["diagram_urls"] or "").strip(),
+        ]
+        raw = "|".join(parts)
+        hashes[qid] = hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
+
+    _MANIFEST_CACHE = {
+        "total": len(ids),
+        "ids": ids,
+        "filtered": False,
+        "subject": None,
+        "chapter": None,
+        "hashes": hashes
+    }
+    return _MANIFEST_CACHE
+
+
 @router.get("/question-ids")
 def get_existing_question_ids(
     subject: Optional[str] = None,
@@ -164,12 +227,18 @@ def get_existing_question_ids(
     """
     Returns question IDs and content checksum hashes currently stored on the cloud server
     (optionally filtered by subject/chapter) for intelligent zero-force delta sync.
+    Serves from in-memory cache in sub-millisecond time.
     """
     if not x_sync_token or x_sync_token != ADMIN_SYNC_TOKEN:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid or missing sync authentication token."
         )
+
+    # Fast path: Unfiltered full manifest served directly from memory cache
+    if not subject and not chapter and include_hashes:
+        return get_or_build_manifest()
+
     conn = get_connection()
     c = conn.cursor()
 
@@ -316,6 +385,8 @@ def delete_questions_batch(
         invalidate_question_cache()
     except Exception as e:
         print(f"[SYNC] Error invalidating question cache after delete: {e}")
+
+    invalidate_manifest_cache()
 
     return {
         "success": True,

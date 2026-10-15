@@ -2,6 +2,7 @@ import os
 from pathlib import Path
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Query, status
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 
@@ -56,6 +57,11 @@ async def run_question_cache_warmup():
         await asyncio.to_thread(warmup_question_cache)
     except Exception as e:
         pass
+    try:
+        from backend.app.routes.sync import get_or_build_manifest
+        await asyncio.to_thread(get_or_build_manifest)
+    except Exception as e:
+        pass
 
 async def run_abandoned_room_cleaner():
     while True:
@@ -82,6 +88,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+# GZip compression for fast responses and low bandwidth on large payloads (manifests, question banks)
+app.add_middleware(GZipMiddleware, minimum_size=1000)
 
 # Mount Diagrams Static Directory
 app.mount("/diagrams", StaticFiles(directory=str(DIAGRAMS_DIR)), name="diagrams")
