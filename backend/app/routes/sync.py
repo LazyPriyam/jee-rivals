@@ -158,9 +158,13 @@ class QuestionBatchDeletePayload(BaseModel):
 def get_existing_question_ids(
     subject: Optional[str] = None,
     chapter: Optional[str] = None,
+    include_hashes: bool = True,
     x_sync_token: Optional[str] = Header(None, alias="X-Sync-Token")
 ):
-    """Returns question IDs currently stored on the cloud server (optionally filtered by subject/chapter) for fast delta sync."""
+    """
+    Returns question IDs and content checksum hashes currently stored on the cloud server
+    (optionally filtered by subject/chapter) for intelligent zero-force delta sync.
+    """
     if not x_sync_token or x_sync_token != ADMIN_SYNC_TOKEN:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -168,7 +172,16 @@ def get_existing_question_ids(
         )
     conn = get_connection()
     c = conn.cursor()
-    query = "SELECT id FROM questions WHERE 1=1"
+
+    if include_hashes:
+        query = """
+            SELECT id, text, correct_answer, options, solution_text, chapter, unit, subject,
+                   difficulty_tier, target_exam, question_type, has_diagram, diagram_urls
+            FROM questions WHERE 1=1
+        """
+    else:
+        query = "SELECT id FROM questions WHERE 1=1"
+
     params = []
     if subject:
         query += " AND LOWER(subject) = ?"
@@ -178,15 +191,58 @@ def get_existing_question_ids(
         params.append(chapter.strip().lower())
 
     c.execute(query, tuple(params))
-    ids = [r[0] for r in c.fetchall()]
+    rows = c.fetchall()
     conn.close()
-    return {
+
+    ids = []
+    hashes = {}
+
+    if include_hashes:
+        import hashlib
+        from backend.app.tools.sync_solution_keys import clean_derivation_text
+        for r in rows:
+            qid = r["id"]
+            ids.append(qid)
+            sol = clean_derivation_text(r["solution_text"] or "")
+            parts = [
+                str(r["text"] or "").strip(),
+                str(r["correct_answer"] or "").strip().upper(),
+                str(r["options"] or "").strip(),
+                str(sol).strip(),
+                str(r["chapter"] or "").strip(),
+                str(r["unit"] or "").strip(),
+                str(r["subject"] or "").strip(),
+                str(r["difficulty_tier"] or "").strip().upper(),
+                str(r["target_exam"] or "").strip().upper(),
+                str(r["question_type"] or "").strip().upper(),
+                str(1 if r["has_diagram"] else 0),
+                str(r["diagram_urls"] or "").strip(),
+            ]
+            raw = "|".join(parts)
+            hashes[qid] = hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
+    else:
+        ids = [r[0] for r in rows]
+
+    res = {
         "total": len(ids),
         "ids": ids,
         "filtered": bool(subject or chapter),
         "subject": subject,
         "chapter": chapter
     }
+    if include_hashes:
+        res["hashes"] = hashes
+    return res
+
+
+@router.get("/question-manifest")
+def get_question_manifest(
+    subject: Optional[str] = None,
+    chapter: Optional[str] = None,
+    x_sync_token: Optional[str] = Header(None, alias="X-Sync-Token")
+):
+    """Dedicated endpoint returning question IDs mapped to their content checksums for zero-bandwidth delta syncing."""
+    return get_existing_question_ids(subject=subject, chapter=chapter, include_hashes=True, x_sync_token=x_sync_token)
 
 
 @router.post("/questions/delete-batch")
