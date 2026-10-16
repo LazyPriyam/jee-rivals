@@ -40,6 +40,8 @@ class UserProfile(BaseModel):
     subject_air_breakdown: Optional[Dict[str, Any]] = None
     air_bottlenecks: Optional[List[str]] = None
     air_meta: Optional[Dict[str, Any]] = None
+    jee_main_dossier: Optional[Dict[str, Any]] = None
+    jee_advanced_dossier: Optional[Dict[str, Any]] = None
     chapter_stats: Dict[str, Any] = {}
     target_college: Optional[str] = "IIT Bombay (Computer Science)"
     target_exam_date: Optional[str] = "JEE Main Jan 2026"

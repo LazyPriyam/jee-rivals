@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { api } from '../utils/api';
+import { sound } from '../utils/sound';
 import SphereGridSkillTree from './SphereGridSkillTree';
 import GrowthTriadRadar from './GrowthTriadRadar';
 import { formatIST, formatISTDate, formatISTTime, formatLastOnline } from '../utils/dateUtils';
@@ -416,6 +417,7 @@ export default function ProfileView({
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [activeSubTab, setActiveSubTab] = useState('overview'); // 'overview', 'skills', 'trophies', 'tests', 'matches'
+  const [rankTrack, setRankTrack] = useState('main'); // 'main' | 'advanced'
   const [selectedSubject, setSelectedSubject] = useState('All');
   const [selectedAchFilter, setSelectedAchFilter] = useState('ALL');
   const [inspectorInput, setInspectorInput] = useState('');
@@ -582,6 +584,35 @@ export default function ProfileView({
   }
 
   const p = data.profile;
+  const mainDossier = p.jee_main_dossier || p.air_meta?.jee_main || {
+    is_calibrated: Boolean(p.full_mocks_count > 0 && p.predicted_air),
+    predicted_air: p.predicted_air,
+    predicted_air_formatted: p.predicted_air_formatted || (p.predicted_air ? `AIR ${p.predicted_air.toLocaleString()}` : 'Requires Full Mock'),
+    predicted_air_range: p.predicted_air_range || 'Uncalibrated (0 Mocks Completed)',
+    predicted_percentile: p.predicted_percentile,
+    predicted_jee_main_marks: p.predicted_jee_main_marks,
+    mocks_count: p.full_mocks_count || 0,
+    confidence_label: p.air_confidence_label || 'Awaiting Full Mock',
+    admissibility: p.college_admissibility || [],
+    bottlenecks: p.air_bottlenecks || []
+  };
+
+  const advDossier = p.jee_advanced_dossier || p.air_meta?.jee_advanced || {
+    is_calibrated: false,
+    predicted_crl: null,
+    predicted_crl_formatted: 'Requires Advanced Mock',
+    predicted_crl_range: 'Uncalibrated (0 Advanced Mocks Taken)',
+    predicted_percentage: null,
+    predicted_advanced_marks: null,
+    crl_status: 'Awaiting Advanced Mock Calibration',
+    is_cutoff_cleared: false,
+    subject_cutoffs: { physics: { pct: 0, cleared: false }, chemistry: { pct: 0, cleared: false }, mathematics: { pct: 0, cleared: false } },
+    mocks_count: 0,
+    confidence_label: 'Awaiting Advanced Mock',
+    admissibility: [],
+    bottlenecks: []
+  };
+
   const theme = BANNER_THEMES[p.banner_theme] || BANNER_THEMES.orange_cyber;
   const divVisuals = getDivisionVisuals(p.current_division);
   const divStyle = divVisuals.divStyle;
@@ -944,49 +975,77 @@ export default function ProfileView({
 
           {/* Right Block: Predicted AIR & Medals Shelf */}
           <div className="flex flex-col sm:flex-row lg:flex-col items-center lg:items-end gap-3.5 shrink-0 w-full sm:w-auto">
-            {/* Predicted AIR Pill & Data-Driven NTA Metrics */}
+            {/* Predicted AIR / CRL Dual Pill & Data-Driven Metrics */}
             <div
-              className="w-full sm:w-auto rounded-2xl p-4 shadow-xl text-center sm:text-right max-w-md border transition-all duration-500"
+              className="w-full sm:w-auto rounded-2xl p-3.5 shadow-xl text-left max-w-md border transition-all duration-500"
               style={cardTheme.surfaceStyle}
             >
-              <span className="text-[10px] uppercase font-bold text-slate-400 block mb-1 flex items-center justify-center sm:justify-end gap-1">
-                <Target className="w-3.5 h-3.5" style={{ color: cardTheme.accentColor }} />
-                <span>Predicted All India Rank (AIR)</span>
-              </span>
-              <div className="flex items-center justify-center sm:justify-end gap-2 flex-wrap">
-                <span
-                  className="text-base sm:text-lg font-black font-mono tracking-tight block leading-snug"
-                  style={{ color: cardTheme.accentColor }}
-                >
-                  {p.full_mocks_count > 0
-                    ? (p.predicted_air_formatted || (p.predicted_air ? `AIR ${p.predicted_air.toLocaleString()}` : (p.predicted_air_bracket || 'Foundation Aspirant')))
-                    : 'Requires Full Mock'}
+              <div className="flex items-center justify-between gap-2 mb-2 pb-1.5 border-b border-white/10">
+                <span className="text-[10px] uppercase font-bold text-slate-400 flex items-center gap-1">
+                  <Target className="w-3.5 h-3.5" style={{ color: cardTheme.accentColor }} />
+                  <span>Dual Track Rank Forecast</span>
                 </span>
-                {p.full_mocks_count > 0 && p.predicted_percentile ? (
-                  <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-emerald-950/90 text-emerald-300 border border-emerald-500/40">
-                    {p.predicted_percentile}%ile
-                  </span>
-                ) : (
-                  <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-amber-950/90 text-amber-300 border border-amber-500/40">
-                    {p.full_mocks_count || 0} Full Mocks
-                  </span>
-                )}
-                {p.full_mocks_count > 0 && p.predicted_jee_main_marks && (
-                  <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-cyan-950/90 text-cyan-300 border border-cyan-500/40">
-                    {p.predicted_jee_main_marks}/300 M
-                  </span>
-                )}
+                <span className="text-[9px] font-mono font-bold text-slate-400">
+                  NTA & IIT CRL
+                </span>
               </div>
 
-              {p.full_mocks_count > 0 && p.predicted_air_range ? (
-                <span className="text-[11px] font-mono text-slate-400 block mt-1">
-                  Confidence Band: <strong className="text-slate-200">{p.predicted_air_range}</strong> ({p.full_mocks_count} Full Mock{p.full_mocks_count > 1 ? 's' : ''})
-                </span>
-              ) : (
-                <span className="text-[11px] font-mono text-amber-400 block mt-1">
-                  Take a CBT Full Mock to calibrate national AIR
-                </span>
-              )}
+              {/* Dual Cards Grid */}
+              <div className="grid grid-cols-2 gap-2">
+                {/* JEE Main Chip */}
+                <button
+                  type="button"
+                  onClick={() => setRankTrack('main')}
+                  className={`p-2.5 rounded-xl border text-left transition cursor-pointer ${
+                    rankTrack === 'main'
+                      ? 'bg-orange-500/15 border-orange-500/50 shadow-md shadow-orange-950/40'
+                      : 'bg-black/30 border-white/5 hover:border-orange-500/30'
+                  }`}
+                  title="View JEE Main AIR & NTA Percentile"
+                >
+                  <div className="flex items-center justify-between mb-0.5">
+                    <span className="text-[9px] font-black uppercase tracking-wider text-orange-400">JEE Main</span>
+                    {mainDossier?.is_calibrated && (
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                    )}
+                  </div>
+                  <span className="text-xs sm:text-sm font-black font-mono text-orange-200 block truncate">
+                    {mainDossier?.is_calibrated ? mainDossier.predicted_air_formatted : 'Requires Mock'}
+                  </span>
+                  <span className="text-[10px] font-mono text-slate-400 block truncate mt-0.5">
+                    {mainDossier?.is_calibrated
+                      ? `${mainDossier.predicted_percentile}%ile • ${mainDossier.predicted_jee_main_marks}/300`
+                      : '0 CBT Mocks'}
+                  </span>
+                </button>
+
+                {/* JEE Advanced Chip */}
+                <button
+                  type="button"
+                  onClick={() => setRankTrack('advanced')}
+                  className={`p-2.5 rounded-xl border text-left transition cursor-pointer ${
+                    rankTrack === 'advanced'
+                      ? 'bg-purple-500/15 border-purple-500/50 shadow-md shadow-purple-950/40'
+                      : 'bg-black/30 border-white/5 hover:border-purple-500/30'
+                  }`}
+                  title="View JEE Advanced IIT CRL & Cutoffs"
+                >
+                  <div className="flex items-center justify-between mb-0.5">
+                    <span className="text-[9px] font-black uppercase tracking-wider text-purple-400">JEE Advanced</span>
+                    {advDossier?.is_calibrated && (
+                      <span className={`w-1.5 h-1.5 rounded-full ${advDossier.is_cutoff_cleared ? 'bg-emerald-400' : 'bg-red-400'}`} />
+                    )}
+                  </div>
+                  <span className="text-xs sm:text-sm font-black font-mono text-purple-200 block truncate">
+                    {advDossier?.is_calibrated ? advDossier.predicted_crl_formatted : 'Requires Mock'}
+                  </span>
+                  <span className="text-[10px] font-mono text-slate-400 block truncate mt-0.5">
+                    {advDossier?.is_calibrated
+                      ? `${advDossier.predicted_percentage}% • ${advDossier.predicted_advanced_marks}/360`
+                      : '0 Adv Mocks'}
+                  </span>
+                </button>
+              </div>
 
               {/* Syllabus Breadth Mini Progress Bar */}
               <div className="mt-3 pt-2.5 border-t border-white/10 text-left">
@@ -1318,268 +1377,650 @@ export default function ProfileView({
           </div>
 
           {/* =========================================================================
-              DATA-DRIVEN ALL INDIA RANK (AIR) DIAGNOSTIC & COLLEGE ADMISSIONS
+              DATA-DRIVEN DUAL-TRACK NATIONAL RANK PREDICTION DOSSIER (MAIN & ADVANCED)
               ========================================================================= */}
           <div className="bg-[#161a24] border border-orange-500/30 rounded-3xl p-6 sm:p-8 shadow-xl glow-orange-subtle space-y-6">
-            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-white/10 pb-5">
+            {/* Top Bar with Track Switcher */}
+            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 border-b border-white/10 pb-5">
               <div>
                 <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-orange-500/15 border border-orange-500/30 text-orange-400 text-[10px] font-black uppercase tracking-wider mb-2">
                   <Target className="w-3.5 h-3.5" />
-                  <span>NTA & IIT Benchmark Engine (14 Lakh Candidate Pool)</span>
+                  <span>Dual-Track Prediction Engine • Pure Mock Test Foundation</span>
                 </div>
-                <h3 className="text-xl sm:text-2xl font-black text-white tracking-tight flex items-center gap-2">
-                  <span>National All India Rank Forecast</span>
-                  {p.full_mocks_count > 0 ? (
-                    <span className="text-xs font-mono font-bold px-2 py-0.5 rounded-full bg-emerald-950 border border-emerald-500/40 text-emerald-400">
-                      Calibrated ({p.full_mocks_count} Full Mock{p.full_mocks_count > 1 ? 's' : ''})
-                    </span>
+                <h3 className="text-xl sm:text-2xl font-black text-white tracking-tight flex items-center gap-2 flex-wrap">
+                  <span>National Rank Dossier</span>
+                  {rankTrack === 'main' ? (
+                    mainDossier?.is_calibrated ? (
+                      <span className="text-xs font-mono font-bold px-2.5 py-0.5 rounded-full bg-emerald-950 border border-emerald-500/40 text-emerald-400">
+                        JEE Main Calibrated ({mainDossier.mocks_count} Mock{mainDossier.mocks_count > 1 ? 's' : ''})
+                      </span>
+                    ) : (
+                      <span className="text-xs font-mono font-bold px-2.5 py-0.5 rounded-full bg-amber-950 border border-amber-500/40 text-amber-400">
+                        JEE Main Uncalibrated (0 Mocks)
+                      </span>
+                    )
                   ) : (
-                    <span className="text-xs font-mono font-bold px-2 py-0.5 rounded-full bg-amber-950 border border-amber-500/40 text-amber-400">
-                      Uncalibrated (0 Full Mocks Taken)
-                    </span>
+                    advDossier?.is_calibrated ? (
+                      <span className={`text-xs font-mono font-bold px-2.5 py-0.5 rounded-full border ${
+                        advDossier.is_cutoff_cleared
+                          ? 'bg-emerald-950 border-emerald-500/40 text-emerald-400'
+                          : 'bg-red-950 border-red-500/40 text-red-400'
+                      }`}>
+                        {advDossier.crl_status} ({advDossier.mocks_count} Mock{advDossier.mocks_count > 1 ? 's' : ''})
+                      </span>
+                    ) : (
+                      <span className="text-xs font-mono font-bold px-2.5 py-0.5 rounded-full bg-amber-950 border border-amber-500/40 text-amber-400">
+                        JEE Advanced Uncalibrated (0 Mocks)
+                      </span>
+                    )
                   )}
                 </h3>
-                <p className="text-xs text-slate-400 mt-1">
-                  Empirical percentile transfer curve calibrated with negative marking penalties (+4 / -1), syllabus breadth across {p.total_syllabus_chapters || 92} chapters, and full mock examination scorecards.
+                <p className="text-xs text-slate-400 mt-1 max-w-2xl">
+                  {rankTrack === 'main'
+                    ? "Piecewise monotonic regression on NTA shift data (14.1L candidates) across Tough, Median, and Easy shifts. Speed duels are excluded; rank is calibrated purely on completed mock tests."
+                    : "Historical IIT Common Rank List (CRL) benchmarked against IIT Madras 2024, IIT Guwahati 2023, and IIT Bombay 2022 (~2.5L qualified pool) with strict 10% subject cutoffs in Physics, Chemistry, and Math."
+                  }
                 </p>
               </div>
 
-              <div className="text-left md:text-right">
-                <span className="text-[11px] uppercase font-bold text-slate-400 block mb-0.5">Estimated Primary Rank</span>
-                <span className="text-2xl sm:text-3xl font-black font-mono text-orange-400 tracking-tight block">
-                  {p.full_mocks_count > 0
-                    ? (p.predicted_air_formatted || (p.predicted_air ? `AIR ${p.predicted_air.toLocaleString()}` : (p.predicted_air_bracket || 'AIR Calculating...')))
-                    : 'Requires Full Mock'}
-                </span>
-                <span className="text-xs font-mono text-slate-300">
-                  {p.full_mocks_count > 0
-                    ? (p.predicted_air_range || 'Provisional Baseline')
-                    : 'Attempt 1 Full CBT Mock to Unlock'}
-                </span>
+              {/* Track Toggle Buttons */}
+              <div className="flex items-center gap-2 bg-[#0e111a] p-1.5 rounded-2xl border border-white/10 shrink-0 self-start lg:self-auto">
+                <button
+                  type="button"
+                  onClick={() => {
+                    sound.click();
+                    setRankTrack('main');
+                  }}
+                  className={`px-4 py-2 rounded-xl text-xs font-bold font-mono transition flex items-center gap-2 cursor-pointer ${
+                    rankTrack === 'main'
+                      ? 'bg-orange-500 text-white shadow-lg shadow-orange-950/50'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  <Target className="w-3.5 h-3.5" />
+                  <span>JEE Main Track</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    sound.click();
+                    setRankTrack('advanced');
+                  }}
+                  className={`px-4 py-2 rounded-xl text-xs font-bold font-mono transition flex items-center gap-2 cursor-pointer ${
+                    rankTrack === 'advanced'
+                      ? 'bg-purple-600 text-white shadow-lg shadow-purple-950/50'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  <Zap className="w-3.5 h-3.5" />
+                  <span>JEE Advanced Track</span>
+                </button>
               </div>
             </div>
 
-            {/* Uncalibrated Full Mock CTA Callout */}
-            {(!p.full_mocks_count || p.full_mocks_count === 0) && (
-              <div className="bg-gradient-to-r from-amber-950/40 via-[#261f1c] to-[#161a24] border border-amber-500/40 rounded-2xl p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-                <div className="flex items-start gap-3">
-                  <div className="p-2.5 rounded-xl bg-amber-500/20 text-amber-400 border border-amber-500/30 shrink-0 mt-0.5">
-                    <AlertTriangle className="w-5 h-5" />
-                  </div>
+            {/* TRACK 1: JEE MAIN DOSSIER */}
+            {rankTrack === 'main' && (
+              <div className="space-y-6">
+                {/* Headline Hero Banner */}
+                <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 bg-[#111520] border border-white/10 rounded-2xl p-5">
                   <div>
-                    <h4 className="text-sm font-bold text-white flex items-center gap-2">
-                      <span>Full Mock Test Required for Authentic AIR Forecast</span>
-                      <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30">NTA Standard</span>
-                    </h4>
-                    <p className="text-xs text-amber-200/80 mt-1 leading-relaxed">
-                      AIR prediction is calibrated exclusively against completed 300-mark Full Mock Examination papers across Physics, Chemistry, and Mathematics. Take your first official mock test in Mocks Center to calculate your authentic national percentile, predicted AIR band, and JoSAA college cutoff matrix.
-                    </p>
+                    <span className="text-[11px] uppercase font-bold text-slate-400 block mb-0.5">
+                      Estimated JEE Main Rank
+                    </span>
+                    <span className="text-3xl sm:text-4xl font-black font-mono text-orange-400 tracking-tight block">
+                      {mainDossier?.is_calibrated ? mainDossier.predicted_air_formatted : 'Requires Full Mock'}
+                    </span>
+                    <span className="text-xs font-mono text-slate-300 mt-1 block">
+                      {mainDossier?.is_calibrated ? mainDossier.predicted_air_range : 'Attempt 1 CBT Full Mock in Mocks Center'}
+                    </span>
+                  </div>
+
+                  {mainDossier?.is_calibrated && (
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="px-3 py-1 rounded-full text-xs font-mono font-bold bg-emerald-950 border border-emerald-500/40 text-emerald-300">
+                        {mainDossier.predicted_percentile}%ile
+                      </span>
+                      <span className="px-3 py-1 rounded-full text-xs font-mono font-bold bg-cyan-950 border border-cyan-500/40 text-cyan-300">
+                        {mainDossier.predicted_jee_main_marks}/300 M
+                      </span>
+                      <span className="px-3 py-1 rounded-full text-xs font-mono font-bold bg-slate-800 border border-white/10 text-slate-300">
+                        {mainDossier.confidence_label}
+                      </span>
+                    </div>
+                  )}
+                </div>
+
+                {/* Uncalibrated Callout */}
+                {!mainDossier?.is_calibrated && (
+                  <div className="bg-gradient-to-r from-amber-950/40 via-[#261f1c] to-[#161a24] border border-amber-500/40 rounded-2xl p-4.5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                    <div className="flex items-start gap-3">
+                      <div className="p-2.5 rounded-xl bg-amber-500/20 text-amber-400 border border-amber-500/30 shrink-0 mt-0.5">
+                        <AlertTriangle className="w-5 h-5" />
+                      </div>
+                      <div>
+                        <h4 className="text-sm font-bold text-white flex items-center gap-2">
+                          <span>Pure Mock Test Calibration Required</span>
+                          <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30">NTA Standard</span>
+                        </h4>
+                        <p className="text-xs text-amber-200/80 mt-1 leading-relaxed">
+                          JEE Main rank prediction excludes speed duel Elo to prevent rating inflation. It strictly requires at least 1 completed 300-mark CBT Mock Test to calculate your authentic national percentile, tri-shift sensitivity band, and NIT/IIIT cutoff chances.
+                        </p>
+                      </div>
+                    </div>
+                    {isOwnProfile && (
+                      <button
+                        onClick={() => {
+                          sound.click();
+                          if (onNavigateTab) onNavigateTab('mocks');
+                        }}
+                        className="px-4 py-2 rounded-xl bg-orange-500 hover:bg-orange-600 text-white text-xs font-bold font-mono transition shrink-0 cursor-pointer shadow-md shadow-orange-950/50 flex items-center gap-1.5 self-stretch sm:self-auto justify-center"
+                      >
+                        <span>Take JEE Main Mock</span>
+                        <ArrowRight className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </div>
+                )}
+
+                {/* Tri-Metric Cards */}
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  {/* Card 1: NTA Percentile */}
+                  <div className="bg-[#111520] border border-white/10 rounded-2xl p-4.5 flex flex-col justify-between">
+                    <div>
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-[11px] uppercase font-bold text-slate-400">NTA Percentile</span>
+                        <Sparkles className="w-4 h-4 text-emerald-400" />
+                      </div>
+                      <div className="text-2xl sm:text-3xl font-black font-mono text-emerald-400">
+                        {mainDossier?.is_calibrated ? `${mainDossier.predicted_percentile}%` : '-- %'}
+                      </div>
+                      <p className="text-[11px] text-slate-400 mt-1 font-mono">
+                        {mainDossier?.is_calibrated
+                          ? `Top ${(100 - mainDossier.predicted_percentile).toFixed(2)}% Nationwide (14.1L Cohort)`
+                          : 'Awaiting 1st JEE Main Mock'}
+                      </p>
+                    </div>
+                    <div className="mt-4 pt-3 border-t border-white/5 text-[10px] text-slate-400">
+                      Tier: <strong className="text-slate-200">{p.tier_name || p.air_meta?.tier_name || 'Awaiting Mock'}</strong>
+                    </div>
+                  </div>
+
+                  {/* Card 2: Projected Marks */}
+                  <div className="bg-[#111520] border border-white/10 rounded-2xl p-4.5 flex flex-col justify-between">
+                    <div>
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-[11px] uppercase font-bold text-slate-400">Projected Score</span>
+                        <Award className="w-4 h-4 text-cyan-400" />
+                      </div>
+                      <div className="flex items-baseline gap-1.5">
+                        <span className="text-2xl sm:text-3xl font-black font-mono text-cyan-400">
+                          {mainDossier?.is_calibrated ? mainDossier.predicted_jee_main_marks : '--'}
+                        </span>
+                        <span className="text-xs font-bold text-slate-400 font-mono">/ 300</span>
+                      </div>
+                      <div className="w-full h-1.5 rounded-full bg-slate-800 overflow-hidden mt-2">
+                        <div
+                          className="h-full rounded-full bg-gradient-to-r from-cyan-500 to-blue-400"
+                          style={{ width: `${mainDossier?.is_calibrated ? Math.min(100, Math.round(((mainDossier.predicted_jee_main_marks || 0) / 300) * 100)) : 0}%` }}
+                        />
+                      </div>
+                    </div>
+                    <div className="mt-4 pt-3 border-t border-white/5 text-[10px] text-slate-400 flex items-center justify-between">
+                      {mainDossier?.is_calibrated ? (
+                        <>
+                          <span>Weighted Trend: <strong className="text-slate-200">{mainDossier.predicted_jee_main_marks}/300</strong></span>
+                          <span className={(mainDossier.predicted_jee_main_marks || 0) >= 92 ? 'text-emerald-400 font-bold' : 'text-amber-400 font-bold'}>
+                            {(mainDossier.predicted_jee_main_marks || 0) >= 92 ? 'Cutoff Cleared' : 'Below Cutoff'}
+                          </span>
+                        </>
+                      ) : (
+                        <span>Take mock to compute marks</span>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Card 3: Tri-Shift Sensitivity */}
+                  <div className="bg-[#111520] border border-white/10 rounded-2xl p-4.5 flex flex-col justify-between">
+                    <div>
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-[11px] uppercase font-bold text-slate-400">Tri-Shift Sensitivity</span>
+                        <Activity className="w-4 h-4 text-orange-400" />
+                      </div>
+                      {mainDossier?.tri_shift_range ? (
+                        <div className="space-y-1.5 text-xs font-mono">
+                          <div className="flex justify-between items-center text-emerald-300">
+                            <span className="text-[10px] text-slate-400">Tough Shift:</span>
+                            <span className="font-bold">{mainDossier.tri_shift_range.tough_shift.air_formatted} ({mainDossier.tri_shift_range.tough_shift.percentile}%ile)</span>
+                          </div>
+                          <div className="flex justify-between items-center text-amber-300">
+                            <span className="text-[10px] text-slate-400">Median Shift:</span>
+                            <span className="font-bold">{mainDossier.tri_shift_range.median_shift.air_formatted} ({mainDossier.tri_shift_range.median_shift.percentile}%ile)</span>
+                          </div>
+                          <div className="flex justify-between items-center text-red-300">
+                            <span className="text-[10px] text-slate-400">Easy Shift:</span>
+                            <span className="font-bold">{mainDossier.tri_shift_range.easy_shift.air_formatted} ({mainDossier.tri_shift_range.easy_shift.percentile}%ile)</span>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="text-xs text-slate-400 font-mono">Awaiting Full Mock to calculate shift dispersion.</div>
+                      )}
+                    </div>
+                    <div className="mt-4 pt-3 border-t border-white/5 text-[10px] text-slate-400">
+                      Normalizes 27 Jan vs 31 Jan score inflation
+                    </div>
                   </div>
                 </div>
-                {isOwnProfile && (
-                  <button
-                    onClick={() => {
-                      sound.click();
-                      if (onNavigateTab) onNavigateTab('mocks');
-                    }}
-                    className="px-4 py-2 rounded-xl bg-orange-500 hover:bg-orange-600 text-white text-xs font-bold font-mono transition shrink-0 cursor-pointer shadow-md shadow-orange-950/50 flex items-center gap-1.5 self-stretch sm:self-auto justify-center"
-                  >
-                    <span>Enter Mocks Center</span>
-                    <ArrowRight className="w-3.5 h-3.5" />
-                  </button>
+
+                {/* Dual-Perspective Extrapolation (Partial Syllabus Tests) */}
+                {mainDossier?.dual_perspective && !mainDossier.dual_perspective.is_full_syllabus && (
+                  <div className="bg-[#111520] border border-cyan-500/20 rounded-2xl p-5">
+                    <div className="flex items-center justify-between mb-3">
+                      <h4 className="text-xs uppercase font-extrabold tracking-wider text-cyan-400 flex items-center gap-1.5">
+                        <Layers className="w-4 h-4" />
+                        <span>Dual-Perspective Syllabus Extrapolation</span>
+                      </h4>
+                      <span className="text-[10px] font-mono text-cyan-300 bg-cyan-950/60 px-2 py-0.5 rounded border border-cyan-500/30">
+                        {mainDossier.dual_perspective.scope_desc}
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      {/* Potential AIR */}
+                      <div className="bg-[#171b26] p-4 rounded-xl border border-white/5">
+                        <span className="text-[10px] uppercase font-bold text-emerald-400 block mb-1">
+                          1. Extrapolated Potential AIR
+                        </span>
+                        <span className="text-lg font-black font-mono text-emerald-300 block">
+                          {mainDossier.dual_perspective.extrapolated_potential_formatted}
+                        </span>
+                        <p className="text-[11px] text-slate-400 mt-1">
+                          Projected rank if you maintain your tested accuracy across the full 92-chapter syllabus.
+                        </p>
+                      </div>
+                      {/* Current Floor */}
+                      <div className="bg-[#171b26] p-4 rounded-xl border border-white/5">
+                        <span className="text-[10px] uppercase font-bold text-amber-400 block mb-1">
+                          2. Current Preparedness Ceiling (Floor)
+                        </span>
+                        <span className="text-lg font-black font-mono text-amber-300 block">
+                          {mainDossier.dual_perspective.current_preparedness_ceiling_formatted}
+                        </span>
+                        <p className="text-[11px] text-slate-400 mt-1">
+                          Reality check rank if exam happened today, treating all untested chapters as 0 marks.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* JoSAA NIT/IIIT/DTU Admissibility Matrix */}
+                {mainDossier?.admissibility && mainDossier.admissibility.length > 0 && (
+                  <div className="bg-[#111520] border border-white/10 rounded-2xl p-5">
+                    <div className="flex items-center justify-between mb-3.5">
+                      <h4 className="text-xs uppercase font-extrabold tracking-wider text-slate-400 flex items-center gap-1.5">
+                        <GraduationCap className="w-4 h-4 text-orange-400" />
+                        <span>NIT / IIIT / DTU Admission Predictor Matrix (JEE Main)</span>
+                      </h4>
+                      <span className="text-[10px] text-slate-400 font-mono">JoSAA / CSAB Standards</span>
+                    </div>
+                    <div className="space-y-2">
+                      {mainDossier.admissibility.map((c, idx) => (
+                        <div key={idx} className="bg-[#171b26] p-3 rounded-xl border border-white/5 flex items-center justify-between gap-3 text-xs">
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-2">
+                              <span className="font-bold text-white truncate">{c.college}</span>
+                              <span className="text-[9px] font-mono text-slate-400 bg-black/40 px-1.5 py-0.2 rounded border border-white/5">
+                                {c.category}
+                              </span>
+                            </div>
+                            <p className="text-[11px] text-slate-400 truncate mt-0.5">
+                              {c.branch} • Cutoff ~AIR {c.cutoff_rank.toLocaleString()}
+                            </p>
+                          </div>
+                          <span className={`text-[9px] font-extrabold uppercase px-2.5 py-0.5 rounded border ${
+                            c.status === 'Safe' ? 'bg-emerald-950/90 text-emerald-400 border-emerald-500/50' :
+                            c.status === 'Target' ? 'bg-amber-950/90 text-amber-300 border-amber-500/50' :
+                            c.status === 'Reach' ? 'bg-blue-950/90 text-blue-300 border-blue-500/50' :
+                            'bg-slate-800/80 text-slate-400 border-white/10'
+                          }`}>
+                            {c.status} ({c.chance})
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Strategic Diagnostic Bottlenecks */}
+                {mainDossier?.bottlenecks && mainDossier.bottlenecks.length > 0 && (
+                  <div className="bg-orange-500/5 border border-orange-500/25 rounded-2xl p-4.5 space-y-2">
+                    <div className="flex items-center gap-1.5 text-xs font-bold text-orange-400">
+                      <Sparkles className="w-3.5 h-3.5" />
+                      <span>JEE Main Strategic Rank Levers:</span>
+                    </div>
+                    <div className="space-y-1.5 text-[11px] text-slate-300">
+                      {mainDossier.bottlenecks.map((b, i) => (
+                        <div key={i} className="flex items-start gap-2">
+                          <span className="text-orange-400 shrink-0 font-bold">•</span>
+                          <span>{b}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
                 )}
               </div>
             )}
 
-            {/* Tri-Metric Calibration Cards */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              {/* Card 1: National Percentile */}
-              <div className="bg-[#111520] border border-white/10 rounded-2xl p-4.5 flex flex-col justify-between">
-                <div>
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="text-[11px] uppercase font-bold text-slate-400">Predicted Percentile</span>
-                    <Sparkles className="w-4 h-4 text-emerald-400" />
-                  </div>
-                  <div className="text-2xl sm:text-3xl font-black font-mono text-emerald-400">
-                    {p.full_mocks_count > 0 && p.predicted_percentile ? `${p.predicted_percentile}%` : '-- %'}
-                  </div>
-                  <p className="text-[11px] text-slate-400 mt-1 font-mono">
-                    {p.full_mocks_count > 0 && p.predicted_percentile
-                      ? `Top ${(100 - p.predicted_percentile).toFixed(2)}% Nationwide`
-                      : 'Awaiting 1st Full Mock Exam'}
-                  </p>
-                </div>
-                <div className="mt-4 pt-3 border-t border-white/5 text-[10px] text-slate-400">
-                  Tier: <strong className="text-slate-200">{p.tier_name || p.air_meta?.tier_name || 'Foundation'}</strong>
-                </div>
-              </div>
-
-              {/* Card 2: Projected JEE Main Marks */}
-              <div className="bg-[#111520] border border-white/10 rounded-2xl p-4.5 flex flex-col justify-between">
-                <div>
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="text-[11px] uppercase font-bold text-slate-400">Projected Score</span>
-                    <Award className="w-4 h-4 text-cyan-400" />
-                  </div>
-                  <div className="flex items-baseline gap-1.5">
-                    <span className="text-2xl sm:text-3xl font-black font-mono text-cyan-400">
-                      {p.full_mocks_count > 0 ? (p.predicted_jee_main_marks || 0) : '--'}
+            {/* TRACK 2: JEE ADVANCED DOSSIER */}
+            {rankTrack === 'advanced' && (
+              <div className="space-y-6">
+                {/* Headline Hero Banner */}
+                <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 bg-[#111520] border border-white/10 rounded-2xl p-5">
+                  <div>
+                    <span className="text-[11px] uppercase font-bold text-slate-400 block mb-0.5">
+                      Estimated IIT Common Rank List (CRL)
                     </span>
-                    <span className="text-xs font-bold text-slate-400 font-mono">/ 300</span>
+                    <span className="text-3xl sm:text-4xl font-black font-mono text-purple-400 tracking-tight block">
+                      {advDossier?.is_calibrated ? advDossier.predicted_crl_formatted : 'Requires Advanced Mock'}
+                    </span>
+                    <span className="text-xs font-mono text-slate-300 mt-1 block">
+                      {advDossier?.is_calibrated ? advDossier.predicted_crl_range : 'Attempt 1 JEE Advanced Mock in Mocks Center'}
+                    </span>
                   </div>
-                  {/* Score Progress Bar */}
-                  <div className="w-full h-1.5 rounded-full bg-slate-800 overflow-hidden mt-2">
-                    <div
-                      className="h-full rounded-full bg-gradient-to-r from-cyan-500 to-blue-400"
-                      style={{ width: `${p.full_mocks_count > 0 ? Math.min(100, Math.round(((p.predicted_jee_main_marks || 0) / 300) * 100)) : 0}%` }}
-                    />
-                  </div>
-                </div>
-                <div className="mt-4 pt-3 border-t border-white/5 text-[10px] text-slate-400 flex items-center justify-between">
-                  {p.full_mocks_count > 0 ? (
-                    <>
-                      <span>Best Mock: <strong className="text-slate-200">{p.best_mock_marks ?? p.predicted_jee_main_marks}/300</strong></span>
-                      <span className={(p.predicted_jee_main_marks || 0) >= 92 ? 'text-emerald-400 font-bold' : 'text-amber-400 font-bold'}>
-                        {(p.predicted_jee_main_marks || 0) >= 92 ? 'Cleared Cutoff' : 'Below Cutoff'}
+
+                  {advDossier?.is_calibrated && (
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className={`px-3 py-1 rounded-full text-xs font-mono font-bold border ${
+                        advDossier.is_cutoff_cleared
+                          ? 'bg-emerald-950 border-emerald-500/40 text-emerald-300'
+                          : 'bg-red-950 border-red-500/40 text-red-300'
+                      }`}>
+                        {advDossier.crl_status}
                       </span>
-                    </>
-                  ) : (
-                    <span>Take Full Mock to record marks</span>
+                      <span className="px-3 py-1 rounded-full text-xs font-mono font-bold bg-purple-950 border border-purple-500/40 text-purple-300">
+                        {advDossier.predicted_percentage}% • {advDossier.predicted_advanced_marks}/360 M
+                      </span>
+                      <span className="px-3 py-1 rounded-full text-xs font-mono font-bold bg-slate-800 border border-white/10 text-slate-300">
+                        {advDossier.confidence_label}
+                      </span>
+                    </div>
                   )}
                 </div>
-              </div>
 
-              {/* Card 3: PCM Tri-Axial Balance */}
-              <div className="bg-[#111520] border border-white/10 rounded-2xl p-4.5 flex flex-col justify-between">
-                <div>
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="text-[11px] uppercase font-bold text-slate-400">PCM Symmetry Index</span>
-                    <Activity className="w-4 h-4 text-purple-400" />
-                  </div>
-                  <div className="text-base sm:text-lg font-black text-purple-300 line-clamp-1">
-                    {p.air_meta?.balance_status || 'Balanced Trifecta'}
-                  </div>
-                  <p className="text-[11px] text-slate-400 mt-1 font-mono">
-                    Rating Variance: <strong className="text-slate-200">±{p.air_meta?.pcm_std_dev || 0} Elo</strong>
-                  </p>
-                </div>
-                <div className="mt-4 pt-3 border-t border-white/5 text-[10px] text-slate-400">
-                  {p.air_meta?.coverage_label || 'Syllabus evaluation active'}
-                </div>
-              </div>
-            </div>
-
-            {/* Subject-by-Subject AIR & Score Breakdown */}
-            {p.subject_air_breakdown && (
-              <div className="bg-[#111520] border border-white/10 rounded-2xl p-5">
-                <h4 className="text-xs uppercase font-extrabold tracking-wider text-slate-400 mb-3 flex items-center gap-1.5">
-                  <BarChart2 className="w-3.5 h-3.5 text-orange-400" />
-                  <span>Subject Performance vs National Shifts</span>
-                </h4>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                  {['physics', 'chemistry', 'mathematics'].map((subjKey) => {
-                    const subjData = p.subject_air_breakdown[subjKey];
-                    if (!subjData) return null;
-                    const isPhys = subjKey === 'physics';
-                    const isChem = subjKey === 'chemistry';
-                    const title = isPhys ? 'Physics' : (isChem ? 'Chemistry' : 'Mathematics');
-                    const emoji = isPhys ? '⚛️' : (isChem ? '🧪' : '📐');
-                    const color = isPhys ? 'text-blue-400' : (isChem ? 'text-emerald-400' : 'text-purple-400');
-                    const statusColor = subjData.status === 'Dominant'
-                      ? 'bg-emerald-950/80 text-emerald-400 border-emerald-500/40'
-                      : subjData.status === 'Lagging'
-                      ? 'bg-red-950/80 text-red-400 border-red-500/40'
-                      : 'bg-slate-800 text-slate-300 border-white/10';
-
-                    return (
-                      <div key={subjKey} className="bg-[#171b26] p-3.5 rounded-xl border border-white/5 flex items-center justify-between">
-                        <div>
-                          <div className="flex items-center gap-1.5 mb-1">
-                            <span className="text-sm">{emoji}</span>
-                            <span className={`text-xs font-black ${color}`}>{title}</span>
-                          </div>
-                          <div className="text-xs font-mono font-bold text-white">
-                            {subjData.percentile}%ile • {subjData.projected_marks}/100 M
-                          </div>
-                        </div>
-                        <span className={`text-[9px] font-extrabold uppercase px-2 py-0.5 rounded border ${statusColor}`}>
-                          {subjData.status}
-                        </span>
+                {/* Uncalibrated Callout */}
+                {!advDossier?.is_calibrated && (
+                  <div className="bg-gradient-to-r from-purple-950/40 via-[#211a2e] to-[#161a24] border border-purple-500/40 rounded-2xl p-4.5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                    <div className="flex items-start gap-3">
+                      <div className="p-2.5 rounded-xl bg-purple-500/20 text-purple-400 border border-purple-500/30 shrink-0 mt-0.5">
+                        <AlertTriangle className="w-5 h-5" />
                       </div>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-
-            {/* Premier College Admissibility Predictor Matrix */}
-            {p.college_admissibility && p.college_admissibility.length > 0 && (
-              <div className="bg-[#111520] border border-white/10 rounded-2xl p-5">
-                <div className="flex items-center justify-between mb-3.5">
-                  <h4 className="text-xs uppercase font-extrabold tracking-wider text-slate-400 flex items-center gap-1.5">
-                    <GraduationCap className="w-4 h-4 text-amber-400" />
-                    <span>Admissions Predictor Matrix (Based on Projected Rank)</span>
-                  </h4>
-                  <span className="text-[10px] text-slate-400 font-mono">JoSAA / CSAB Standards</span>
-                </div>
-
-                <div className="space-y-2">
-                  {p.college_admissibility.map((c, idx) => {
-                    const isSafe = c.status === 'Safe';
-                    const isTarget = c.status === 'Target';
-                    const isReach = c.status === 'Reach';
-                    const statusBadge = isSafe
-                      ? 'bg-emerald-950/90 text-emerald-400 border-emerald-500/50'
-                      : isTarget
-                      ? 'bg-amber-950/90 text-amber-300 border-amber-500/50'
-                      : isReach
-                      ? 'bg-blue-950/90 text-blue-300 border-blue-500/50'
-                      : 'bg-slate-800/80 text-slate-400 border-white/10';
-
-                    return (
-                      <div
-                        key={idx}
-                        className="bg-[#171b26] p-3 rounded-xl border border-white/5 flex items-center justify-between gap-3 text-xs"
+                      <div>
+                        <h4 className="text-sm font-bold text-white flex items-center gap-2">
+                          <span>Authentic IIT CRL Calibration Required</span>
+                          <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-purple-500/20 text-purple-300 border border-purple-500/30">IIT Standard</span>
+                        </h4>
+                        <p className="text-xs text-purple-200/80 mt-1 leading-relaxed">
+                          JEE Advanced CRL rank cannot be derived simply by scaling JEE Main marks. Getting 50% in JEE Advanced (~180/360) is top ~1,500 CRL, whereas 50% in Main (150/300) is ~35,000 AIR. Complete an official JEE Advanced Mock Test to calibrate your CRL and subject-wise cutoffs.
+                        </p>
+                      </div>
+                    </div>
+                    {isOwnProfile && (
+                      <button
+                        onClick={() => {
+                          sound.click();
+                          if (onNavigateTab) onNavigateTab('mocks');
+                        }}
+                        className="px-4 py-2 rounded-xl bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold font-mono transition shrink-0 cursor-pointer shadow-md shadow-purple-950/50 flex items-center gap-1.5 self-stretch sm:self-auto justify-center"
                       >
-                        <div className="min-w-0 flex-1">
-                          <div className="flex items-center gap-2">
-                            <span className="font-bold text-white truncate">{c.college}</span>
-                            <span className="text-[9px] font-mono text-slate-400 bg-black/40 px-1.5 py-0.2 rounded border border-white/5">
-                              {c.category}
+                        <span>Take Advanced Mock</span>
+                        <ArrowRight className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </div>
+                )}
+
+                {/* Tri-Metric Cards */}
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  {/* Card 1: CRL & Qualification */}
+                  <div className="bg-[#111520] border border-white/10 rounded-2xl p-4.5 flex flex-col justify-between">
+                    <div>
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-[11px] uppercase font-bold text-slate-400">Common Rank List (CRL)</span>
+                        <Sparkles className="w-4 h-4 text-purple-400" />
+                      </div>
+                      <div className="text-2xl sm:text-3xl font-black font-mono text-purple-400">
+                        {advDossier?.is_calibrated && advDossier.is_cutoff_cleared
+                          ? `CRL ${advDossier.predicted_crl?.toLocaleString()}`
+                          : (advDossier?.crl_status || '--')}
+                      </div>
+                      <p className="text-[11px] text-slate-400 mt-1 font-mono">
+                        {advDossier?.is_calibrated && advDossier.is_cutoff_cleared
+                          ? `Top ${((advDossier.predicted_crl / 250000) * 100).toFixed(2)}% of Qualified IIT Aspirants`
+                          : 'Awaiting Advanced Mock Qualification'}
+                      </p>
+                    </div>
+                    <div className="mt-4 pt-3 border-t border-white/5 text-[10px] text-slate-400">
+                      Cohort: <strong className="text-slate-200">~2.5 Lakh Qualified Candidates</strong>
+                    </div>
+                  </div>
+
+                  {/* Card 2: Projected 360M Score */}
+                  <div className="bg-[#111520] border border-white/10 rounded-2xl p-4.5 flex flex-col justify-between">
+                    <div>
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-[11px] uppercase font-bold text-slate-400">Projected Advanced Score</span>
+                        <Award className="w-4 h-4 text-purple-300" />
+                      </div>
+                      <div className="flex items-baseline gap-1.5">
+                        <span className="text-2xl sm:text-3xl font-black font-mono text-purple-300">
+                          {advDossier?.is_calibrated ? advDossier.predicted_advanced_marks : '--'}
+                        </span>
+                        <span className="text-xs font-bold text-slate-400 font-mono">/ 360</span>
+                        {advDossier?.is_calibrated && (
+                          <span className="text-xs font-mono font-bold text-purple-400 ml-1">
+                            ({advDossier.predicted_percentage}%)
+                          </span>
+                        )}
+                      </div>
+                      <div className="w-full h-1.5 rounded-full bg-slate-800 overflow-hidden mt-2">
+                        <div
+                          className="h-full rounded-full bg-gradient-to-r from-purple-500 to-indigo-400"
+                          style={{ width: `${advDossier?.is_calibrated ? Math.min(100, Math.round(((advDossier.predicted_advanced_marks || 0) / 360) * 100)) : 0}%` }}
+                        />
+                      </div>
+                    </div>
+                    <div className="mt-4 pt-3 border-t border-white/5 text-[10px] text-slate-400 flex items-center justify-between">
+                      {advDossier?.is_calibrated ? (
+                        <>
+                          <span>Aggregate Cutoff: <strong className="text-slate-200">23% (~83/360)</strong></span>
+                          <span className={(advDossier.predicted_percentage || 0) >= 23 ? 'text-emerald-400 font-bold' : 'text-red-400 font-bold'}>
+                            {(advDossier.predicted_percentage || 0) >= 23 ? 'Aggregate Cleared' : 'Below Cutoff'}
+                          </span>
+                        </>
+                      ) : (
+                        <span>Take mock to compute marks</span>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Card 3: Strict 10% Subject Cutoff Compliance */}
+                  <div className="bg-[#111520] border border-white/10 rounded-2xl p-4.5 flex flex-col justify-between">
+                    <div>
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-[11px] uppercase font-bold text-slate-400">Subject Cutoffs (Min 10%)</span>
+                        <Activity className="w-4 h-4 text-purple-400" />
+                      </div>
+                      {advDossier?.subject_cutoffs ? (
+                        <div className="space-y-1.5 text-xs font-mono">
+                          <div className="flex justify-between items-center">
+                            <span className="text-[10px] text-slate-400">⚛️ Physics:</span>
+                            <span className={`px-1.5 py-0.2 rounded text-[10px] font-bold border ${
+                              advDossier.subject_cutoffs.physics?.cleared
+                                ? 'bg-emerald-950 text-emerald-300 border-emerald-500/40'
+                                : 'bg-red-950 text-red-300 border-red-500/40'
+                            }`}>
+                              {advDossier.subject_cutoffs.physics?.pct || 0}% {advDossier.subject_cutoffs.physics?.cleared ? '✓' : '✗'}
                             </span>
                           </div>
-                          <p className="text-[11px] text-slate-400 truncate mt-0.5">
-                            {c.branch} • Cutoff ~AIR {c.cutoff_rank.toLocaleString()}
-                          </p>
+                          <div className="flex justify-between items-center">
+                            <span className="text-[10px] text-slate-400">🧪 Chemistry:</span>
+                            <span className={`px-1.5 py-0.2 rounded text-[10px] font-bold border ${
+                              advDossier.subject_cutoffs.chemistry?.cleared
+                                ? 'bg-emerald-950 text-emerald-300 border-emerald-500/40'
+                                : 'bg-red-950 text-red-300 border-red-500/40'
+                            }`}>
+                              {advDossier.subject_cutoffs.chemistry?.pct || 0}% {advDossier.subject_cutoffs.chemistry?.cleared ? '✓' : '✗'}
+                            </span>
+                          </div>
+                          <div className="flex justify-between items-center">
+                            <span className="text-[10px] text-slate-400">📐 Mathematics:</span>
+                            <span className={`px-1.5 py-0.2 rounded text-[10px] font-bold border ${
+                              advDossier.subject_cutoffs.mathematics?.cleared
+                                ? 'bg-emerald-950 text-emerald-300 border-emerald-500/40'
+                                : 'bg-red-950 text-red-300 border-red-500/40'
+                            }`}>
+                              {advDossier.subject_cutoffs.mathematics?.pct || 0}% {advDossier.subject_cutoffs.mathematics?.cleared ? '✓' : '✗'}
+                            </span>
+                          </div>
                         </div>
+                      ) : (
+                        <div className="text-xs text-slate-400 font-mono">Awaiting Advanced Mock to check 10% PCM cutoffs.</div>
+                      )}
+                    </div>
+                    <div className="mt-4 pt-3 border-t border-white/5 text-[10px] text-slate-400">
+                      Failing any 1 subject locks JoSAA IIT counseling
+                    </div>
+                  </div>
+                </div>
 
-                        <div className="flex items-center gap-2 shrink-0">
-                          <span className={`text-[9px] font-extrabold uppercase px-2 py-0.5 rounded border ${statusBadge}`}>
+                {/* Historical Year Difficulty Sensitivity (2022 Tough vs 2023 vs 2024 Easy) */}
+                {advDossier?.tri_difficulty_range && (
+                  <div className="bg-[#111520] border border-white/10 rounded-2xl p-5">
+                    <h4 className="text-xs uppercase font-extrabold tracking-wider text-slate-400 mb-3 flex items-center gap-1.5">
+                      <BarChart2 className="w-3.5 h-3.5 text-purple-400" />
+                      <span>Historical IIT CRL Difficulty Shift Sensitivity</span>
+                    </h4>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                      <div className="bg-[#171b26] p-3.5 rounded-xl border border-white/5">
+                        <span className="text-[10px] uppercase font-bold text-emerald-400 block mb-0.5">Tough Year (e.g. 2022)</span>
+                        <span className="text-base font-black font-mono text-white block">
+                          {advDossier.tri_difficulty_range.tough_year?.crl_formatted || '--'}
+                        </span>
+                        <p className="text-[10px] text-slate-400 mt-1">Low cutoff benchmark (55% = Top 500 CRL)</p>
+                      </div>
+                      <div className="bg-[#171b26] p-3.5 rounded-xl border border-white/5">
+                        <span className="text-[10px] uppercase font-bold text-purple-400 block mb-0.5">Median Year (e.g. 2023)</span>
+                        <span className="text-base font-black font-mono text-white block">
+                          {advDossier.tri_difficulty_range.median_year?.crl_formatted || '--'}
+                        </span>
+                        <p className="text-[10px] text-slate-400 mt-1">Balanced multi-year IIT baseline</p>
+                      </div>
+                      <div className="bg-[#171b26] p-3.5 rounded-xl border border-white/5">
+                        <span className="text-[10px] uppercase font-bold text-amber-400 block mb-0.5">High-Scoring Year (e.g. 2024)</span>
+                        <span className="text-base font-black font-mono text-white block">
+                          {advDossier.tri_difficulty_range.easy_year?.crl_formatted || '--'}
+                        </span>
+                        <p className="text-[10px] text-slate-400 mt-1">Score-inflated conservative benchmark</p>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Dual-Perspective Extrapolation (Partial Syllabus Tests) */}
+                {advDossier?.dual_perspective && !advDossier.dual_perspective.is_full_syllabus && (
+                  <div className="bg-[#111520] border border-purple-500/20 rounded-2xl p-5">
+                    <div className="flex items-center justify-between mb-3">
+                      <h4 className="text-xs uppercase font-extrabold tracking-wider text-purple-400 flex items-center gap-1.5">
+                        <Layers className="w-4 h-4" />
+                        <span>Dual-Perspective Advanced Syllabus Extrapolation</span>
+                      </h4>
+                      <span className="text-[10px] font-mono text-purple-300 bg-purple-950/60 px-2 py-0.5 rounded border border-purple-500/30">
+                        {advDossier.dual_perspective.scope_desc}
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      {/* Potential CRL */}
+                      <div className="bg-[#171b26] p-4 rounded-xl border border-white/5">
+                        <span className="text-[10px] uppercase font-bold text-emerald-400 block mb-1">
+                          1. Extrapolated Potential CRL
+                        </span>
+                        <span className="text-lg font-black font-mono text-emerald-300 block">
+                          {advDossier.dual_perspective.extrapolated_potential_formatted}
+                        </span>
+                        <p className="text-[11px] text-slate-400 mt-1">
+                          Projected CRL if you maintain current mastery across the entire JEE Advanced syllabus.
+                        </p>
+                      </div>
+                      {/* Current Floor */}
+                      <div className="bg-[#171b26] p-4 rounded-xl border border-white/5">
+                        <span className="text-[10px] uppercase font-bold text-amber-400 block mb-1">
+                          2. Current Preparedness Ceiling (Floor)
+                        </span>
+                        <span className="text-lg font-black font-mono text-amber-300 block">
+                          {advDossier.dual_perspective.current_preparedness_ceiling_formatted}
+                        </span>
+                        <p className="text-[11px] text-slate-400 mt-1">
+                          Reality check CRL if Advanced happened today, treating all unattempted chapters as 0 marks.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Premier IIT Admissibility Matrix */}
+                {advDossier?.admissibility && advDossier.admissibility.length > 0 && (
+                  <div className="bg-[#111520] border border-white/10 rounded-2xl p-5">
+                    <div className="flex items-center justify-between mb-3.5">
+                      <h4 className="text-xs uppercase font-extrabold tracking-wider text-slate-400 flex items-center gap-1.5">
+                        <GraduationCap className="w-4 h-4 text-purple-400" />
+                        <span>Indian Institute of Technology (IIT) Admissibility Matrix</span>
+                      </h4>
+                      <span className="text-[10px] text-slate-400 font-mono">JoSAA IIT CRL Standards</span>
+                    </div>
+                    <div className="space-y-2">
+                      {advDossier.admissibility.map((c, idx) => (
+                        <div key={idx} className="bg-[#171b26] p-3 rounded-xl border border-white/5 flex items-center justify-between gap-3 text-xs">
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-2">
+                              <span className="font-bold text-white truncate">{c.college}</span>
+                              <span className="text-[9px] font-mono text-slate-400 bg-black/40 px-1.5 py-0.2 rounded border border-white/5">
+                                {c.category}
+                              </span>
+                            </div>
+                            <p className="text-[11px] text-slate-400 truncate mt-0.5">
+                              {c.branch} • Cutoff ~CRL {c.cutoff_rank.toLocaleString()}
+                            </p>
+                          </div>
+                          <span className={`text-[9px] font-extrabold uppercase px-2.5 py-0.5 rounded border ${
+                            c.status === 'Safe' ? 'bg-emerald-950/90 text-emerald-400 border-emerald-500/50' :
+                            c.status === 'Target' ? 'bg-amber-950/90 text-amber-300 border-amber-500/50' :
+                            c.status === 'Reach' ? 'bg-blue-950/90 text-blue-300 border-blue-500/50' :
+                            'bg-slate-800/80 text-slate-400 border-white/10'
+                          }`}>
                             {c.status} ({c.chance})
                           </span>
                         </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-
-            {/* Diagnostic Bottlenecks & Roadmap Gates */}
-            {p.air_bottlenecks && p.air_bottlenecks.length > 0 && (
-              <div className="bg-amber-500/5 border border-amber-500/25 rounded-2xl p-4.5 space-y-2">
-                <div className="flex items-center gap-1.5 text-xs font-bold text-amber-400">
-                  <Sparkles className="w-3.5 h-3.5" />
-                  <span>Strategic Rank Diagnosis & Actionable Levers:</span>
-                </div>
-                <div className="space-y-1.5 text-[11px] text-slate-300">
-                  {p.air_bottlenecks.map((b, i) => (
-                    <div key={i} className="flex items-start gap-2">
-                      <span className="text-amber-400 shrink-0 font-bold">•</span>
-                      <span>{b}</span>
+                      ))}
                     </div>
-                  ))}
-                </div>
+                  </div>
+                )}
+
+                {/* Strategic Diagnostic Bottlenecks */}
+                {advDossier?.bottlenecks && advDossier.bottlenecks.length > 0 && (
+                  <div className="bg-purple-500/5 border border-purple-500/25 rounded-2xl p-4.5 space-y-2">
+                    <div className="flex items-center gap-1.5 text-xs font-bold text-purple-400">
+                      <Sparkles className="w-3.5 h-3.5" />
+                      <span>JEE Advanced Strategic Rank Levers:</span>
+                    </div>
+                    <div className="space-y-1.5 text-[11px] text-slate-300">
+                      {advDossier.bottlenecks.map((b, i) => (
+                        <div key={i} className="flex items-start gap-2">
+                          <span className="text-purple-400 shrink-0 font-bold">•</span>
+                          <span>{b}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             )}
           </div>
