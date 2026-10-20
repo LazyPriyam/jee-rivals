@@ -11,16 +11,23 @@ router = APIRouter(prefix="/api/streaks", tags=["Streaks & Daily Momentum"])
 def get_my_streak(current_user: dict = Depends(get_current_user)):
     """
     Returns the player's full streak dossier, rolling 7-day calendar,
-    freeze shield count, and milestone progression.
+    and milestone progression aligned with IST.
     """
-    return get_user_streak_meta(current_user)
+    conn = get_connection()
+    c = conn.cursor()
+    try:
+        meta = get_user_streak_meta(current_user, cursor=c)
+        conn.commit()
+        return meta
+    finally:
+        conn.close()
 
 
 @router.post("/check-in")
 def daily_streak_checkin(current_user: dict = Depends(get_current_user)):
     """
-    Records daily study activity for the user, advancing their streak,
-    applying freeze shields if needed, and granting streak bonuses.
+    Records daily study activity for the user, advancing their streak
+    and granting streak bonuses.
     """
     conn = get_connection()
     c = conn.cursor()
@@ -31,7 +38,8 @@ def daily_streak_checkin(current_user: dict = Depends(get_current_user)):
         # Re-fetch full streak meta
         c.execute("SELECT * FROM users WHERE id = ?", (current_user["id"],))
         updated_user = dict(c.fetchone())
-        meta = get_user_streak_meta(updated_user)
+        meta = get_user_streak_meta(updated_user, cursor=c)
+        conn.commit()
         result["streak_meta"] = meta
         invalidate_user_cache(current_user["id"])
         return result
@@ -45,20 +53,10 @@ def daily_streak_checkin(current_user: dict = Depends(get_current_user)):
 @router.post("/buy-freeze")
 def purchase_streak_freeze(current_user: dict = Depends(get_current_user)):
     """
-    Allows user to spend 100 RP to purchase a Freeze Shield (max 3).
+    Deprecated: Freeze shields have been retired in favor of honest daily consistency.
     """
-    conn = get_connection()
-    c = conn.cursor()
-    try:
-        result = buy_streak_freeze(current_user["id"], c)
-        conn.commit()
-        invalidate_user_cache(current_user["id"])
-        return result
-    except ValueError as ve:
-        conn.rollback()
-        raise HTTPException(status_code=400, detail=str(ve))
-    except Exception as e:
-        conn.rollback()
-        raise HTTPException(status_code=500, detail=str(e))
-    finally:
-        conn.close()
+    return {
+        "success": False,
+        "streak_freezes": 0,
+        "message": "Freeze shields have been retired. Practice daily to maintain your momentum!"
+    }

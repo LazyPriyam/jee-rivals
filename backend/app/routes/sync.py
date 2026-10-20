@@ -458,7 +458,7 @@ def get_admin_users(
             u_dict["banner_theme"] = r.get("banner_theme") or "orange_cyber"
             u_dict["pinned_badges"] = r.get("pinned_badges") or '["elo_bronze", "first_blood"]'
             u_dict["target_exam_date"] = r.get("target_exam_date") or "JEE Main Jan 2026"
-            u_dict["streak_freezes"] = r.get("streak_freezes") or 1
+            u_dict["streak_freezes"] = r.get("streak_freezes") or 0
             u_dict["streak_history"] = r.get("streak_history") or "[]"
 
         users.append(u_dict)

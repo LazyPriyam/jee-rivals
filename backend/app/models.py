@@ -59,7 +59,7 @@ class UserProfile(BaseModel):
     current_streak: Optional[int] = 0
     longest_streak: Optional[int] = 0
     last_active_date: Optional[str] = None
-    streak_freezes: Optional[int] = 1
+    streak_freezes: Optional[int] = 0
     is_streak_active_today: Optional[bool] = False
     streak_meta: Optional[Dict[str, Any]] = None
     last_active: Optional[str] = None

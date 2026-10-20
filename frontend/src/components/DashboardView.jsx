@@ -458,7 +458,7 @@ export default function DashboardView({
                 </span>
               </h3>
               <p className="text-xs text-slate-300 mt-0.5">
-                Granting <strong className="text-orange-400">+{Math.min(20, (user.current_streak || 0) * 2)}% Bonus RP</strong> on all duels & tests. {user.streak_freezes !== undefined ? `🛡️ ${user.streak_freezes} Freeze Shield available.` : ''}
+                Granting <strong className="text-orange-400">+{Math.min(20, (user.current_streak || 0) * 2)}% Bonus RP</strong> on all duels & tests. Practice daily to keep your flame burning!
               </p>
             </div>
           </div>

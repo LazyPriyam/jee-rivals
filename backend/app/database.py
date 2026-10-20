@@ -400,7 +400,7 @@ def restore_users_from_backup(conn: Optional[sqlite3.Connection] = None) -> int:
                 curr_solved = max(int(curr.get("total_solved") or 0), int(u.get("total_solved") or 0))
                 curr_correct = max(int(curr.get("total_correct") or 0), int(u.get("total_correct") or 0))
                 curr_longest_streak = max(int(curr.get("longest_streak") or 0), int(u.get("longest_streak") or 0))
-                curr_streak_freezes = max(int(curr.get("streak_freezes") or 0), int(u.get("streak_freezes") or 0))
+                curr_streak_freezes = 0
 
                 # Union merge of learnt chapters
                 curr_learnt = set()

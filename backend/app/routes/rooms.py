@@ -1252,6 +1252,11 @@ async def submit_bulk_mock(
             record_daily_question_solved(user["id"], c, count=attempted_count)
         except Exception:
             pass
+        try:
+            from backend.app.tools.streaks_engine import record_daily_activity
+            record_daily_activity(user["id"], c)
+        except Exception:
+            pass
 
     # Check if everyone finished
     c.execute("SELECT COUNT(*) as unfinished FROM room_participants WHERE room_id = ? AND is_finished = 0", (room_id,))
