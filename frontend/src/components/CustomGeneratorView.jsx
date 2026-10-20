@@ -303,10 +303,23 @@ export default function CustomGeneratorView({ user, onRoomCreated, onOpenAuth })
       const defaultTitle = isMock
         ? (cumulativeMode ? 'Cumulative Retention Mock (60/25/15)' : 'Custom Blueprint Mock Test')
         : (cumulativeMode ? 'Cumulative Retention Duel (60/25/15)' : 'Custom Battle Blueprint');
+
+      // Accurately compute active subjects if specific chapters are selected
+      const effectiveSubjects = selectedChapters.length > 0
+        ? Array.from(new Set(
+            selectedChapters.map((chName) => {
+              for (const [subj, chList] of Object.entries(chaptersMap)) {
+                if (Array.isArray(chList) && chList.some((item) => item.chapter === chName)) return subj;
+              }
+              return null;
+            }).filter(Boolean)
+          ))
+        : selectedSubjects;
+
       const room = await api.rooms.create({
         mode,
         preset_name: roomTitle.trim() || defaultTitle,
-        subjects: selectedSubjects,
+        subjects: effectiveSubjects.length > 0 ? effectiveSubjects : selectedSubjects,
         chapters: selectedChapters.length > 0 ? selectedChapters : null,
         difficulty_tier: difficulty,
         target_exam: targetExam,

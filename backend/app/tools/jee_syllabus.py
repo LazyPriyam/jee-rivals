@@ -291,6 +291,8 @@ CHAPTER_NORMALIZER = {
     "polymers": "Polymers",
 
     # Mathematics
+    "fundamental of mathematics": "Sets, Relations and Functions",
+    "fundamentals of mathematics": "Sets, Relations and Functions",
     "sets, relations and functions": "Sets, Relations and Functions",
     "sets and relations": "Sets, Relations and Functions",
     "complex numbers": "Complex Numbers and Quadratic Equations",
