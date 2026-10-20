@@ -37,6 +37,7 @@ import {
   Loader2
 } from 'lucide-react';
 import ReportQuestionModal from './ReportQuestionModal';
+import ImpactRatingCounter from './ImpactRatingCounter';
 
 const TIER_COLORS = {
   FOUNDATION_DIAGNOSTIC: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40',
@@ -493,7 +494,9 @@ export default function AdaptivePracticeView({ user, onOpenAuth, onNavigateTab, 
       setResult((prev) => prev ? {
         ...prev,
         provisional_refund: refund,
-        session_elo_after: Math.round(Number(prev.session_elo_after || 1200) + refund)
+        session_elo_after: Math.round(Number(prev.session_elo_after || 1200) + refund),
+        chapter_elo_after: Math.round(Number(prev.chapter_elo_after || prev.session_elo_after || 1200) + refund),
+        chapter_elo_delta: Number(prev.chapter_elo_delta || prev.elo_delta || 0) + refund,
       } : prev);
 
       // Re-sync user profile dynamically across Navbar and entire app
@@ -1417,6 +1420,49 @@ export default function AdaptivePracticeView({ user, onOpenAuth, onNavigateTab, 
                       <span><strong>Provisional Rating Restored:</strong> +{result.provisional_refund.toFixed(1)} Elo credited to your profile pending review.</span>
                     </div>
                     <span className="font-mono font-bold text-amber-400 bg-amber-500/20 px-2 py-0.5 rounded text-[10px]">SAFEGUARD ACTIVE</span>
+                  </div>
+                )}
+
+                {/* Synchronized Flying Rating Delta Progression Arena */}
+                {result && (
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between px-1">
+                      <span className="text-[11px] font-mono uppercase tracking-wider text-slate-400 font-bold flex items-center gap-1.5">
+                        <Sparkles className="w-3.5 h-3.5 text-orange-400" />
+                        <span>Authoritative Rating Progression</span>
+                      </span>
+                      <span className="text-[10px] font-mono text-slate-500">
+                        Synchronized Impact & Flight
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      {/* Overall JEE Rating */}
+                      <ImpactRatingCounter
+                        key={`overall-${question.id}-${result.total_attempted || 0}`}
+                        label="Overall JEE Rating"
+                        badgeText="All-India Competitive Ladder"
+                        icon={Trophy}
+                        initialRating={result.overall_elo_before ?? user?.overall_elo ?? 1200}
+                        targetRating={result.overall_elo_after ?? (user?.overall_elo ? user.overall_elo + (result.overall_elo_delta || 0) : 1200)}
+                        delta={result.overall_elo_delta ?? 0}
+                        accent="orange"
+                        delay={0}
+                      />
+
+                      {/* Chapter Mastery Elo */}
+                      <ImpactRatingCounter
+                        key={`chapter-${question.id}-${result.total_attempted || 0}`}
+                        label="Chapter Mastery Elo"
+                        badgeText={`${result.subject_name || question.subject} • ${result.chapter_name || question.chapter}`}
+                        icon={Target}
+                        initialRating={result.chapter_elo_before ?? result.session_elo_before ?? question.chapter_elo ?? session.current_elo ?? 1200}
+                        targetRating={result.chapter_elo_after ?? result.session_elo_after ?? (session.current_elo || 1200)}
+                        delta={result.chapter_elo_delta ?? result.elo_delta ?? 0}
+                        accent="cyan"
+                        delay={120}
+                      />
+                    </div>
                   </div>
                 )}
 

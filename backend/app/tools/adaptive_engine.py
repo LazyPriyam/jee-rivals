@@ -519,13 +519,52 @@ def calculate_adaptive_elo_delta(
     return round(raw_delta, 1)
 
 
+def compute_adaptive_overall_delta(
+    cur_overall: float,
+    p_elo: float,
+    c_elo: float,
+    m_elo: float,
+    chap: str,
+    subj: str,
+    elo_delta: float,
+    cursor=None,
+    user_id: Optional[str] = None
+) -> Tuple[float, float, float]:
+    """
+    Computes (overall_before, overall_after, overall_delta) for an adaptive solve:
+    - Applies chapter diminishing factor based on single-chapter vs multi-chapter scope.
+    - Applies JEE subject asymmetry gate (dampens gains if one subject is vastly higher than lagging subjects).
+    - Caps overall elo at min_subj_elo + 350.
+    """
+    from backend.app.tools.elo_engine import (
+        calculate_chapter_diminishing_factor,
+        calculate_subject_asymmetry_factor
+    )
+    chap_factor, _ = calculate_chapter_diminishing_factor(cursor, user_id, [chap], [subj])
+    asym_factor, _ = calculate_subject_asymmetry_factor(p_elo, c_elo, m_elo, [subj], elo_delta)
+
+    if elo_delta > 0:
+        combined_factor = round(chap_factor * asym_factor, 2)
+        overall_delta = round(elo_delta * combined_factor, 1)
+        min_subj_elo = min(p_elo, c_elo, m_elo)
+        max_allowed_overall = min_subj_elo + 350.0
+        if (cur_overall + overall_delta) > max_allowed_overall:
+            overall_delta = max(0.0, round(max_allowed_overall - cur_overall, 1))
+    else:
+        overall_delta = round(elo_delta * chap_factor, 1)
+
+    new_overall = max(100.0, cur_overall + overall_delta)
+    return round(cur_overall, 1), round(new_overall, 1), round(overall_delta, 1)
+
+
 def apply_adaptive_result_to_profile(
     cursor,
     user_id: str,
     question: dict,
     is_correct: bool,
     time_spent: int,
-    elo_delta: float
+    elo_delta: float,
+    precomputed_overall_delta: Optional[float] = None
 ):
     """
     Updates the student's permanent profile:
@@ -560,18 +599,21 @@ def apply_adaptive_result_to_profile(
     m_elo = float(u_row["math_elo"] or 1200.0) if u_row else 1200.0
     raw_stats = u_row["chapter_stats"] if u_row else None
 
-    chap_factor, _ = calculate_chapter_diminishing_factor(cursor, user_id, [chap], [subj])
-    asym_factor, _ = calculate_subject_asymmetry_factor(p_elo, c_elo, m_elo, [subj], elo_delta)
-
-    if elo_delta > 0:
-        combined_factor = round(chap_factor * asym_factor, 2)
-        overall_delta = round(elo_delta * combined_factor, 1)
-        min_subj_elo = min(p_elo, c_elo, m_elo)
-        max_allowed_overall = min_subj_elo + 350.0
-        if (cur_overall + overall_delta) > max_allowed_overall:
-            overall_delta = max(0.0, round(max_allowed_overall - cur_overall, 1))
+    if precomputed_overall_delta is not None:
+        overall_delta = precomputed_overall_delta
     else:
-        overall_delta = round(elo_delta * chap_factor, 1)
+        chap_factor, _ = calculate_chapter_diminishing_factor(cursor, user_id, [chap], [subj])
+        asym_factor, _ = calculate_subject_asymmetry_factor(p_elo, c_elo, m_elo, [subj], elo_delta)
+
+        if elo_delta > 0:
+            combined_factor = round(chap_factor * asym_factor, 2)
+            overall_delta = round(elo_delta * combined_factor, 1)
+            min_subj_elo = min(p_elo, c_elo, m_elo)
+            max_allowed_overall = min_subj_elo + 350.0
+            if (cur_overall + overall_delta) > max_allowed_overall:
+                overall_delta = max(0.0, round(max_allowed_overall - cur_overall, 1))
+        else:
+            overall_delta = round(elo_delta * chap_factor, 1)
 
     # 1. Update chapter_stats
     stats = {}

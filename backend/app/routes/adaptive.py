@@ -18,6 +18,7 @@ from backend.app.tools.adaptive_engine import (
     get_user_revenge_question_ids,
     select_next_adaptive_question,
     calculate_adaptive_elo_delta,
+    compute_adaptive_overall_delta,
     apply_adaptive_result_to_profile
 )
 
@@ -92,7 +93,8 @@ def _bg_sync_adaptive_submission(
     elo_delta: float,
     session_id: str,
     sess_snapshot: dict,
-    is_finished: bool
+    is_finished: bool,
+    overall_delta: Optional[float] = None
 ):
     bg_conn = get_connection()
     try:
@@ -105,7 +107,8 @@ def _bg_sync_adaptive_submission(
                 question=q_copy,
                 is_correct=is_correct,
                 time_spent=time_spent,
-                elo_delta=elo_delta
+                elo_delta=elo_delta,
+                precomputed_overall_delta=overall_delta
             )
         except Exception as e:
             print(f"[ADAPTIVE_BG] Telemetry profile update note: {e}")
@@ -758,7 +761,25 @@ def submit_adaptive_answer(
 
     put_cached_session(session_id, sess_updated)
 
-    # 7. Offload database sync (profile updates + session updates) to background task
+    # 7. Compute authentic Overall Elo delta
+    cur_overall = float(user.get("overall_elo") or 1200.0)
+    p_elo = float(user.get("physics_elo") or 1200.0)
+    c_elo = float(user.get("chemistry_elo") or 1200.0)
+    m_elo = float(user.get("math_elo") or 1200.0)
+
+    ov_before, ov_after, ov_delta = compute_adaptive_overall_delta(
+        cur_overall=cur_overall,
+        p_elo=p_elo,
+        c_elo=c_elo,
+        m_elo=m_elo,
+        chap=q.get("chapter", "General"),
+        subj=q.get("subject", "Physics"),
+        elo_delta=elo_delta,
+        cursor=None,
+        user_id=user["id"]
+    )
+
+    # 8. Offload database sync (profile updates + session updates) to background task
     q_copy = dict(q)
     q_copy["user_choice"] = req.submitted_answer
 
@@ -771,10 +792,11 @@ def submit_adaptive_answer(
         elo_delta,
         session_id,
         sess_updated,
-        is_session_finished
+        is_session_finished,
+        ov_delta
     )
 
-    # 8. Parse formulas and pitfalls in RAM (< 0.1ms)
+    # 9. Parse formulas and pitfalls in RAM (< 0.1ms)
     formulas, pitfall = parse_formulas_and_pitfalls(q)
 
     return {
@@ -783,9 +805,20 @@ def submit_adaptive_answer(
         "solution_text": q.get("solution_text") or "Solution steps: Verified through standard JEE principles.",
         "key_formulas": formulas,
         "common_pitfall": pitfall,
+        # Chapter Rating Delta
+        "chapter_name": q.get("chapter"),
+        "subject_name": q.get("subject"),
         "elo_delta": elo_delta,
+        "chapter_elo_delta": elo_delta,
         "session_elo_before": round(current_chapter_elo, 1),
+        "chapter_elo_before": round(current_chapter_elo, 1),
         "session_elo_after": round(new_chapter_elo, 1),
+        "chapter_elo_after": round(new_chapter_elo, 1),
+        # Overall Rating Delta
+        "overall_elo_before": ov_before,
+        "overall_elo_after": ov_after,
+        "overall_elo_delta": ov_delta,
+        # Session state
         "current_streak": new_streak,
         "flow_state": new_streak >= 3,
         "total_attempted": new_attempted,
