@@ -106,12 +106,13 @@ def sync_data(payload: SyncPayload, x_sync_token: Optional[str] = Header(None, a
                     clean_sol = clean_derivation_text(sol_text)
                     if clean_sol:
                         sol_text = clean_sol
-                    derived_key = extract_derived_key(sol_text, q_type, options_str)
-                    if derived_key:
-                        der_norm = normalize_to_options(derived_key.upper(), options_str)
-                        cur_norm = normalize_to_options(correct_ans.upper(), options_str)
-                        if der_norm and der_norm != cur_norm:
-                            correct_ans = der_norm
+                    if q_type not in ("COMPREHENSION", "SUBJECTIVE", "MATRIX_MATCH") and "," not in correct_ans and ";" not in correct_ans:
+                        derived_key = extract_derived_key(sol_text, q_type, options_str)
+                        if derived_key:
+                            der_norm = normalize_to_options(derived_key.upper(), options_str)
+                            cur_norm = normalize_to_options(correct_ans.upper(), options_str)
+                            if der_norm and der_norm != cur_norm:
+                                correct_ans = der_norm
                 except Exception as ex_derive:
                     print(f"[SYNC] Non-critical derivation sanitize note for {q_id}: {ex_derive}")
 
