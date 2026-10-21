@@ -867,15 +867,42 @@ export default function ChapterMasteryView({
                     </div>
 
                     {/* Diagram Display */}
-                    {q.has_diagram && q.diagram_urls && (
-                      <div className="p-2 bg-[#0e121c] rounded-xl border border-white/5 inline-block">
-                        <img
-                          src={q.diagram_urls}
-                          alt="Question Diagram"
-                          className="max-h-52 rounded-lg object-contain"
-                        />
-                      </div>
-                    )}
+                    {Boolean(q.has_diagram) && (() => {
+                      let urls = [];
+                      try {
+                        urls = typeof q.diagram_urls === 'string' ? JSON.parse(q.diagram_urls) : (q.diagram_urls || []);
+                      } catch (_) {
+                        urls = [];
+                      }
+                      if (!Array.isArray(urls)) urls = urls ? [urls] : [];
+                      if (urls.length === 0) return null;
+
+                      return (
+                        <div className="p-3 bg-[#0e121c] rounded-xl border border-white/5 flex flex-wrap gap-3 items-center justify-start">
+                          {urls.map((url, dIdx) => (
+                            <div key={dIdx} className="flex flex-col items-center">
+                              <img
+                                src={url}
+                                alt={`Question Diagram ${dIdx + 1}`}
+                                className="max-h-60 max-w-full rounded-lg object-contain border border-white/10 bg-white/5 p-1"
+                                onError={(e) => {
+                                  if (!e.currentTarget.dataset.retried) {
+                                    e.currentTarget.dataset.retried = "1";
+                                    const cleanPath = url.startsWith('/') ? url : `/${url}`;
+                                    e.currentTarget.src = `https://jee-rivals.onrender.com${cleanPath}`;
+                                  }
+                                }}
+                              />
+                              {urls.length > 1 && (
+                                <span className="text-[10px] text-slate-400 mt-1 font-mono">
+                                  {dIdx === 0 ? "Figure / Prompt" : `Figure ${dIdx + 1}`}
+                                </span>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      );
+                    })()}
 
                     {/* Options (if present) */}
                     {Array.isArray(q.options) && q.options.length > 0 && (

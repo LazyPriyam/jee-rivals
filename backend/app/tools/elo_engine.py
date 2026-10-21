@@ -237,6 +237,58 @@ def calculate_solo_match_elo_delta(
     return round(max(-28.0, min(28.0, raw_delta)), 1)
 
 
+def calculate_mock_subject_and_overall_deltas(
+    user_row: dict,
+    subject_stats: Dict[str, Dict[str, Any]],
+    chapters: Optional[List[str]] = None,
+) -> Tuple[Dict[str, float], float]:
+    """
+    Computes mathematically rigorous, independent per-subject Elo deltas for Mock Tests.
+    Prevents the 'equal split' flaw:
+    - Each subject (Physics, Chemistry, Mathematics) is evaluated independently against
+      its specific questions' average difficulty and the user's specific subject Elo.
+    - Overall Elo delta is computed as the balanced average across active subjects,
+      respecting syllabus coverage and lagging subject safeguards.
+
+    subject_stats structure:
+      {
+         'Physics': {'correct': int, 'total': int, 'elos': [float, ...]},
+         'Chemistry': ...,
+         'Mathematics': ...
+      }
+    Returns: (subject_deltas_dict, overall_raw_delta)
+    """
+    subject_deltas: Dict[str, float] = {}
+    valid_subject_deltas: List[float] = []
+
+    subj_col_map = {
+        "Physics": "physics_elo",
+        "Chemistry": "chemistry_elo",
+        "Mathematics": "math_elo"
+    }
+
+    for subj_name, col_name in subj_col_map.items():
+        st = subject_stats.get(subj_name)
+        if not st or st.get("total", 0) <= 0:
+            continue
+
+        user_subj_elo = float(user_row.get(col_name) or 1200.0)
+        q_elos = st.get("elos", [])
+        c_count = st.get("correct", 0)
+        t_count = st.get("total", 0)
+
+        s_delta = calculate_solo_match_elo_delta(user_subj_elo, q_elos, c_count, t_count)
+        subject_deltas[col_name] = s_delta
+        valid_subject_deltas.append(s_delta)
+
+    if valid_subject_deltas:
+        overall_raw_delta = round(sum(valid_subject_deltas) / len(valid_subject_deltas), 1)
+    else:
+        overall_raw_delta = 0.0
+
+    return subject_deltas, overall_raw_delta
+
+
 def reseed_questions_gradient(cursor: sqlite3.Cursor) -> int:
     """
     Upgrades all questions in the database from the old 3-bucket fixed values (1350/1500/1850)
@@ -564,11 +616,14 @@ def apply_match_elo_to_user(
     user_id: str,
     raw_delta: float,
     subjects: Optional[List[str]] = None,
-    chapters: Optional[List[str]] = None
+    chapters: Optional[List[str]] = None,
+    subject_deltas: Optional[Dict[str, float]] = None
 ) -> Tuple[float, float, str]:
     """
     Applies Elo change from a match to user profile:
-    - Subject Elo(s) get raw_delta (or split among subjects if multiple). Domain mastery is unrestricted!
+    - If subject_deltas is provided (e.g. from Mock Tests), each subject gets its true
+      independent delta.
+    - Otherwise, Subject Elo(s) get raw_delta (or split among subjects if multiple). Domain mastery is unrestricted!
     - Overall Elo gets raw_delta * diminishing_factor * subject_asymmetry_factor.
       Gains are damped or locked (+0.0) if a single subject is farmed while lagging subjects are neglected.
     - Updates user_rank_history with the new trajectory point.
@@ -620,27 +675,33 @@ def apply_match_elo_to_user(
     subj_updates = []
     now_iso = datetime.datetime.utcnow().isoformat()
 
-    subj_calibration = 1.0
-    if chapters and len(chapters) > 0:
-        valid_chaps = [c.strip() for c in chapters if c and c.strip().lower() not in ("all", "any", "full syllabus", "*")]
-        if valid_chaps:
-            subj_calibration = min(1.0, 0.40 + 0.60 * (len(valid_chaps) / 12.0))
-
-    if subjs:
-        s_delta = round((raw_delta / len(subjs)) * subj_calibration, 1)
-        for s in subjs:
-            s_low = s.lower()
-            if "phys" in s_low:
-                subj_updates.append(("physics_elo", s_delta))
-            elif "chem" in s_low:
-                subj_updates.append(("chemistry_elo", s_delta))
-            elif "math" in s_low:
-                subj_updates.append(("math_elo", s_delta))
+    if subject_deltas and isinstance(subject_deltas, dict):
+        # Precise independent subject scoring
+        for col, d in subject_deltas.items():
+            if col in ("physics_elo", "chemistry_elo", "math_elo"):
+                subj_updates.append((col, round(float(d), 1)))
     else:
-        third = round((raw_delta / 3.0) * subj_calibration, 1)
-        subj_updates.append(("physics_elo", third))
-        subj_updates.append(("chemistry_elo", third))
-        subj_updates.append(("math_elo", third))
+        subj_calibration = 1.0
+        if chapters and len(chapters) > 0:
+            valid_chaps = [c.strip() for c in chapters if c and c.strip().lower() not in ("all", "any", "full syllabus", "*")]
+            if valid_chaps:
+                subj_calibration = min(1.0, 0.40 + 0.60 * (len(valid_chaps) / 12.0))
+
+        if subjs:
+            s_delta = round((raw_delta / len(subjs)) * subj_calibration, 1)
+            for s in subjs:
+                s_low = s.lower()
+                if "phys" in s_low:
+                    subj_updates.append(("physics_elo", s_delta))
+                elif "chem" in s_low:
+                    subj_updates.append(("chemistry_elo", s_delta))
+                elif "math" in s_low:
+                    subj_updates.append(("math_elo", s_delta))
+        else:
+            third = round((raw_delta / 3.0) * subj_calibration, 1)
+            subj_updates.append(("physics_elo", third))
+            subj_updates.append(("chemistry_elo", third))
+            subj_updates.append(("math_elo", third))
 
     set_clauses = ["overall_elo = MAX(100.0, overall_elo + ?)"]
     params = [overall_delta]
@@ -680,11 +741,13 @@ def record_chapter_attempt(
     subject: str,
     chapter: str,
     is_correct: bool,
-    elo_delta: Optional[float] = None
+    elo_delta: Optional[float] = None,
+    question_elo: Optional[float] = None
 ) -> float:
     """
     Updates the 92-chapter independent Elo rating, attempts count, and accuracy
     in the `user_chapter_elo` table for the specified user and chapter.
+    Uses true question-difficulty calibrated Elo if question_elo is provided.
     """
     from backend.app.tools.jee_syllabus import normalize_chapter_name
     canonical_chapter = normalize_chapter_name(chapter)
@@ -707,6 +770,23 @@ def record_chapter_attempt(
 
     if elo_delta is not None:
         delta = elo_delta
+    elif question_elo is not None and float(question_elo) > 0:
+        # Authentic Elo computation: compares student chapter Elo vs question rating
+        diff = (float(question_elo) - cur_elo) / 400.0
+        diff = max(-5.0, min(5.0, diff))
+        expected = 1.0 / (1.0 + (10.0 ** diff))
+        actual = 1.0 if is_correct else 0.0
+
+        # Adaptive K-factor: rapid initial calibration that stabilizes with question volume
+        if attempts < 10:
+            k = 32.0
+        elif attempts < 30:
+            k = 24.0
+        else:
+            k = 18.0
+
+        delta = k * (actual - expected)
+        delta = max(-24.0, min(32.0, delta))
     else:
         delta = 16.0 if is_correct else -12.0
 

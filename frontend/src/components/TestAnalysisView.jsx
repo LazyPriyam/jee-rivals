@@ -1637,11 +1637,36 @@ export default function TestAnalysisView({
                     </div>
 
                     {/* Diagrams if present */}
-                    {q.diagram_urls && (
-                      <div className="my-3 p-2 bg-black/30 rounded-xl max-w-sm">
-                        <img src={q.diagram_urls} alt="Question diagram" className="rounded-lg max-h-56 mx-auto" />
-                      </div>
-                    )}
+                    {Boolean(q.diagram_urls) && (() => {
+                      let urls = [];
+                      try {
+                        urls = typeof q.diagram_urls === 'string' ? JSON.parse(q.diagram_urls) : (q.diagram_urls || []);
+                      } catch (_) {
+                        urls = [];
+                      }
+                      if (!Array.isArray(urls)) urls = urls ? [urls] : [];
+                      if (urls.length === 0) return null;
+
+                      return (
+                        <div className="my-3 p-2 bg-black/30 rounded-xl flex flex-wrap gap-2 max-w-full justify-center">
+                          {urls.map((url, dIdx) => (
+                            <img
+                              key={dIdx}
+                              src={url}
+                              alt={`Question diagram ${dIdx + 1}`}
+                              className="rounded-lg max-h-56 object-contain"
+                              onError={(e) => {
+                                if (!e.currentTarget.dataset.retried) {
+                                  e.currentTarget.dataset.retried = "1";
+                                  const cleanPath = url.startsWith('/') ? url : `/${url}`;
+                                  e.currentTarget.src = `https://jee-rivals.onrender.com${cleanPath}`;
+                                }
+                              }}
+                            />
+                          ))}
+                        </div>
+                      );
+                    })()}
 
                     {/* User Answer vs Correct Answer */}
                     <div className="p-3.5 rounded-2xl bg-black/40 border border-white/5 grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs font-mono">

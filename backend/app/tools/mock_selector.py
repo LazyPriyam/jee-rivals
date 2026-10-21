@@ -12,12 +12,14 @@ Enforces:
 import json
 import logging
 import random
+import statistics
 from typing import List, Dict, Optional, Set, Any, Tuple
 
 logger = logging.getLogger("jee_rivals.mock_selector")
 
 from backend.app.tools.jee_syllabus import (
     JEE_SYLLABUS,
+    ALL_CANONICAL_CHAPTERS,
     normalize_chapter_name,
     get_chapter_weightage,
     get_chapter_subject,
@@ -184,6 +186,85 @@ def get_participants_seen_question_map(
     return seen_counts
 
 
+def get_effective_chapter_elos(
+    cursor,
+    user_ids: Optional[List[str]] = None,
+) -> Dict[str, float]:
+    """
+    Computes effective baseline chapter Elo ratings for question selection.
+    If multiple user_ids are provided, uses the room median for each chapter.
+    Falls back gracefully:
+    Chapter Elo -> Subject Elo -> Overall Elo -> Baseline 1200.0.
+    """
+    default_base = 1200.0
+    effective_elos: Dict[str, float] = {}
+
+    if not cursor or not user_ids:
+        for ch in ALL_CANONICAL_CHAPTERS:
+            effective_elos[ch] = default_base
+        return effective_elos
+
+    valid_uids = [str(uid) for uid in user_ids if uid and not str(uid).startswith("bot_")]
+    if not valid_uids:
+        for ch in ALL_CANONICAL_CHAPTERS:
+            effective_elos[ch] = default_base
+        return effective_elos
+
+    placeholders = ",".join("?" for _ in valid_uids)
+    try:
+        cursor.execute(f"""
+            SELECT id, overall_elo, physics_elo, chemistry_elo, math_elo
+            FROM users WHERE id IN ({placeholders})
+        """, valid_uids)
+        user_rows = [dict(r) for r in cursor.fetchall()]
+    except Exception as e:
+        logger.warning(f"Error fetching user baseline ratings: {e}")
+        user_rows = []
+
+    overall_list = [float(u.get("overall_elo") or default_base) for u in user_rows]
+    phys_list = [float(u.get("physics_elo") or default_base) for u in user_rows]
+    chem_list = [float(u.get("chemistry_elo") or default_base) for u in user_rows]
+    math_list = [float(u.get("math_elo") or default_base) for u in user_rows]
+
+    overall_median = statistics.median(overall_list) if overall_list else default_base
+    phys_median = statistics.median(phys_list) if phys_list else default_base
+    chem_median = statistics.median(chem_list) if chem_list else default_base
+    math_median = statistics.median(math_list) if math_list else default_base
+
+    subj_medians = {
+        "Physics": phys_median,
+        "Chemistry": chem_median,
+        "Mathematics": math_median
+    }
+
+    try:
+        cursor.execute(f"""
+            SELECT user_id, chapter, elo
+            FROM user_chapter_elo
+            WHERE user_id IN ({placeholders})
+        """, valid_uids)
+        ch_rows = [dict(r) for r in cursor.fetchall()]
+    except Exception as e:
+        logger.warning(f"Error fetching user chapter elos: {e}")
+        ch_rows = []
+
+    chap_ratings: Dict[str, List[float]] = {}
+    for r in ch_rows:
+        cn = normalize_chapter_name(r.get("chapter") or "")
+        e = float(r.get("elo") or 0.0)
+        if e > 0:
+            chap_ratings.setdefault(cn, []).append(e)
+
+    for ch in ALL_CANONICAL_CHAPTERS:
+        if ch in chap_ratings and chap_ratings[ch]:
+            effective_elos[ch] = round(statistics.median(chap_ratings[ch]), 1)
+        else:
+            subj = get_chapter_subject(ch)
+            effective_elos[ch] = round(subj_medians.get(subj, overall_median), 1)
+
+    return effective_elos
+
+
 def _pick_from_chapters_weighted(
     candidates: List[dict],
     quota: int,
@@ -194,6 +275,10 @@ def _pick_from_chapters_weighted(
     passage_groups: Dict[str, List[dict]],
     prefer_advanced: bool = False,
     seen_counts: Optional[Dict[str, int]] = None,
+    target_chapter_elos: Optional[Dict[str, float]] = None,
+    target_exam: str = "MAIN",
+    tier_counts: Optional[Dict[str, int]] = None,
+    tier_targets: Optional[Dict[str, int]] = None,
 ) -> List[dict]:
     """
     Selects up to `quota` questions from `candidates`, guided by `ch_quotas` and `weights_map`.
@@ -201,11 +286,14 @@ def _pick_from_chapters_weighted(
     Preserves comprehension passage groups atomically.
     Soft-forces unseen questions (seen_count == 0 across participants) before smoothly falling back
     to questions seen by the fewest participants if unseen bank supply is exhausted.
+    Calibrates question difficulty dynamically against the student's chapter Elo to satisfy the
+    30/50/20 cognitive mix (Anchor, Frontier, Peak).
     """
     if quota <= 0 or not candidates:
         return []
 
     picked: List[dict] = []
+    is_adv = prefer_advanced or (target_exam or "").upper().strip() in ("ADVANCED", "JEE_ADVANCED", "ADV")
 
     def _get_q_seen(q: dict) -> int:
         if not seen_counts:
@@ -215,6 +303,36 @@ def _pick_from_chapters_weighted(
             # Maximum seen count among all siblings of this passage
             return max(seen_counts.get(s["id"], 0) for s in passage_groups[pid])
         return seen_counts.get(q["id"], 0)
+
+    def _get_q_tier_and_dist(q: dict) -> Tuple[str, float]:
+        ch = normalize_chapter_name(q.get("chapter") or "")
+        base_e = target_chapter_elos.get(ch, 1200.0) if target_chapter_elos else 1200.0
+        qe = float(q.get("elo_rating") or 1500.0)
+        d = qe - base_e
+
+        if is_adv:
+            if d < 30:
+                tier = "ANCHOR"
+                target_e = base_e - 15.0
+            elif d < 180:
+                tier = "FRONTIER"
+                target_e = base_e + 120.0
+            else:
+                tier = "PEAK"
+                target_e = base_e + 240.0
+        else:
+            if d < 20:
+                tier = "ANCHOR"
+                target_e = base_e - 25.0
+            elif d < 110:
+                tier = "FRONTIER"
+                target_e = base_e + 65.0
+            else:
+                tier = "PEAK"
+                target_e = base_e + 140.0
+
+        dist = abs(qe - target_e)
+        return tier, dist
 
     # Group candidates by normalized chapter
     by_chapter: Dict[str, List[dict]] = {}
@@ -227,18 +345,25 @@ def _pick_from_chapters_weighted(
     def _sort_chapter_cands(c_list: List[dict]) -> List[dict]:
         shuffled = list(c_list)
         random.shuffle(shuffled)
-        if prefer_advanced:
-            diff_rank = {"HARD": 0, "MEDIUM": 1, "EASY": 2}
-            exam_rank = {"JEE_ADVANCED": 0, "ADVANCED": 0, "MIXED": 1, "JEE_MAIN": 2, "MAIN": 2}
-            shuffled.sort(
-                key=lambda x: (
-                    _get_q_seen(x),
-                    exam_rank.get((x.get("target_exam") or "").upper(), 2),
-                    diff_rank.get((x.get("difficulty_tier") or "MEDIUM").upper(), 1),
-                )
+
+        def _sort_key(x: dict):
+            seen = _get_q_seen(x)
+            tier, dist = _get_q_tier_and_dist(x)
+            deficit = (tier_targets.get(tier, 0) - tier_counts.get(tier, 0)) if (tier_targets and tier_counts) else 0
+
+            exam_rank = 0
+            if prefer_advanced:
+                e_tag = (x.get("target_exam") or "").upper()
+                exam_rank = 0 if "ADV" in e_tag else (1 if "MIX" in e_tag else 2)
+
+            return (
+                seen,
+                exam_rank,
+                -deficit,
+                dist + random.uniform(0, 15.0)
             )
-        else:
-            shuffled.sort(key=lambda x: _get_q_seen(x))
+
+        shuffled.sort(key=_sort_key)
         return shuffled
 
     for ch_k in by_chapter:
@@ -260,12 +385,18 @@ def _pick_from_chapters_weighted(
             for s in siblings:
                 seen_ids.add(s["id"])
                 picked.append(s)
+                if tier_counts is not None:
+                    st, _ = _get_q_tier_and_dist(s)
+                    tier_counts[st] = tier_counts.get(st, 0) + 1
             return len(siblings)
         else:
             if len(picked) + 1 > max_total:
                 return 0
             seen_ids.add(q["id"])
             picked.append(q)
+            if tier_counts is not None:
+                qt, _ = _get_q_tier_and_dist(q)
+                tier_counts[qt] = tier_counts.get(qt, 0) + 1
             return 1
 
     # Pass 1A: Draw UNSEEN questions (_get_q_seen == 0) from chapters that have positive quota (ch_quotas[ch] > 0)
@@ -442,6 +573,12 @@ def select_mock_and_room_questions(
         exclude_room_id=exclude_room_id,
     )
 
+    # Compute effective baseline chapter ratings for adaptive cognitive tiers
+    target_chapter_elos = get_effective_chapter_elos(
+        cursor=cursor,
+        user_ids=user_ids,
+    )
+
     # 1. Resolve active subjects in canonical order (Physics -> Chemistry -> Mathematics)
     norm_chapters: List[str] = []
     if filter_chapters:
@@ -585,6 +722,22 @@ def select_mock_and_room_questions(
 
         subj_selected: List[dict] = []
 
+        # Cognitive Tier Targets for this subject (Aptitude Engine 30/50/20 & 40/45/15)
+        tier_counts: Dict[str, int] = {"ANCHOR": 0, "FRONTIER": 0, "PEAK": 0}
+        if is_jee_advanced:
+            t_frontier = max(1, round(s_target * 0.50))
+            t_peak = max(1, round(s_target * 0.30))
+            t_anchor = max(1, s_target - (t_frontier + t_peak))
+        else:
+            t_frontier = max(1, round(s_target * 0.45))
+            t_anchor = max(1, round(s_target * 0.40))
+            t_peak = max(1, s_target - (t_frontier + t_anchor))
+        tier_targets = {
+            "ANCHOR": t_anchor,
+            "FRONTIER": t_frontier,
+            "PEAK": t_peak,
+        }
+
         if is_jee_main:
             # ─────────────────────────────────────────────────────────────
             # JEE MAIN FORMAT:
@@ -624,6 +777,10 @@ def select_mock_and_room_questions(
                 passage_groups=passage_groups,
                 prefer_advanced=False,
                 seen_counts=seen_counts,
+                target_chapter_elos=target_chapter_elos,
+                target_exam=target_exam,
+                tier_counts=tier_counts,
+                tier_targets=tier_targets,
             )
 
             # Backfill any NVQ shortfall into Section A (Single Choice)
@@ -641,6 +798,10 @@ def select_mock_and_room_questions(
                 passage_groups=passage_groups,
                 prefer_advanced=False,
                 seen_counts=seen_counts,
+                target_chapter_elos=target_chapter_elos,
+                target_exam=target_exam,
+                tier_counts=tier_counts,
+                tier_targets=tier_targets,
             )
 
             subj_selected.extend(picked_scq)
@@ -660,6 +821,10 @@ def select_mock_and_room_questions(
                     passage_groups=passage_groups,
                     prefer_advanced=False,
                     seen_counts=seen_counts,
+                    target_chapter_elos=target_chapter_elos,
+                    target_exam=target_exam,
+                    tier_counts=tier_counts,
+                    tier_targets=tier_targets,
                 )
                 subj_selected.extend(extra)
 
@@ -693,6 +858,10 @@ def select_mock_and_room_questions(
                     passage_groups=passage_groups,
                     prefer_advanced=True,
                     seen_counts=seen_counts,
+                    target_chapter_elos=target_chapter_elos,
+                    target_exam=target_exam,
+                    tier_counts=tier_counts,
+                    tier_targets=tier_targets,
                 )
                 subj_selected.extend(picked_custom)
             else:
@@ -718,6 +887,10 @@ def select_mock_and_room_questions(
                     passage_groups=passage_groups,
                     prefer_advanced=True,
                     seen_counts=seen_counts,
+                    target_chapter_elos=target_chapter_elos,
+                    target_exam=target_exam,
+                    tier_counts=tier_counts,
+                    tier_targets=tier_targets,
                 )
                 subj_selected.extend(picked_comp)
 
@@ -732,6 +905,10 @@ def select_mock_and_room_questions(
                     passage_groups=passage_groups,
                     prefer_advanced=True,
                     seen_counts=seen_counts,
+                    target_chapter_elos=target_chapter_elos,
+                    target_exam=target_exam,
+                    tier_counts=tier_counts,
+                    tier_targets=tier_targets,
                 )
                 subj_selected.extend(picked_multi)
 
@@ -746,6 +923,10 @@ def select_mock_and_room_questions(
                     passage_groups=passage_groups,
                     prefer_advanced=True,
                     seen_counts=seen_counts,
+                    target_chapter_elos=target_chapter_elos,
+                    target_exam=target_exam,
+                    tier_counts=tier_counts,
+                    tier_targets=tier_targets,
                 )
                 subj_selected.extend(picked_mat)
 
@@ -763,6 +944,10 @@ def select_mock_and_room_questions(
                     passage_groups=passage_groups,
                     prefer_advanced=True,
                     seen_counts=seen_counts,
+                    target_chapter_elos=target_chapter_elos,
+                    target_exam=target_exam,
+                    tier_counts=tier_counts,
+                    tier_targets=tier_targets,
                 )
                 subj_selected.extend(picked_num)
 
@@ -781,6 +966,10 @@ def select_mock_and_room_questions(
                     passage_groups=passage_groups,
                     prefer_advanced=True,
                     seen_counts=seen_counts,
+                    target_chapter_elos=target_chapter_elos,
+                    target_exam=target_exam,
+                    tier_counts=tier_counts,
+                    tier_targets=tier_targets,
                 )
                 subj_selected.extend(picked_adv_rem)
 
@@ -797,6 +986,10 @@ def select_mock_and_room_questions(
                     passage_groups=passage_groups,
                     prefer_advanced=True,
                     seen_counts=seen_counts,
+                    target_chapter_elos=target_chapter_elos,
+                    target_exam=target_exam,
+                    tier_counts=tier_counts,
+                    tier_targets=tier_targets,
                 )
                 subj_selected.extend(picked_scq_adv)
 
@@ -812,6 +1005,10 @@ def select_mock_and_room_questions(
                     passage_groups=passage_groups,
                     prefer_advanced=True,
                     seen_counts=seen_counts,
+                    target_chapter_elos=target_chapter_elos,
+                    target_exam=target_exam,
+                    tier_counts=tier_counts,
+                    tier_targets=tier_targets,
                 )
                 subj_selected.extend(picked_fb)
 

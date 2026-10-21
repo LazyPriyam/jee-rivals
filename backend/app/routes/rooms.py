@@ -1186,14 +1186,16 @@ async def submit_bulk_mock(
         if q_time is None or q_time <= 0:
             q_time = max(1, req.total_time_seconds // max(1, len(q_ids)))
 
-        if user_choice in ("NONE", "SKIPPED", "", None):
+        q = get_question_cached(q_id, cursor=c)
+        if not q:
+            continue
+
+        is_skipped = user_choice in ("NONE", "SKIPPED", "", None)
+        if is_skipped:
             delta_score = 0
             delta_marks = 0.0
             is_corr = False
         else:
-            q = get_question_cached(q_id, cursor=c)
-            if not q:
-                continue
             correct_ans = q["correct_answer"]
             q_type = q.get("question_type", "MCQ")
 
@@ -1207,13 +1209,17 @@ async def submit_bulk_mock(
                 delta_score = int(neg_penalty)
                 delta_marks = -1.0
 
-            telemetry_items.append((
-                q["id"],
-                q.get("subject"),
-                q.get("chapter"),
-                is_corr,
-                q_time
-            ))
+        telemetry_items.append({
+            "question_id": q["id"],
+            "subject": q.get("subject"),
+            "chapter": q.get("chapter"),
+            "is_correct": is_corr,
+            "is_skipped": is_skipped,
+            "user_choice": user_choice,
+            "time_spent": q_time,
+            "question_elo": float(q.get("elo_rating") or 1500.0),
+            "question_dict": dict(q)
+        })
 
         total_score += delta_score
         total_marks += delta_marks
@@ -1268,7 +1274,7 @@ async def submit_bulk_mock(
         match_completed = True
 
         c.execute("""
-            SELECT p.user_id, p.score, u.overall_elo, u.gold_medals
+            SELECT p.user_id, p.score, u.overall_elo, u.physics_elo, u.chemistry_elo, u.math_elo, u.gold_medals
             FROM room_participants p
             JOIN users u ON p.user_id = u.id
             WHERE p.room_id = ?
@@ -1284,25 +1290,85 @@ async def submit_bulk_mock(
             if len(finished_parts) > 2:
                 c.execute("UPDATE users SET bronze_medals = bronze_medals + 1 WHERE id = ?", (finished_parts[2]["user_id"],))
 
-            q_elos = []
+            q_info_map = {}
             if q_ids:
                 placeholders = ','.join(['?'] * len(q_ids))
-                c.execute(f"SELECT elo_rating FROM questions WHERE id IN ({placeholders})", q_ids)
-                q_elos = [float(r["elo_rating"] or 1500) for r in c.fetchall()]
+                c.execute(f"SELECT id, subject, chapter, elo_rating FROM questions WHERE id IN ({placeholders})", q_ids)
+                for qr in c.fetchall():
+                    q_info_map[qr["id"]] = dict(qr)
 
             user_answers_map = {}
             for part in finished_parts:
                 ans_val = part.get("answers") or "{}"
                 user_answers_map[part["user_id"]] = json.loads(ans_val) if isinstance(ans_val, str) else ans_val
 
-            from backend.app.tools.elo_engine import apply_match_elo_to_user
+            from backend.app.tools.elo_engine import apply_match_elo_to_user, calculate_mock_subject_and_overall_deltas
             r_subjs = json.loads(room["subjects"]) if isinstance(room.get("subjects"), str) else (room.get("subjects") or [])
             r_chaps = json.loads(room["chapters"]) if isinstance(room.get("chapters"), str) else (room.get("chapters") or [])
 
-            elo_deltas = calculate_elo_updates(finished_parts, user_answers_map, q_elos)
-            for uid, delta in elo_deltas.items():
-                apply_match_elo_to_user(c, uid, delta, r_subjs, r_chaps)
+            if len(finished_parts) == 1:
+                part = finished_parts[0]
+                uid = part["user_id"]
+                u_ans = user_answers_map.get(uid, {})
+                subj_stats = {
+                    "Physics": {"correct": 0, "total": 0, "elos": []},
+                    "Chemistry": {"correct": 0, "total": 0, "elos": []},
+                    "Mathematics": {"correct": 0, "total": 0, "elos": []}
+                }
+                for qid in q_ids:
+                    qi = q_info_map.get(qid)
+                    if not qi:
+                        continue
+                    q_sub = qi.get("subject") or ""
+                    norm_sub = None
+                    if "phys" in q_sub.lower(): norm_sub = "Physics"
+                    elif "chem" in q_sub.lower(): norm_sub = "Chemistry"
+                    elif "math" in q_sub.lower(): norm_sub = "Mathematics"
+                    if not norm_sub:
+                        continue
+                    q_e = float(qi.get("elo_rating") or 1500.0)
+                    subj_stats[norm_sub]["total"] += 1
+                    subj_stats[norm_sub]["elos"].append(q_e)
+                    u_entry = u_ans.get(qid)
+                    if isinstance(u_entry, dict) and u_entry.get("correct"):
+                        subj_stats[norm_sub]["correct"] += 1
+
+                subj_deltas, overall_delta = calculate_mock_subject_and_overall_deltas(part, subj_stats, r_chaps)
+                apply_match_elo_to_user(c, uid, overall_delta, r_subjs, r_chaps, subject_deltas=subj_deltas)
                 invalidate_user_cache(uid)
+            else:
+                q_elos = [float(q_info_map.get(qid, {}).get("elo_rating") or 1500.0) for qid in q_ids]
+                elo_deltas = calculate_elo_updates(finished_parts, user_answers_map, q_elos)
+                for part in finished_parts:
+                    uid = part["user_id"]
+                    delta = elo_deltas.get(uid, 0.0)
+                    u_ans = user_answers_map.get(uid, {})
+                    subj_stats = {
+                        "Physics": {"correct": 0, "total": 0, "elos": []},
+                        "Chemistry": {"correct": 0, "total": 0, "elos": []},
+                        "Mathematics": {"correct": 0, "total": 0, "elos": []}
+                    }
+                    for qid in q_ids:
+                        qi = q_info_map.get(qid)
+                        if not qi:
+                            continue
+                        q_sub = qi.get("subject") or ""
+                        norm_sub = None
+                        if "phys" in q_sub.lower(): norm_sub = "Physics"
+                        elif "chem" in q_sub.lower(): norm_sub = "Chemistry"
+                        elif "math" in q_sub.lower(): norm_sub = "Mathematics"
+                        if not norm_sub:
+                            continue
+                        q_e = float(qi.get("elo_rating") or 1500.0)
+                        subj_stats[norm_sub]["total"] += 1
+                        subj_stats[norm_sub]["elos"].append(q_e)
+                        u_entry = u_ans.get(qid)
+                        if isinstance(u_entry, dict) and u_entry.get("correct"):
+                            subj_stats[norm_sub]["correct"] += 1
+
+                    subj_deltas, _ = calculate_mock_subject_and_overall_deltas(part, subj_stats, r_chaps)
+                    apply_match_elo_to_user(c, uid, delta, r_subjs, r_chaps, subject_deltas=subj_deltas)
+                    invalidate_user_cache(uid)
 
     r_subjs_all = json.loads(room["subjects"]) if isinstance(room.get("subjects"), str) else (room.get("subjects") or [])
     r_chaps_all = json.loads(room["chapters"]) if isinstance(room.get("chapters"), str) else (room.get("chapters") or [])
@@ -1318,16 +1384,46 @@ async def submit_bulk_mock(
         try:
             bg_c = bg_conn.cursor()
             from backend.app.tools.elo_engine import update_question_elo_from_attempt, record_chapter_attempt
-            for q_id, q_sub, q_ch, is_cor, t_spent in items:
+            from backend.app.tools.fsrs_engine import process_question_fsrs
+            for it in items:
+                q_id = it["question_id"]
+                q_sub = it["subject"]
+                q_ch = it["chapter"]
+                is_cor = it["is_correct"]
+                is_skip = it["is_skipped"]
+                t_spent = it["time_spent"]
+                q_elo = it["question_elo"]
+                q_dict = it["question_dict"]
+                u_choice = it["user_choice"]
+
                 try:
-                    q_delta, _ = update_question_elo_from_attempt(
-                        bg_c, u_id, q_id, is_cor, t_spent, overall_e, ts_now
-                    )
-                    bg_c.execute("""
-                        INSERT INTO activity_log (user_id, question_id, subject, chapter, is_correct, time_spent_seconds, elo_delta, mode, created_at)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """, (u_id, q_id, q_sub, q_ch, 1 if is_cor else 0, t_spent, q_delta, r_mode, ts_now))
-                    record_chapter_attempt(bg_c, u_id, q_sub, q_ch, is_cor)
+                    if is_skip:
+                        if t_spent > 0:
+                            bg_c.execute("""
+                                INSERT INTO activity_log (user_id, question_id, subject, chapter, is_correct, time_spent_seconds, elo_delta, mode, created_at)
+                                VALUES (?, ?, ?, ?, 0, ?, 0.0, 'MOCK_TEST_SKIPPED', ?)
+                            """, (u_id, q_id, q_sub, q_ch, t_spent, ts_now))
+
+                        if t_spent >= 45 and q_dict:
+                            try:
+                                process_question_fsrs(bg_c, u_id, q_dict, False, "SKIPPED", t_spent)
+                            except Exception as fsrs_err:
+                                print(f"[BULK_MOCK_BG] FSRS skip review error {q_id}: {fsrs_err}")
+                    else:
+                        q_delta, _ = update_question_elo_from_attempt(
+                            bg_c, u_id, q_id, is_cor, t_spent, overall_e, ts_now
+                        )
+                        bg_c.execute("""
+                            INSERT INTO activity_log (user_id, question_id, subject, chapter, is_correct, time_spent_seconds, elo_delta, mode, created_at)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """, (u_id, q_id, q_sub, q_ch, 1 if is_cor else 0, t_spent, q_delta, r_mode, ts_now))
+                        record_chapter_attempt(bg_c, u_id, q_sub, q_ch, is_cor, question_elo=q_elo)
+
+                        if q_dict:
+                            try:
+                                process_question_fsrs(bg_c, u_id, q_dict, is_cor, u_choice, t_spent)
+                            except Exception as fsrs_err:
+                                print(f"[BULK_MOCK_BG] FSRS review error {q_id}: {fsrs_err}")
                 except Exception as item_err:
                     print(f"[BULK_MOCK_BG] Telemetry item error {q_id}: {item_err}")
 
