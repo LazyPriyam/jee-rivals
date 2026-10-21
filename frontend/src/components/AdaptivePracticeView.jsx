@@ -1234,18 +1234,36 @@ export default function AdaptivePracticeView({ user, onOpenAuth, onNavigateTab, 
             </div>
 
             {/* Diagrams if any */}
-            {question.has_diagram && question.diagram_urls && question.diagram_urls.length > 0 && (
-              <div className="p-4 rounded-2xl bg-[#1e2433] border border-white/10 flex flex-wrap justify-center gap-4">
-                {question.diagram_urls.map((url, i) => (
-                  <img
-                    key={i}
-                    src={url}
-                    alt={`Question Diagram ${i + 1}`}
-                    className="max-h-64 rounded-xl object-contain border border-white/10"
-                  />
-                ))}
-              </div>
-            )}
+            {Boolean(question.has_diagram || question.diagram_urls) && (() => {
+              let urls = [];
+              try {
+                urls = typeof question.diagram_urls === 'string' ? JSON.parse(question.diagram_urls) : (question.diagram_urls || []);
+              } catch (_) {
+                urls = question.diagram_urls ? [question.diagram_urls] : [];
+              }
+              if (!Array.isArray(urls)) urls = urls ? [urls] : [];
+              if (urls.length === 0) return null;
+
+              return (
+                <div className="p-4 rounded-2xl bg-[#1e2433] border border-white/10 flex flex-wrap justify-center gap-4">
+                  {urls.map((url, i) => (
+                    <img
+                      key={i}
+                      src={url}
+                      alt={`Question Diagram ${i + 1}`}
+                      className="max-h-64 rounded-xl object-contain border border-white/10"
+                      onError={(e) => {
+                        if (!e.currentTarget.dataset.retried) {
+                          e.currentTarget.dataset.retried = "1";
+                          const cleanPath = url.startsWith('/') ? url : `/${url}`;
+                          e.currentTarget.src = `https://jee-rivals.onrender.com${cleanPath}`;
+                        }
+                      }}
+                    />
+                  ))}
+                </div>
+              );
+            })()}
 
             {/* Interactive Options / Answer Input */}
             {!submitted ? (

@@ -573,30 +573,48 @@ export default function MockTestView({ room, user, onMatchComplete, onExitToDash
               </div>
 
               {/* Diagram */}
-              {currentQ.has_diagram && currentQ.diagram_urls && currentQ.diagram_urls.length > 0 && (
-                <div className="mb-6 p-3 bg-slate-50 border border-slate-200 rounded-lg inline-block max-w-full">
-                  <div className="text-[11px] text-slate-500 font-semibold mb-2 flex items-center gap-1">
-                    <ImageIcon className="w-3.5 h-3.5 text-orange-500" />
-                    <span>Diagrams ({currentQ.diagram_urls.length})</span>
+              {Boolean(currentQ.has_diagram || currentQ.diagram_urls) && (() => {
+                let urls = [];
+                try {
+                  urls = typeof currentQ.diagram_urls === 'string' ? JSON.parse(currentQ.diagram_urls) : (currentQ.diagram_urls || []);
+                } catch (_) {
+                  urls = currentQ.diagram_urls ? [currentQ.diagram_urls] : [];
+                }
+                if (!Array.isArray(urls)) urls = urls ? [urls] : [];
+                if (urls.length === 0) return null;
+
+                return (
+                  <div className="mb-6 p-3 bg-slate-50 border border-slate-200 rounded-lg inline-block max-w-full">
+                    <div className="text-[11px] text-slate-500 font-semibold mb-2 flex items-center gap-1">
+                      <ImageIcon className="w-3.5 h-3.5 text-orange-500" />
+                      <span>Diagrams ({urls.length})</span>
+                    </div>
+                    <div className="flex flex-wrap gap-3 items-center">
+                      {urls.map((url, dIdx) => (
+                        <div key={dIdx} className="flex flex-col items-center">
+                          <img
+                            src={url}
+                            alt={`Question Diagram ${dIdx + 1}`}
+                            className="max-h-60 object-contain rounded border border-slate-200 bg-white"
+                            onError={(e) => {
+                              if (!e.currentTarget.dataset.retried) {
+                                e.currentTarget.dataset.retried = "1";
+                                const cleanPath = url.startsWith('/') ? url : `/${url}`;
+                                e.currentTarget.src = `https://jee-rivals.onrender.com${cleanPath}`;
+                              }
+                            }}
+                          />
+                          {urls.length > 1 && (
+                            <span className="text-[10px] text-slate-400 mt-1 font-mono">
+                              {dIdx === 0 ? "Figure / Setup" : `Figure ${dIdx + 1} (Options / Details)`}
+                            </span>
+                          )}
+                        </div>
+                      ))}
+                    </div>
                   </div>
-                  <div className="flex flex-wrap gap-3 items-center">
-                    {currentQ.diagram_urls.map((url, dIdx) => (
-                      <div key={dIdx} className="flex flex-col items-center">
-                        <img
-                          src={url}
-                          alt={`Question Diagram ${dIdx + 1}`}
-                          className="max-h-60 object-contain rounded border border-slate-200 bg-white"
-                        />
-                        {currentQ.diagram_urls.length > 1 && (
-                          <span className="text-[10px] text-slate-400 mt-1 font-mono">
-                            {dIdx === 0 ? "Figure / Setup" : `Figure ${dIdx + 1} (Options / Details)`}
-                          </span>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
+                );
+              })()}
 
               {/* Options List (Radio for Single/Comprehension/Matrix, Checkbox for Multi-Correct) */}
               <div className="space-y-3 mt-4">

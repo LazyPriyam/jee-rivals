@@ -358,26 +358,44 @@ export default function ResultsView({ roomCode, user, onReturnArena, onRematch, 
                 </div>
 
                 {/* Diagram */}
-                {q.has_diagram && q.diagram_urls && q.diagram_urls.length > 0 && (
-                  <div className="mb-4 bg-[#1e2433] border border-white/10 rounded-xl p-3 inline-block max-w-full">
-                    <div className="flex flex-wrap gap-2 items-center">
-                      {q.diagram_urls.map((url, dIdx) => (
-                        <div key={dIdx} className="flex flex-col items-center">
-                          <img
-                            src={url}
-                            alt={`Question diagram ${dIdx + 1}`}
-                            className="max-h-48 object-contain rounded bg-white p-2"
-                          />
-                          {q.diagram_urls.length > 1 && (
-                            <span className="text-[10px] text-slate-400 mt-1 font-mono">
-                              Figure {dIdx + 1}
-                            </span>
-                          )}
-                        </div>
-                      ))}
+                {Boolean(q.has_diagram || q.diagram_urls) && (() => {
+                  let urls = [];
+                  try {
+                    urls = typeof q.diagram_urls === 'string' ? JSON.parse(q.diagram_urls) : (q.diagram_urls || []);
+                  } catch (_) {
+                    urls = q.diagram_urls ? [q.diagram_urls] : [];
+                  }
+                  if (!Array.isArray(urls)) urls = urls ? [urls] : [];
+                  if (urls.length === 0) return null;
+
+                  return (
+                    <div className="mb-4 bg-[#1e2433] border border-white/10 rounded-xl p-3 inline-block max-w-full">
+                      <div className="flex flex-wrap gap-2 items-center">
+                        {urls.map((url, dIdx) => (
+                          <div key={dIdx} className="flex flex-col items-center">
+                            <img
+                              src={url}
+                              alt={`Question diagram ${dIdx + 1}`}
+                              className="max-h-48 object-contain rounded bg-white p-2"
+                              onError={(e) => {
+                                if (!e.currentTarget.dataset.retried) {
+                                  e.currentTarget.dataset.retried = "1";
+                                  const cleanPath = url.startsWith('/') ? url : `/${url}`;
+                                  e.currentTarget.src = `https://jee-rivals.onrender.com${cleanPath}`;
+                                }
+                              }}
+                            />
+                            {urls.length > 1 && (
+                              <span className="text-[10px] text-slate-400 mt-1 font-mono">
+                                Figure {dIdx + 1}
+                              </span>
+                            )}
+                          </div>
+                        ))}
+                      </div>
                     </div>
-                  </div>
-                )}
+                  );
+                })()}
 
                 {/* Options List */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-6 text-xs">

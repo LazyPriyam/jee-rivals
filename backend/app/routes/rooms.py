@@ -1617,7 +1617,7 @@ async def submit_answer(
     """, (1 if is_correct else 0, user_rp_gain, now, user["id"]))
 
     # Offload secondary question Elo, activity logs, chapter attempts, and streaks to background task
-    def _bg_record_duel_telemetry(u_id, q_id, q_sub, q_ch, is_cor, t_spent, r_mode, overall_e, ts_now):
+    def _bg_record_duel_telemetry(u_id, q_id, q_sub, q_ch, is_cor, t_spent, r_mode, overall_e, ts_now, q_elo, q_dict, u_choice):
         bg_conn = get_connection()
         try:
             bg_c = bg_conn.cursor()
@@ -1629,7 +1629,15 @@ async def submit_answer(
                 INSERT INTO activity_log (user_id, question_id, subject, chapter, is_correct, time_spent_seconds, elo_delta, mode, created_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (u_id, q_id, q_sub, q_ch, 1 if is_cor else 0, t_spent, q_delta, r_mode, ts_now))
-            record_chapter_attempt(bg_c, u_id, q_sub, q_ch, is_cor)
+            record_chapter_attempt(bg_c, u_id, q_sub, q_ch, is_cor, question_elo=q_elo)
+
+            if q_dict:
+                try:
+                    from backend.app.tools.fsrs_engine import process_question_fsrs
+                    process_question_fsrs(bg_c, u_id, q_dict, is_cor, u_choice, t_spent)
+                except Exception as fsrs_err:
+                    print(f"[DUEL_BG] FSRS review note: {fsrs_err}")
+
             try:
                 from backend.app.tools.streaks_engine import record_daily_activity
                 record_daily_activity(u_id, bg_c)
@@ -1659,7 +1667,10 @@ async def submit_answer(
         time_spent,
         room["mode"],
         float(user.get("overall_elo", 1200.0)),
-        now
+        now,
+        float(q.get("elo_rating") or 1500.0),
+        dict(q),
+        user_ans
     )
 
     match_completed = False
@@ -1670,68 +1681,68 @@ async def submit_answer(
             c.execute("UPDATE rooms SET status = 'COMPLETED', completed_at = ? WHERE id = ?", (now, room_id))
             match_completed = True
 
-        c.execute("""
-            SELECT p.user_id, p.score, u.overall_elo, u.gold_medals
-            FROM room_participants p
-            JOIN users u ON p.user_id = u.id
-            WHERE p.room_id = ?
-            ORDER BY p.score DESC
-        """, (room_id,))
-        finished_parts = [dict(r) for r in c.fetchall()]
+            c.execute("""
+                SELECT p.user_id, p.score, u.overall_elo, u.gold_medals
+                FROM room_participants p
+                JOIN users u ON p.user_id = u.id
+                WHERE p.room_id = ?
+                ORDER BY p.score DESC
+            """, (room_id,))
+            finished_parts = [dict(r) for r in c.fetchall()]
 
-        if finished_parts:
-            winner_id = finished_parts[0]["user_id"]
-            c.execute("UPDATE users SET gold_medals = gold_medals + 1 WHERE id = ?", (winner_id,))
-            if len(finished_parts) > 1:
-                c.execute("UPDATE users SET silver_medals = silver_medals + 1 WHERE id = ?", (finished_parts[1]["user_id"],))
-            if len(finished_parts) > 2:
-                c.execute("UPDATE users SET bronze_medals = bronze_medals + 1 WHERE id = ?", (finished_parts[2]["user_id"],))
+            if finished_parts:
+                winner_id = finished_parts[0]["user_id"]
+                c.execute("UPDATE users SET gold_medals = gold_medals + 1 WHERE id = ?", (winner_id,))
+                if len(finished_parts) > 1:
+                    c.execute("UPDATE users SET silver_medals = silver_medals + 1 WHERE id = ?", (finished_parts[1]["user_id"],))
+                if len(finished_parts) > 2:
+                    c.execute("UPDATE users SET bronze_medals = bronze_medals + 1 WHERE id = ?", (finished_parts[2]["user_id"],))
 
-            q_elos = []
-            if q_ids:
-                placeholders = ','.join(['?'] * len(q_ids))
-                c.execute(f"SELECT elo_rating FROM questions WHERE id IN ({placeholders})", q_ids)
-                q_elos = [float(r["elo_rating"] or 1500) for r in c.fetchall()]
+                q_elos = []
+                if q_ids:
+                    placeholders = ','.join(['?'] * len(q_ids))
+                    c.execute(f"SELECT elo_rating FROM questions WHERE id IN ({placeholders})", q_ids)
+                    q_elos = [float(r["elo_rating"] or 1500) for r in c.fetchall()]
 
-            user_answers_map = {}
-            for part in finished_parts:
-                ans_val = part.get("answers") or "{}"
-                user_answers_map[part["user_id"]] = json.loads(ans_val) if isinstance(ans_val, str) else ans_val
+                user_answers_map = {}
+                for part in finished_parts:
+                    ans_val = part.get("answers") or "{}"
+                    user_answers_map[part["user_id"]] = json.loads(ans_val) if isinstance(ans_val, str) else ans_val
 
-            from backend.app.tools.elo_engine import apply_match_elo_to_user
-            r_subjs = json.loads(room["subjects"]) if isinstance(room.get("subjects"), str) else (room.get("subjects") or [])
-            r_chaps = json.loads(room["chapters"]) if isinstance(room.get("chapters"), str) else (room.get("chapters") or [])
+                from backend.app.tools.elo_engine import apply_match_elo_to_user
+                r_subjs = json.loads(room["subjects"]) if isinstance(room.get("subjects"), str) else (room.get("subjects") or [])
+                r_chaps = json.loads(room["chapters"]) if isinstance(room.get("chapters"), str) else (room.get("chapters") or [])
 
-            elo_deltas = calculate_elo_updates(finished_parts, user_answers_map, q_elos)
-            for uid, delta in elo_deltas.items():
-                apply_match_elo_to_user(c, uid, delta, r_subjs, r_chaps)
-                invalidate_user_cache(uid)
+                elo_deltas = calculate_elo_updates(finished_parts, user_answers_map, q_elos)
+                for uid, delta in elo_deltas.items():
+                    apply_match_elo_to_user(c, uid, delta, r_subjs, r_chaps)
+                    invalidate_user_cache(uid)
 
-            if room.get("tournament_id"):
-                try:
-                    from backend.app.routes.tournaments import check_and_advance_tournament_round
-                    t_id = room["tournament_id"]
-                    win_uid = finished_parts[0]["user_id"] if finished_parts else None
-                    c.execute("SELECT player1_id, player2_id FROM tournament_matches WHERE tournament_id = ? AND room_code = ?", (t_id, code))
-                    tm_row = c.fetchone()
-                    if tm_row:
-                        p1_s = next((p["score"] for p in finished_parts if p["user_id"] == tm_row["player1_id"]), 0)
-                        p2_s = next((p["score"] for p in finished_parts if p["user_id"] == tm_row["player2_id"]), 0)
-                        p1_m = next((p.get("marks") for p in finished_parts if p["user_id"] == tm_row["player1_id"]), float(p1_s))
-                        p2_m = next((p.get("marks") for p in finished_parts if p["user_id"] == tm_row["player2_id"]), float(p2_s))
-                    else:
-                        p1_s = finished_parts[0]["score"] if finished_parts else 0
-                        p2_s = finished_parts[1]["score"] if len(finished_parts) > 1 else 0
-                        p1_m = finished_parts[0].get("marks") if finished_parts else 0.0
-                        p2_m = finished_parts[1].get("marks") if len(finished_parts) > 1 else 0.0
-                    c.execute("""
-                        UPDATE tournament_matches
-                        SET status = 'COMPLETED', winner_id = ?, player1_score = ?, player2_score = ?, player1_marks = ?, player2_marks = ?, completed_at = ?
-                        WHERE tournament_id = ? AND room_code = ?
-                    """, (win_uid, p1_s, p2_s, p1_m, p2_m, now, t_id, code))
-                    check_and_advance_tournament_round(c, t_id)
-                except Exception as e:
-                    print(f"[TOURNAMENT] Error advancing tournament match: {e}")
+                if room.get("tournament_id"):
+                    try:
+                        from backend.app.routes.tournaments import check_and_advance_tournament_round
+                        t_id = room["tournament_id"]
+                        win_uid = finished_parts[0]["user_id"] if finished_parts else None
+                        c.execute("SELECT player1_id, player2_id FROM tournament_matches WHERE tournament_id = ? AND room_code = ?", (t_id, code))
+                        tm_row = c.fetchone()
+                        if tm_row:
+                            p1_s = next((p["score"] for p in finished_parts if p["user_id"] == tm_row["player1_id"]), 0)
+                            p2_s = next((p["score"] for p in finished_parts if p["user_id"] == tm_row["player2_id"]), 0)
+                            p1_m = next((p.get("marks") for p in finished_parts if p["user_id"] == tm_row["player1_id"]), float(p1_s))
+                            p2_m = next((p.get("marks") for p in finished_parts if p["user_id"] == tm_row["player2_id"]), float(p2_s))
+                        else:
+                            p1_s = finished_parts[0]["score"] if finished_parts else 0
+                            p2_s = finished_parts[1]["score"] if len(finished_parts) > 1 else 0
+                            p1_m = finished_parts[0].get("marks") if finished_parts else 0.0
+                            p2_m = finished_parts[1].get("marks") if len(finished_parts) > 1 else 0.0
+                        c.execute("""
+                            UPDATE tournament_matches
+                            SET status = 'COMPLETED', winner_id = ?, player1_score = ?, player2_score = ?, player1_marks = ?, player2_marks = ?, completed_at = ?
+                            WHERE tournament_id = ? AND room_code = ?
+                        """, (win_uid, p1_s, p2_s, p1_m, p2_m, now, t_id, code))
+                        check_and_advance_tournament_round(c, t_id)
+                    except Exception as e:
+                        print(f"[TOURNAMENT] Error advancing tournament match: {e}")
 
     conn.commit()
     conn.close()
