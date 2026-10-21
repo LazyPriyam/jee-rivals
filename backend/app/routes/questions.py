@@ -49,7 +49,18 @@ def row_to_question_out(row: dict) -> QuestionOut:
     except Exception:
         opts_data = []
 
-    options = [QuestionOptionModel(key=o.get("key", ""), text=clean_escapes(o.get("text", ""))) for o in opts_data]
+    if not isinstance(opts_data, list):
+        opts_data = []
+
+    options = []
+    for idx, o in enumerate(opts_data):
+        if isinstance(o, dict):
+            key = str(o.get("key") or chr(ord('A') + idx))
+            text = clean_escapes(str(o.get("text") or ""))
+            options.append(QuestionOptionModel(key=key, text=text))
+        elif isinstance(o, str):
+            key = chr(ord('A') + idx) if idx < 26 else str(idx + 1)
+            options.append(QuestionOptionModel(key=key, text=clean_escapes(o)))
 
     raw_urls = row.get("diagram_urls")
     try:
@@ -69,21 +80,23 @@ def row_to_question_out(row: dict) -> QuestionOut:
                 clean_urls.append(f"/diagrams/{fn}")
 
     passage_text_clean = clean_escapes(row.get("passage_text")) if row.get("passage_text") else None
-    is_comp = bool(passage_text_clean or row.get("passage_id") or (row.get("question_type") and row.get("question_type").upper() == "COMPREHENSION"))
+    is_comp = bool(passage_text_clean or row.get("passage_id") or (row.get("question_type") and str(row.get("question_type")).upper() == "COMPREHENSION"))
+
+    raw_text = clean_escapes(str(row.get("text") or ""))
 
     return QuestionOut(
-        id=row["id"],
-        subject=row["subject"],
-        unit=row["unit"],
-        chapter=row["chapter"],
-        question_type=row["question_type"],
-        text=clean_escapes(row["text"]),
+        id=str(row.get("id") or ""),
+        subject=str(row.get("subject") or "Mixed"),
+        unit=str(row.get("unit") or "General"),
+        chapter=str(row.get("chapter") or "General"),
+        question_type=str(row.get("question_type") or "SINGLE_CHOICE"),
+        text=raw_text,
         options=options,
         has_diagram=bool(row.get("has_diagram")),
         diagram_urls=clean_urls,
-        difficulty_tier=row.get("difficulty_tier", "MEDIUM"),
-        elo_rating=row.get("elo_rating", 1500),
-        passage_id=row.get("passage_id"),
+        difficulty_tier=str(row.get("difficulty_tier") or "MEDIUM"),
+        elo_rating=int(row.get("elo_rating") if row.get("elo_rating") is not None else 1500),
+        passage_id=str(row.get("passage_id")) if row.get("passage_id") else None,
         passage_title=row.get("passage_title") or ("Comprehension Passage" if is_comp else None),
         passage_text=passage_text_clean,
         subquestion_index=row.get("subquestion_index"),

@@ -145,8 +145,9 @@ export default function TestAnalysisView({
     }
   };
 
-  useEffect(() => {
+  const fetchAnalysis = () => {
     if (!roomCode) return;
+    setError(null);
     setLoading(true);
 
     Promise.all([
@@ -162,6 +163,10 @@ export default function TestAnalysisView({
         setError(err.message || 'Failed to load test analysis.');
         setLoading(false);
       });
+  };
+
+  useEffect(() => {
+    fetchAnalysis();
   }, [roomCode]);
 
   // Keyboard navigation for pages
@@ -253,14 +258,31 @@ export default function TestAnalysisView({
 
   if (error || !data) {
     return (
-      <div className="max-w-4xl mx-auto px-4 py-16 text-center">
-        <p className="text-red-400 font-bold mb-4">{error || 'Analysis record unavailable.'}</p>
-        <button
-          onClick={onBack}
-          className="px-4 py-2 rounded-xl bg-white/10 hover:bg-white/20 text-white font-bold text-sm cursor-pointer"
-        >
-          Return to Test History
-        </button>
+      <div className="max-w-xl mx-auto px-4 py-16 text-center font-mono page-transition">
+        <div className="bg-[#101524] border border-white/10 rounded-3xl p-8 sm:p-10 shadow-2xl relative overflow-hidden">
+          <div className="absolute inset-0 bg-gradient-to-b from-red-500/5 via-transparent to-transparent pointer-events-none" />
+          <p className="text-red-400 font-bold mb-3 text-sm">{error || 'Analysis record unavailable.'}</p>
+          <p className="text-xs text-slate-400 mb-6 font-sans">
+            Unable to fetch test results from the server. If the server is waking up or updating, please try again.
+          </p>
+          <div className="flex items-center justify-center gap-3">
+            <button
+              onClick={() => {
+                sound.click();
+                fetchAnalysis();
+              }}
+              className="px-4 py-2 rounded-xl bg-orange-500 hover:bg-orange-600 text-white font-bold text-xs cursor-pointer transition shadow-lg shadow-orange-950/40"
+            >
+              Retry Analysis
+            </button>
+            <button
+              onClick={onBack}
+              className="px-4 py-2 rounded-xl bg-white/10 hover:bg-white/20 text-white font-bold text-xs cursor-pointer transition"
+            >
+              Return to Test History
+            </button>
+          </div>
+        </div>
       </div>
     );
   }

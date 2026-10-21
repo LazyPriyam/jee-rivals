@@ -1774,107 +1774,164 @@ async def submit_answer(
     }
 
 
+def _safe_parse_list_or_json(val: Any) -> List[str]:
+    if not val:
+        return []
+    if isinstance(val, list):
+        return [str(x).strip() for x in val if x is not None and str(x).strip()]
+    if isinstance(val, str):
+        v = val.strip()
+        if not v or v in ("[]", "{}"):
+            return []
+        try:
+            parsed = json.loads(v)
+            if isinstance(parsed, list):
+                return [str(x).strip() for x in parsed if x is not None and str(x).strip()]
+            elif isinstance(parsed, str):
+                return [parsed.strip()]
+        except Exception:
+            pass
+        cleaned = v.replace("'", '"').strip()
+        if cleaned.startswith("[") and cleaned.endswith("]"):
+            try:
+                parsed = json.loads(cleaned)
+                if isinstance(parsed, list):
+                    return [str(x).strip() for x in parsed if x is not None and str(x).strip()]
+            except Exception:
+                pass
+        return [s.strip() for s in v.split(",") if s.strip()]
+    return []
+
+
 @router.get("/{code}/results")
 def get_room_results(code: str, user: dict = Depends(get_current_user)):
     code = code.strip().upper()
     conn = get_connection()
     c = conn.cursor()
 
-    c.execute("SELECT * FROM rooms WHERE code = ?", (code,))
-    room_row = c.fetchone()
-    if not room_row:
-        conn.close()
-        raise HTTPException(status_code=404, detail="Room not found.")
+    try:
+        c.execute("SELECT * FROM rooms WHERE code = ?", (code,))
+        room_row = c.fetchone()
+        if not room_row:
+            raise HTTPException(status_code=404, detail="Room not found.")
 
-    room = dict(room_row)
-    room_id = room["id"]
+        room = dict(room_row)
+        room_id = room["id"]
 
-    order_clause = "p.marks DESC, p.score DESC" if room.get("mode") == "MOCK_TEST" else "p.score DESC, p.marks DESC"
-    c.execute(f"""
-        SELECT p.*, u.username, u.avatar_id, u.avatar_image_url, u.title, u.overall_elo
-        FROM room_participants p
-        JOIN users u ON p.user_id = u.id
-        WHERE p.room_id = ?
-        ORDER BY {order_clause}
-    """, (room_id,))
-    part_rows = [dict(r) for r in c.fetchall()]
+        order_clause = "p.marks DESC, p.score DESC" if room.get("mode") == "MOCK_TEST" else "p.score DESC, p.marks DESC"
+        c.execute(f"""
+            SELECT p.*, u.username, u.avatar_id, u.avatar_image_url, u.title, u.overall_elo
+            FROM room_participants p
+            JOIN users u ON p.user_id = u.id
+            WHERE p.room_id = ?
+            ORDER BY {order_clause}
+        """, (room_id,))
+        part_rows = [dict(r) for r in c.fetchall()]
 
-    q_ids = json.loads(room["question_ids"])
-    questions_data = []
-    from backend.app.tools.question_cache import get_questions_cached_batch
-    questions_map = get_questions_cached_batch(q_ids, cursor=c)
-    for q_id in q_ids:
-        qd = questions_map.get(str(q_id))
-        if qd:
-            raw_formulas = qd.get("key_formulas")
-            try:
-                formulas = json.loads(raw_formulas) if isinstance(raw_formulas, str) else (raw_formulas or [])
-            except Exception:
-                formulas = []
-            
-            q_out = row_to_question_out(qd)
-            sol_out = QuestionSolutionOut(
-                id=qd["id"],
-                correct_answer=qd["correct_answer"],
-                solution_text=qd.get("solution_text"),
-                key_formulas=formulas,
-                common_pitfall=qd.get("common_pitfall")
+        q_ids = _safe_parse_list_or_json(room.get("question_ids"))
+        questions_data = []
+        if q_ids:
+            from backend.app.tools.question_cache import get_questions_cached_batch
+            questions_map = get_questions_cached_batch(q_ids, cursor=c)
+            for q_id in q_ids:
+                qd = questions_map.get(str(q_id))
+                if qd:
+                    try:
+                        raw_formulas = qd.get("key_formulas")
+                        try:
+                            formulas = json.loads(raw_formulas) if isinstance(raw_formulas, str) else (raw_formulas or [])
+                        except Exception:
+                            formulas = []
+                        if isinstance(formulas, list):
+                            clean_formulas = [str(f) for f in formulas if f is not None]
+                        else:
+                            clean_formulas = []
+
+                        q_out = row_to_question_out(qd)
+                        sol_out = QuestionSolutionOut(
+                            id=str(qd.get("id") or q_id),
+                            correct_answer=qd.get("correct_answer") if qd.get("correct_answer") is not None else "",
+                            solution_text=qd.get("solution_text"),
+                            key_formulas=clean_formulas,
+                            common_pitfall=qd.get("common_pitfall")
+                        )
+                        questions_data.append({
+                            "question": q_out.dict(),
+                            "solution": sol_out.dict()
+                        })
+                    except Exception as q_err:
+                        logger.warning(f"[ROOM_RESULTS] Skipping question {q_id} due to serialization note: {q_err}")
+
+        r_subjs_all = _safe_parse_list_or_json(room.get("subjects"))
+        r_chaps_all = _safe_parse_list_or_json(room.get("chapters"))
+
+        calib_factor = 1.0
+        calib_reason = "Full Syllabus Tri-Subject evaluation (100% Elo weight)"
+        try:
+            from backend.app.tools.elo_engine import calculate_chapter_calibration_factor
+            calib_factor, calib_reason = calculate_chapter_calibration_factor(
+                c, str(user.get("id") or ""), r_chaps_all, r_subjs_all
             )
-            questions_data.append({
-                "question": q_out.dict(),
-                "solution": sol_out.dict()
+        except Exception as calib_err:
+            logger.warning(f"[ROOM_RESULTS] Calibration factor note: {calib_err}")
+
+        is_full_syllabus = bool(calib_factor >= 0.99)
+
+        total_q = room.get("total_questions") or len(q_ids) or len(questions_data) or 1
+        participants_summary = []
+        for idx, p in enumerate(part_rows, start=1):
+            raw_ans = p.get("answers") or "{}"
+            try:
+                answers_dict = json.loads(raw_ans) if isinstance(raw_ans, str) else raw_ans
+            except Exception:
+                answers_dict = {}
+
+            if not isinstance(answers_dict, dict):
+                answers_dict = {}
+
+            attempted_items = [
+                v for v in answers_dict.values()
+                if isinstance(v, dict) and v.get("selected") not in ("NONE", "SKIPPED", "", None) and v.get("attempted") is not False
+            ]
+            attempted_cnt = len(attempted_items)
+            corr_cnt = sum(1 for v in attempted_items if v.get("correct"))
+            acc = round((corr_cnt / attempted_cnt) * 100, 1) if attempted_cnt > 0 else 0.0
+
+            participants_summary.append({
+                "rank": idx,
+                "user_id": str(p.get("user_id") or ""),
+                "username": p.get("username") or "Candidate",
+                "avatar_id": p.get("avatar_id") or "default",
+                "avatar_image_url": p.get("avatar_image_url"),
+                "title": p.get("title") or "JEE Aspirant",
+                "score": float(p.get("score") or 0.0),
+                "marks": float(p.get("marks") if p.get("marks") is not None else 0.0),
+                "answers": answers_dict,
+                "total_attempted": attempted_cnt,
+                "correct_count": corr_cnt,
+                "accuracy": acc,
+                "is_finished": bool(p.get("is_finished"))
             })
 
-    r_subjs_all = json.loads(room["subjects"]) if isinstance(room.get("subjects"), str) else (room.get("subjects") or [])
-    r_chaps_all = json.loads(room["chapters"]) if isinstance(room.get("chapters"), str) else (room.get("chapters") or [])
-    from backend.app.tools.elo_engine import calculate_chapter_calibration_factor
-    calib_factor, calib_reason = calculate_chapter_calibration_factor(c, user["id"], r_chaps_all, r_subjs_all)
-    is_full_syllabus = bool(calib_factor >= 0.99)
-
-    conn.close()
-
-    total_q = room.get("total_questions") or len(q_ids) or 1
-    participants_summary = []
-    for idx, p in enumerate(part_rows, start=1):
-        raw_ans = p.get("answers") or "{}"
+        return {
+            "room_code": code,
+            "mode": room.get("mode") or "MOCK_TEST",
+            "status": room.get("status") or "COMPLETED",
+            "total_questions": total_q,
+            "max_marks": float(total_q * 4),
+            "calibration_factor": calib_factor,
+            "calibration_reason": calib_reason,
+            "is_full_syllabus": is_full_syllabus,
+            "participants": participants_summary,
+            "questions": questions_data
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"[ROOM_RESULTS] Unhandled error tabulating results for room {code}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to tabulate test analysis: {str(e)}")
+    finally:
         try:
-            answers_dict = json.loads(raw_ans) if isinstance(raw_ans, str) else raw_ans
+            conn.close()
         except Exception:
-            answers_dict = {}
-
-        attempted_items = [
-            v for v in answers_dict.values()
-            if isinstance(v, dict) and v.get("selected") not in ("NONE", "SKIPPED", "", None) and v.get("attempted") is not False
-        ]
-        attempted_cnt = len(attempted_items)
-        corr_cnt = sum(1 for v in attempted_items if v.get("correct"))
-        acc = round((corr_cnt / attempted_cnt) * 100, 1) if attempted_cnt > 0 else 0.0
-
-        participants_summary.append({
-            "rank": idx,
-            "user_id": p["user_id"],
-            "username": p["username"],
-            "avatar_id": p.get("avatar_id") or "default",
-            "avatar_image_url": p.get("avatar_image_url"),
-            "title": p.get("title") or "JEE Aspirant",
-            "score": p["score"],
-            "marks": p["marks"],
-            "answers": answers_dict,
-            "total_attempted": attempted_cnt,
-            "correct_count": corr_cnt,
-            "accuracy": acc,
-            "is_finished": bool(p["is_finished"])
-        })
-
-    return {
-        "room_code": code,
-        "mode": room["mode"],
-        "status": room["status"],
-        "total_questions": total_q,
-        "max_marks": float(total_q * 4),
-        "calibration_factor": calib_factor,
-        "calibration_reason": calib_reason,
-        "is_full_syllabus": is_full_syllabus,
-        "participants": participants_summary,
-        "questions": questions_data
-    }
+            pass

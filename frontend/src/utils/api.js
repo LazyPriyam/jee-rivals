@@ -225,8 +225,27 @@ async function request(path, options = {}) {
   if (!res.ok) {
     let errorDetail = "An unexpected error occurred";
     try {
-      const data = await res.json();
-      errorDetail = data.detail || errorDetail;
+      const rawText = await res.text();
+      try {
+        const data = JSON.parse(rawText);
+        if (typeof data.detail === "string") {
+          errorDetail = data.detail;
+        } else if (Array.isArray(data.detail)) {
+          errorDetail = data.detail.map((d) => (typeof d === "string" ? d : d.msg || JSON.stringify(d))).join(", ");
+        } else if (data.detail && typeof data.detail === "object") {
+          errorDetail = data.detail.message || JSON.stringify(data.detail);
+        } else if (data.message) {
+          errorDetail = data.message;
+        } else if (data.error) {
+          errorDetail = data.error;
+        }
+      } catch (_) {
+        if (rawText && rawText.trim().length > 0 && rawText.length < 300) {
+          errorDetail = rawText.trim();
+        } else if (res.statusText) {
+          errorDetail = res.statusText;
+        }
+      }
     } catch (_) {
       errorDetail = res.statusText || errorDetail;
     }

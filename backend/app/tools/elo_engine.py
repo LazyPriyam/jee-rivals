@@ -419,8 +419,8 @@ def calculate_chapter_diminishing_factor(
       - 13-20 Custom Chapters: 0.90x (90% rating weight for Overall Elo)
       - 21+ chapters or Full Syllabus: 1.0x (100% full rating weight)
     """
-    chaps = [c.strip() for c in (chapters or []) if c and c.strip() and c.strip().lower() not in ("all", "any", "full syllabus", "*")]
-    subjs = [s.strip() for s in (subjects or []) if s and s.strip() and s.strip().lower() not in ("mixed", "full syllabus", "all", "any")]
+    chaps = [str(c).strip() for c in (chapters or []) if c and str(c).strip() and str(c).strip().lower() not in ("all", "any", "full syllabus", "*")]
+    subjs = [str(s).strip() for s in (subjects or []) if s and str(s).strip() and str(s).strip().lower() not in ("mixed", "full syllabus", "all", "any")]
 
     # True Full Syllabus: no custom chapter filter AND all 3 PCM subjects
     if not chaps:
@@ -454,7 +454,7 @@ def calculate_chapter_diminishing_factor(
     # Prior repetition dampener on those specific chapters
     from backend.app.tools.jee_syllabus import normalize_chapter_name
     norm_chaps = [normalize_chapter_name(c) for c in chaps if normalize_chapter_name(c)]
-    all_query_chaps = list(set(norm_chaps + chaps))
+    all_query_chaps = [str(c).strip() for c in set(norm_chaps + chaps) if c and str(c).strip()]
 
     # Fast in-memory cache check (avoids repeating unindexed COUNT(*) over activity_log)
     calib_cache_key = (str(user_id), ",".join(sorted(all_query_chaps)))
