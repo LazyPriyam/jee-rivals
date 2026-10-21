@@ -59,96 +59,21 @@ def calculate_growth_triad(
     # -------------------------------------------------------------
     # 1. CHAPTER KNOWLEDGE CALCULATION (0 - 100) FROM ACTUAL MASTERY
     # -------------------------------------------------------------
-    from backend.app.tools.jee_syllabus import normalize_chapter_name
+    from backend.app.tools.jee_syllabus import get_unified_chapter_metrics
 
-    ch_raw = user.get("chapter_stats") or "{}"
-    try:
-        ch_stats = json.loads(ch_raw) if isinstance(ch_raw, str) else ch_raw
-        if not isinstance(ch_stats, dict):
-            ch_stats = {}
-    except Exception:
-        ch_stats = {}
-
-    chapter_mastery: Dict[str, Dict[str, Any]] = {}
-
-    # A. Official persistent 92-chapter mastery records from user_chapter_elo
-    if cursor and user_id:
-        try:
-            cursor.execute("""
-                SELECT chapter, elo, attempts, correct
-                FROM user_chapter_elo
-                WHERE user_id = ? AND attempts > 0
-            """, (user_id,))
-            for r in cursor.fetchall():
-                ch_norm = normalize_chapter_name(r["chapter"])
-                if ch_norm:
-                    chapter_mastery[ch_norm] = {
-                        "elo": float(r["elo"] or 1200.0),
-                        "attempts": int(r["attempts"] or 0),
-                        "correct": int(r["correct"] or 0)
-                    }
-        except Exception as e:
-            logger.warning(f"Error querying user_chapter_elo in triad: {e}")
-
-    # B. Query activity_log for any attempted questions across duels, mocks, or practice
-    if cursor and user_id:
-        try:
-            cursor.execute("""
-                SELECT chapter, COUNT(*) as att, SUM(CASE WHEN is_correct = 1 THEN 1 ELSE 0 END) as corr
-                FROM activity_log
-                WHERE user_id = ?
-                GROUP BY chapter
-            """, (user_id,))
-            for r in cursor.fetchall():
-                ch_norm = normalize_chapter_name(r[0])
-                if ch_norm and ch_norm not in chapter_mastery:
-                    chapter_mastery[ch_norm] = {
-                        "elo": 1200.0,
-                        "attempts": int(r[1] or 0),
-                        "correct": int(r[2] or 0)
-                    }
-        except Exception:
-            pass
-
-    # C. Query user chapter_stats for legacy attempts
-    for ch_raw_name, stat in ch_stats.items():
-        if isinstance(stat, dict) and stat.get("attempts", 0) > 0:
-            ch_norm = normalize_chapter_name(ch_raw_name)
-            if ch_norm and ch_norm not in chapter_mastery:
-                chapter_mastery[ch_norm] = {
-                    "elo": float(stat.get("elo") or 1200.0),
-                    "attempts": int(stat.get("attempts", 0)),
-                    "correct": int(stat.get("correct", 0))
-                }
-
-    # Evaluate breadth and mastery depth strictly from tested chapters
-    active_set = set()
-    mastered_count = 0     # 1800+ Elo
-    proficient_count = 0   # 1500-1799 Elo
-    emerging_count = 0     # 1300-1499 Elo
-    critical_count = 0     # <1300 Elo
-
-    for ch_name, data in chapter_mastery.items():
-        if data["attempts"] > 0:
-            active_set.add(ch_name)
-            elo = data["elo"]
-            if elo >= 1800.0:
-                mastered_count += 1
-            elif elo >= 1500.0:
-                proficient_count += 1
-            elif elo >= 1300.0:
-                emerging_count += 1
-            else:
-                critical_count += 1
-
-    active_chapters_count = len(active_set)
-    breadth_pct = round((active_chapters_count / float(TOTAL_SYLLABUS_CHAPTERS)) * 100.0, 1)
+    ch_metrics = get_unified_chapter_metrics(cursor=cursor, user_id=user_id, user_dict=user)
+    active_chapters_count = ch_metrics.get("tested_chapters_count", 0)
+    mastered_count = ch_metrics.get("mastered_count", 0)
+    proficient_count = ch_metrics.get("proficient_count", 0)
+    practicing_count = ch_metrics.get("practicing_count", 0)
+    critical_count = ch_metrics.get("critical_count", 0)
+    breadth_pct = ch_metrics.get("coverage_percent", 0.0)
 
     # Depth & quality of mastery across the syllabus
     # 25 mastered/proficient chapters represents top 1% national JEE readiness
     depth_score = min(
         100.0,
-        ((mastered_count * 1.0 + proficient_count * 0.75 + emerging_count * 0.45 + critical_count * 0.15) / 25.0) * 100.0
+        ((mastered_count * 1.0 + proficient_count * 0.75 + practicing_count * 0.45 + critical_count * 0.15) / 25.0) * 100.0
     )
 
     # Chapter Knowledge: 55% Syllabus Breadth + 45% Tested Mastery Depth

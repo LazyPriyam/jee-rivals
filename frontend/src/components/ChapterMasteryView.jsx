@@ -38,28 +38,42 @@ const TIER_COLORS = {
     border: 'border-emerald-500/40',
     text: 'text-emerald-400',
     badge: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40',
-    label: 'Mastered (1800+)'
+    label: 'Mastered'
   },
   PROFICIENT: {
     bg: 'bg-blue-950/50',
     border: 'border-blue-500/40',
     text: 'text-blue-400',
     badge: 'bg-blue-500/20 text-blue-300 border-blue-500/40',
-    label: 'Proficient (1500-1799)'
+    label: 'Proficient'
+  },
+  PRACTICING: {
+    bg: 'bg-amber-950/50',
+    border: 'border-amber-500/40',
+    text: 'text-amber-400',
+    badge: 'bg-amber-500/20 text-amber-300 border-amber-500/40',
+    label: 'Practicing'
   },
   EMERGING: {
     bg: 'bg-amber-950/50',
     border: 'border-amber-500/40',
     text: 'text-amber-400',
     badge: 'bg-amber-500/20 text-amber-300 border-amber-500/40',
-    label: 'Emerging (1300-1499)'
+    label: 'Practicing'
   },
   CRITICAL: {
     bg: 'bg-red-950/50',
     border: 'border-red-500/40',
     text: 'text-red-400',
     badge: 'bg-red-500/20 text-red-300 border-red-500/40',
-    label: 'Critical (<1300)'
+    label: 'Critical Trap'
+  },
+  UNTESTED: {
+    bg: 'bg-slate-900/50',
+    border: 'border-slate-700/40',
+    text: 'text-slate-400',
+    badge: 'bg-slate-800 text-slate-400 border-slate-700',
+    label: 'Untested (0 Qs)'
   }
 };
 
@@ -214,7 +228,13 @@ export default function ChapterMasteryView({
   // Filter chapters list
   const filteredChapters = (chaptersData?.chapters || []).filter((ch) => {
     if (subjectFilter !== 'ALL' && ch.subject.toUpperCase() !== subjectFilter) return false;
-    if (tierFilter !== 'ALL' && ch.mastery_tier !== tierFilter) return false;
+    if (tierFilter !== 'ALL') {
+      if (tierFilter === 'PRACTICING' && (ch.mastery_tier === 'PRACTICING' || ch.mastery_tier === 'EMERGING')) {
+        // match
+      } else if (ch.mastery_tier !== tierFilter) {
+        return false;
+      }
+    }
     if (weightageFilter !== 'ALL' && ch.weightage !== weightageFilter) return false;
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
@@ -473,8 +493,9 @@ export default function ChapterMasteryView({
                 <option value="ALL">All Quadrants</option>
                 <option value="MASTERED">Mastered</option>
                 <option value="PROFICIENT">Proficient</option>
-                <option value="EMERGING">Emerging</option>
-                <option value="CRITICAL">Critical</option>
+                <option value="PRACTICING">Practicing</option>
+                <option value="CRITICAL">Critical Trap</option>
+                <option value="UNTESTED">Untested (0 Qs)</option>
               </select>
 
               <select

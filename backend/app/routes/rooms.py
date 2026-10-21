@@ -540,6 +540,72 @@ def get_room_details(code: str, user: dict = Depends(get_current_user)):
     return get_room_state(code.strip().upper(), user)
 
 
+@router.delete("/{code}")
+def delete_test_room(code: str, user: dict = Depends(get_current_user)):
+    """
+    Permanently deletes a completed, abandoned, or old test room record for the calling user.
+    - If user is sole participant or creator: removes room & participants entirely.
+    - If multi-participant battle: wipes user's participation from the test.
+    - Clears mock history caches so AIR engine re-calibrates immediately.
+    """
+    code_norm = code.strip().upper()
+    conn = get_connection()
+    c = conn.cursor()
+    try:
+        c.execute("SELECT id, host_id, code FROM rooms WHERE code = ? COLLATE NOCASE", (code_norm,))
+        room = c.fetchone()
+        if not room:
+            raise HTTPException(status_code=404, detail=f"Room #{code_norm} not found.")
+
+        room_id = room["id"]
+        user_id = str(user["id"])
+
+        # Check if user is participant or host
+        c.execute("SELECT user_id FROM room_participants WHERE room_id = ? AND user_id = ?", (room_id, user_id))
+        part = c.fetchone()
+
+        if not part and str(room["host_id"]) != user_id:
+            raise HTTPException(status_code=403, detail="You do not have permission to delete this test paper.")
+
+        # Delete user's participation record
+        c.execute("DELETE FROM room_participants WHERE room_id = ? AND user_id = ?", (room_id, user_id))
+
+        # Check remaining participants
+        c.execute("SELECT COUNT(*) as cnt FROM room_participants WHERE room_id = ?", (room_id,))
+        cnt_row = c.fetchone()
+        rem_count = cnt_row["cnt"] if cnt_row else 0
+
+        # If no participants left or host requested delete on a solo mock, wipe the room
+        if rem_count == 0 or str(room["host_id"]) == user_id:
+            c.execute("DELETE FROM room_participants WHERE room_id = ?", (room_id,))
+            c.execute("DELETE FROM rooms WHERE id = ?", (room_id,))
+
+        conn.commit()
+    finally:
+        conn.close()
+
+    # Invalidate relevant caches
+    try:
+        from backend.app.tools.air_engine import invalidate_user_mock_history_cache
+        invalidate_user_mock_history_cache(user["id"])
+    except Exception:
+        pass
+
+    try:
+        from backend.app.tools.jee_syllabus import invalidate_unified_chapter_cache
+        invalidate_unified_chapter_cache(user["id"])
+    except Exception:
+        pass
+
+    invalidate_user_cache(user["id"])
+
+    return {
+        "status": "success",
+        "message": f"Test #{code_norm} removed from records.",
+        "code": code_norm
+    }
+
+
 def get_room_state(code: str, user: dict) -> RoomState:
     conn = get_connection()
     c = conn.cursor()

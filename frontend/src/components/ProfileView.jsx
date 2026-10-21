@@ -594,7 +594,8 @@ export default function ProfileView({
     mocks_count: p.full_mocks_count || 0,
     confidence_label: p.air_confidence_label || 'Awaiting Full Mock',
     admissibility: p.college_admissibility || [],
-    bottlenecks: p.air_bottlenecks || []
+    bottlenecks: p.air_bottlenecks || [],
+    considered_mocks: p.air_meta?.jee_main?.considered_mocks || p.air_meta?.considered_mocks || []
   };
 
   const advDossier = p.jee_advanced_dossier || p.air_meta?.jee_advanced || {
@@ -610,7 +611,8 @@ export default function ProfileView({
     mocks_count: 0,
     confidence_label: 'Awaiting Advanced Mock',
     admissibility: [],
-    bottlenecks: []
+    bottlenecks: [],
+    considered_mocks: p.air_meta?.jee_advanced?.considered_mocks || []
   };
 
   const theme = BANNER_THEMES[p.banner_theme] || BANNER_THEMES.orange_cyber;
@@ -1707,6 +1709,91 @@ export default function ProfileView({
                     </div>
                   </div>
                 )}
+
+                {/* Considered Mock Tests Section */}
+                {mainDossier?.considered_mocks && mainDossier.considered_mocks.length > 0 && (
+                  <div className="bg-[#111520] border border-orange-500/25 rounded-2xl p-5 space-y-3.5">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <BookOpen className="w-4 h-4 text-orange-400" />
+                        <h4 className="text-xs uppercase font-extrabold tracking-wider text-slate-200">
+                          Considered Mock Examinations ({mainDossier.considered_mocks.length})
+                        </h4>
+                      </div>
+                      <span className="text-[10px] text-orange-400 bg-orange-950/80 border border-orange-500/30 px-2 py-0.5 rounded-full font-mono font-bold">
+                        AIR Calibration Cohort
+                      </span>
+                    </div>
+
+                    <p className="text-[11px] text-slate-400 leading-relaxed">
+                      Your official All India Rank and NTA percentile models calibrate exclusively on these completed CBT mock tests, applying dynamic recency-decay weighting (50% latest, 30% prior, 20% older).
+                    </p>
+
+                    <div className="space-y-2.5">
+                      {mainDossier.considered_mocks.map((m, idx) => (
+                        <div
+                          key={m.code || idx}
+                          className="bg-[#161a26] border border-white/5 hover:border-orange-500/40 rounded-xl p-3.5 transition flex flex-col sm:flex-row sm:items-center justify-between gap-3 group"
+                        >
+                          <div className="space-y-1">
+                            <div className="flex items-center gap-2">
+                              <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded bg-orange-500/15 text-orange-400 border border-orange-500/30">
+                                Mock #{idx + 1}
+                              </span>
+                              <span className="text-[10px] font-mono text-slate-300 font-bold">
+                                Room #{m.code}
+                              </span>
+                              <span className="text-[10px] font-mono text-slate-500">
+                                • {formatIST(m.date, { fallback: 'Recent' })}
+                              </span>
+                            </div>
+                            <h5 className="text-xs font-bold text-white group-hover:text-orange-300 transition">
+                              {m.preset_name}
+                            </h5>
+                            <div className="flex flex-wrap items-center gap-3 text-[10px] font-mono text-slate-400">
+                              <span>
+                                Scope: <strong className="text-slate-200">{m.is_full_syllabus ? 'Full Syllabus' : `~${Math.round((m.coverage_ratio || 0) * 100)}% Syllabus`}</strong>
+                              </span>
+                              <span>•</span>
+                              <span>
+                                Accuracy: <strong className={(m.accuracy || 0) >= 70 ? 'text-emerald-400' : 'text-amber-400'}>{m.accuracy || 0}%</strong>
+                              </span>
+                              <span>•</span>
+                              <span>
+                                Scaled 300: <strong className="text-orange-400">{m.norm_marks_300}/300 M ({m.norm_pct}%)</strong>
+                              </span>
+                            </div>
+                          </div>
+
+                          <div className="flex items-center gap-3 self-end sm:self-center shrink-0">
+                            <div className="text-right font-mono">
+                              <span className="text-sm font-black text-white block">
+                                {(m.marks || 0) >= 0 ? '+' : ''}{m.marks} / {m.max_marks || 300}
+                              </span>
+                              <span className="text-[10px] text-slate-400">
+                                {m.norm_pct}% score
+                              </span>
+                            </div>
+                            {onSelectTest && (
+                              <button
+                                type="button"
+                                onMouseEnter={() => api.rooms.results(m.code).catch(() => {})}
+                                onClick={() => {
+                                  sound.click();
+                                  onSelectTest(m.code, p.username);
+                                }}
+                                className="px-3 py-1.5 rounded-lg bg-orange-500/15 hover:bg-orange-500 text-orange-400 hover:text-white border border-orange-500/30 font-mono text-[11px] font-bold transition flex items-center gap-1 cursor-pointer"
+                              >
+                                <span>Analysis</span>
+                                <ChevronRight className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             )}
 
@@ -2016,6 +2103,94 @@ export default function ProfileView({
                         <div key={i} className="flex items-start gap-2">
                           <span className="text-purple-400 shrink-0 font-bold">•</span>
                           <span>{b}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Considered Advanced Mock Tests Section */}
+                {advDossier?.considered_mocks && advDossier.considered_mocks.length > 0 && (
+                  <div className="bg-[#111520] border border-purple-500/20 rounded-2xl p-5 space-y-3.5">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <BookOpen className="w-4 h-4 text-purple-400" />
+                        <h4 className="text-xs uppercase font-extrabold tracking-wider text-slate-200">
+                          Considered JEE Advanced Mock Tests ({advDossier.considered_mocks.length})
+                        </h4>
+                      </div>
+                      <span className="text-[10px] text-purple-300 bg-purple-950/80 border border-purple-500/30 px-2 py-0.5 rounded-full font-mono font-bold">
+                        CRL Calibration Cohort
+                      </span>
+                    </div>
+
+                    <p className="text-[11px] text-slate-400 leading-relaxed">
+                      Historical Common Rank List (CRL) benchmarked strictly on completed JEE Advanced mock papers. Evaluates aggregate score percentage against IIT qualifying cutoffs and verifies minimum 10% thresholds in Physics, Chemistry, and Math.
+                    </p>
+
+                    <div className="space-y-2.5">
+                      {advDossier.considered_mocks.map((m, idx) => (
+                        <div
+                          key={m.code || idx}
+                          className="bg-[#161a26] border border-white/5 hover:border-purple-500/40 rounded-xl p-3.5 transition flex flex-col sm:flex-row sm:items-center justify-between gap-3 group"
+                        >
+                          <div className="space-y-1">
+                            <div className="flex items-center gap-2">
+                              <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded bg-purple-500/15 text-purple-400 border border-purple-500/30">
+                                Adv Mock #{idx + 1}
+                              </span>
+                              <span className="text-[10px] font-mono text-slate-300 font-bold">
+                                Room #{m.code}
+                              </span>
+                              <span className="text-[10px] font-mono text-slate-500">
+                                • {formatIST(m.date, { fallback: 'Recent' })}
+                              </span>
+                            </div>
+                            <h5 className="text-xs font-bold text-white group-hover:text-purple-300 transition">
+                              {m.preset_name}
+                            </h5>
+                            <div className="flex flex-wrap items-center gap-3 text-[10px] font-mono text-slate-400">
+                              <span>
+                                PCM Minimums:{' '}
+                                <strong className={m.all_subject_cutoffs_cleared ? 'text-emerald-400' : 'text-rose-400'}>
+                                  {m.all_subject_cutoffs_cleared ? 'All Cleared (P,C,M >= 10%)' : `Cutoff Failed in ${m.failing_subjects?.join(', ') || 'Subjects'}`}
+                                </strong>
+                              </span>
+                              <span>•</span>
+                              <span>
+                                Accuracy: <strong className="text-slate-200">{m.accuracy || 0}%</strong>
+                              </span>
+                              <span>•</span>
+                              <span>
+                                Scaled 360: <strong className="text-purple-400">{m.norm_marks_360}/360 M ({m.norm_pct}%)</strong>
+                              </span>
+                            </div>
+                          </div>
+
+                          <div className="flex items-center gap-3 self-end sm:self-center shrink-0">
+                            <div className="text-right font-mono">
+                              <span className="text-sm font-black text-white block">
+                                {(m.marks || 0) >= 0 ? '+' : ''}{m.marks} / {m.max_marks || 360}
+                              </span>
+                              <span className="text-[10px] text-slate-400">
+                                {m.norm_pct}% score
+                              </span>
+                            </div>
+                            {onSelectTest && (
+                              <button
+                                type="button"
+                                onMouseEnter={() => api.rooms.results(m.code).catch(() => {})}
+                                onClick={() => {
+                                  sound.click();
+                                  onSelectTest(m.code, p.username);
+                                }}
+                                className="px-3 py-1.5 rounded-lg bg-purple-500/15 hover:bg-purple-500 text-purple-300 hover:text-white border border-purple-500/30 font-mono text-[11px] font-bold transition flex items-center gap-1 cursor-pointer"
+                              >
+                                <span>Analysis</span>
+                                <ChevronRight className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+                          </div>
                         </div>
                       ))}
                     </div>

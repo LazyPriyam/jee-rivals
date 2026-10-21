@@ -449,6 +449,15 @@ export const api = {
         method: "POST",
         body: JSON.stringify({ chapters, subjects, pinned_recent_chapters }),
       }),
+    delete: async (code) => {
+      const cleanCode = (code || "").trim().toUpperCase();
+      try {
+        sessionStorage.removeItem(`jee_cached_results_${cleanCode}`);
+      } catch (_) {}
+      return request(`/api/rooms/${cleanCode}`, {
+        method: "DELETE",
+      });
+    },
     forfeit: (code) =>
       request(`/api/rooms/${code}/forfeit`, {
         method: "POST",
@@ -603,7 +612,26 @@ export const api = {
       }),
   },
   mastery: {
-    getChapters: () => request('/api/mastery/chapters'),
+    getChapters: async () => {
+      const cacheKey = "jee_cached_mastery_chapters";
+      try {
+        const stored = sessionStorage.getItem(cacheKey);
+        if (stored) {
+          const parsed = JSON.parse(stored);
+          if (parsed && Array.isArray(parsed.chapters) && parsed.chapters.length > 0) {
+            request('/api/mastery/chapters')
+              .then((fresh) => {
+                try { sessionStorage.setItem(cacheKey, JSON.stringify(fresh)); } catch (_) {}
+              })
+              .catch(() => {});
+            return parsed;
+          }
+        }
+      } catch (_) {}
+      const res = await request('/api/mastery/chapters');
+      try { sessionStorage.setItem(cacheKey, JSON.stringify(res)); } catch (_) {}
+      return res;
+    },
     getRadar: () => request('/api/mastery/radar'),
     getGraveyard: () => request('/api/mastery/graveyard'),
     toggleBookmark: (questionId, notes = '') =>

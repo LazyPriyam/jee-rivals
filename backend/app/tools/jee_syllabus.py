@@ -464,11 +464,21 @@ def calculate_mastery_tier(total_attempts: int, correct: int, avg_time: float = 
     }
 
 
-def build_user_skill_tree(activity_rows: List[Dict[str, Any]], chapter_question_counts: Optional[Dict[str, int]] = None) -> Dict[str, Any]:
+def build_user_skill_tree(
+    activity_rows: List[Dict[str, Any]],
+    chapter_question_counts: Optional[Dict[str, int]] = None,
+    unified_metrics: Optional[Dict[str, Any]] = None
+) -> Dict[str, Any]:
     """
     Build structured skill tree with computed mastery for Physics, Chemistry, and Mathematics,
     incorporating live question counts available in the question bank.
+    When unified_metrics is provided, synchronizes 100% with the authoritative chapter engine.
     """
+    unified_map = {}
+    if unified_metrics and "chapters" in unified_metrics:
+        for ch in unified_metrics["chapters"]:
+            unified_map[ch["chapter"].lower()] = ch
+
     stats_map = {}
     for row in activity_rows:
         subj = row.get("subject", "")
@@ -499,11 +509,23 @@ def build_user_skill_tree(activity_rows: List[Dict[str, Any]], chapter_question_
             }
             for chap_name in u["chapters"]:
                 total_chapters += 1
-                key = f"{subject}::{chap_name}"
-                stat = stats_map.get(key, {"attempts": 0, "correct": 0, "total_time": 0.0})
-                avg_time = (stat["total_time"] / stat["attempts"]) if stat["attempts"] > 0 else 0.0
-                mastery = calculate_mastery_tier(stat["attempts"], stat["correct"], avg_time)
-                if mastery["tier_level"] >= 3:
+                norm_chap = normalize_chapter_name(chap_name)
+                u_item = unified_map.get(norm_chap.lower()) or unified_map.get(chap_name.lower())
+
+                if u_item:
+                    attempts = u_item["attempts"]
+                    correct = u_item["correct"]
+                    avg_time = u_item.get("avg_time_seconds") or 0.0
+                    mastery = calculate_mastery_tier(attempts, correct, avg_time)
+                    mastery["elo"] = u_item["elo"]
+                    mastery["mastery_tier"] = u_item["mastery_tier"]
+                else:
+                    key = f"{subject}::{chap_name}"
+                    stat = stats_map.get(key, {"attempts": 0, "correct": 0, "total_time": 0.0})
+                    avg_time = (stat["total_time"] / stat["attempts"]) if stat["attempts"] > 0 else 0.0
+                    mastery = calculate_mastery_tier(stat["attempts"], stat["correct"], avg_time)
+
+                if mastery.get("tier_level", 0) >= 2 or mastery.get("mastery_tier") in ("MASTERED", "PROFICIENT"):
                     total_mastered += 1
 
                 q_count = (chapter_question_counts or {}).get(chap_name, 0)
@@ -518,11 +540,18 @@ def build_user_skill_tree(activity_rows: List[Dict[str, Any]], chapter_question_
 
             result_tree[subject].append(unit_obj)
 
+    if unified_metrics:
+        total_chapters = unified_metrics.get("total_chapters", total_chapters)
+        total_mastered = unified_metrics.get("mastered_count", 0) + unified_metrics.get("proficient_count", 0)
+        mastery_percentage = unified_metrics.get("coverage_percent", 0.0)
+    else:
+        mastery_percentage = round((total_mastered / total_chapters) * 100, 1) if total_chapters > 0 else 0.0
+
     return {
         "tree": result_tree,
         "total_chapters": total_chapters,
         "total_mastered": total_mastered,
-        "mastery_percentage": round((total_mastered / total_chapters) * 100, 1) if total_chapters > 0 else 0.0
+        "mastery_percentage": mastery_percentage
     }
 
 
@@ -702,4 +731,336 @@ def distribute_weighted_counts(total: int, chapter_weights: Dict[str, float]) ->
             floors[scored[i]] += 1
 
     return floors
+
+
+# =========================================================================
+# AUTHORITATIVE UNIFIED CHAPTER PROGRESSION & PROFICIENCY ENGINE
+# =========================================================================
+
+HIGH_YIELD_CHAPTERS_SET = {
+    # Physics
+    "Rotational Dynamics", "Work, Energy and Power", "Newton's Laws of Motion & Friction",
+    "Electrostatics", "Current Electricity", "Magnetic Effects of Current",
+    "Electromagnetic Induction", "Geometrical Optics", "Wave Optics",
+    "Dual Nature of Radiation and Matter", "Atomic Physics", "Nuclear Physics",
+    "Kinetic Theory of Gases & Thermodynamics", "Simple Harmonic Motion", "Gravitation",
+    # Chemistry
+    "Chemical Bonding and Molecular Structure", "Coordination Compounds",
+    "Chemical Thermodynamics & Thermochemistry", "Solutions and Colligative Properties",
+    "Chemical Kinetics", "General Organic Chemistry & IUPAC Nomenclature",
+    "Aldehydes, Ketones and Carboxylic Acids", "Hydrocarbons (Alkanes, Alkenes, Alkynes)",
+    "Some Basic Concepts of Chemistry (Mole Concept)", "Electrochemistry",
+    "d and f-Block Elements", "p-Block Elements (Group 13 & 14)",
+    # Mathematics
+    "Definite Integration and Area Under Curves", "Indefinite Integration",
+    "Limits, Continuity and Differentiability", "Differentiation and Applications of Derivatives",
+    "Vector Algebra", "Three Dimensional Geometry",
+    "Matrices and Determinants", "Complex Numbers and Quadratic Equations",
+    "Straight Lines and Pair of Straight Lines", "Circles", "Parabola", "Ellipse",
+    "Probability", "Sequences and Series", "Mathematical Induction & Binomial Theorem"
+}
+
+MEDIUM_YIELD_CHAPTERS_SET = {
+    # Physics
+    "Kinematics 1D & 2D", "Fluid Mechanics", "Center of Mass and Collisions",
+    "Alternating Current", "Semiconductor Electronics", "Heat Transfer",
+    "Units and Dimensions", "Elasticity and Viscosity", "Electromagnetic Waves",
+    # Chemistry
+    "Structure of Atom", "Chemical Equilibrium", "Ionic Equilibrium",
+    "Haloalkanes and Haloarenes", "Alcohols, Phenols and Ethers",
+    "Amines and Nitrogen Containing Compounds", "Biomolecules",
+    "Classification of Elements & Periodicity", "Redox Reactions",
+    # Mathematics
+    "Permutations and Combinations", "Hyperbola", "Differential Equations",
+    "Sets, Relations and Functions", "Inverse Trigonometric Functions",
+    "Statistics", "Trigonometric Equations"
+}
+
+_UNIFIED_CHAPTER_CACHE: Dict[Tuple[str, Any], Tuple[float, Dict[str, Any]]] = {}
+
+def invalidate_unified_chapter_cache(user_id: Optional[str] = None):
+    """Clears cached unified chapter metrics for a specific user or all users."""
+    global _UNIFIED_CHAPTER_CACHE
+    if user_id:
+        uid = str(user_id)
+        for k in list(_UNIFIED_CHAPTER_CACHE.keys()):
+            if k[0] == uid:
+                _UNIFIED_CHAPTER_CACHE.pop(k, None)
+    else:
+        _UNIFIED_CHAPTER_CACHE.clear()
+
+def get_unified_chapter_metrics(
+    cursor=None,
+    user_id: Optional[str] = None,
+    user_dict: Optional[dict] = None
+) -> Dict[str, Any]:
+    """
+    Authoritative single-point-of-truth calculation for chapter metrics across all 92 canonical chapters.
+    Eliminates discrepancies between profile, mastery, growth triad, and practice modules.
+
+    Evaluates chapters strictly from questions solved, accuracy, and Elo:
+      - MASTERED: >= 10 solved and >= 70% accuracy, or Elo >= 1800
+      - PROFICIENT: >= 5 solved and >= 50% accuracy, or Elo >= 1500
+      - PRACTICING: 1 to 4 solved (or >= 5 with emerging accuracy)
+      - CRITICAL: >= 5 solved and < 40% accuracy and Elo < 1300
+      - UNTESTED: 0 solved
+    """
+    import json
+    import time
+    from backend.app.database import get_connection
+
+    if not user_id:
+        total_canonical = len(ALL_CANONICAL_CHAPTERS)
+        by_subj_default = {
+            "Physics": {"total": 34, "tested": 0, "mastered": 0, "proficient": 0, "practicing": 0, "critical": 0, "untested": 34, "coverage_percent": 0.0},
+            "Chemistry": {"total": 33, "tested": 0, "mastered": 0, "proficient": 0, "practicing": 0, "critical": 0, "untested": 33, "coverage_percent": 0.0},
+            "Mathematics": {"total": 25, "tested": 0, "mastered": 0, "proficient": 0, "practicing": 0, "critical": 0, "untested": 25, "coverage_percent": 0.0}
+        }
+        return {
+            "total_chapters": total_canonical,
+            "tested_chapters_count": 0,
+            "mastered_count": 0,
+            "proficient_count": 0,
+            "practicing_count": 0,
+            "critical_count": 0,
+            "untested_count": total_canonical,
+            "coverage_ratio": 0.0,
+            "coverage_percent": 0.0,
+            "active_chapters": [],
+            "proficient_or_mastered_chapters": [],
+            "tier_summary": {"MASTERED": 0, "PROFICIENT": 0, "PRACTICING": 0, "CRITICAL": 0, "UNTESTED": total_canonical},
+            "by_subject": by_subj_default,
+            "chapters": []
+        }
+
+    uid_str = str(user_id)
+    now_t = time.time()
+    state_sig = (
+        user_dict.get("total_solved") if user_dict else None,
+        user_dict.get("overall_elo") if user_dict else None
+    )
+    cache_key = (uid_str, state_sig)
+    cached = _UNIFIED_CHAPTER_CACHE.get(cache_key)
+    if cached and (now_t - cached[0] < 60.0):
+        return cached[1]
+
+    conn = None
+    close_conn = False
+    if cursor is None:
+        conn = get_connection()
+        c = conn.cursor()
+        close_conn = True
+    else:
+        c = cursor
+
+    try:
+        # 1. Fetch user_chapter_elo records
+        c.execute("""
+            SELECT chapter, subject, elo, attempts, correct, last_updated
+            FROM user_chapter_elo
+            WHERE user_id = ?
+        """, (user_id,))
+        elo_rows = [dict(r) for r in c.fetchall()]
+
+        # 2. Fetch activity_log aggregated metrics
+        c.execute("""
+            SELECT chapter, subject,
+                   COUNT(*) as att,
+                   SUM(CASE WHEN is_correct = 1 THEN 1 ELSE 0 END) as corr,
+                   AVG(CASE WHEN time_spent_seconds > 0 THEN time_spent_seconds ELSE NULL END) as avg_time
+            FROM activity_log
+            WHERE user_id = ? AND chapter IS NOT NULL AND TRIM(chapter) != ''
+            GROUP BY chapter
+        """, (user_id,))
+        act_rows = [dict(r) for r in c.fetchall()]
+
+        # 3. Legacy chapter_stats from user_dict or DB
+        raw_cstats = None
+        if user_dict is not None and "chapter_stats" in user_dict:
+            raw_cstats = user_dict.get("chapter_stats")
+        else:
+            c.execute("SELECT chapter_stats FROM users WHERE id = ?", (user_id,))
+            u_row = c.fetchone()
+            if u_row:
+                raw_cstats = u_row["chapter_stats"]
+
+        legacy_map = {}
+        if raw_cstats:
+            try:
+                parsed_cstats = json.loads(raw_cstats) if isinstance(raw_cstats, str) else raw_cstats
+                if isinstance(parsed_cstats, dict):
+                    legacy_map = parsed_cstats
+            except Exception:
+                pass
+
+    finally:
+        if close_conn and conn:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+    # Normalize and merge data sources
+    elo_map: Dict[str, dict] = {}
+    for r in elo_rows:
+        norm = normalize_chapter_name(r.get("chapter") or "")
+        if norm:
+            elo_map[norm] = r
+
+    act_map: Dict[str, dict] = {}
+    for r in act_rows:
+        norm = normalize_chapter_name(r.get("chapter") or "")
+        if norm:
+            act_map[norm] = r
+
+    IDEAL_PACE_MAP = {
+        "Chemistry": 70,
+        "Physics": 120,
+        "Mathematics": 170
+    }
+
+    chapters_out = []
+    tier_summary = {
+        "MASTERED": 0,
+        "PROFICIENT": 0,
+        "PRACTICING": 0,
+        "CRITICAL": 0,
+        "UNTESTED": 0
+    }
+    by_subject = {
+        "Physics": {"total": 0, "tested": 0, "mastered": 0, "proficient": 0, "practicing": 0, "critical": 0, "untested": 0, "coverage_percent": 0.0},
+        "Chemistry": {"total": 0, "tested": 0, "mastered": 0, "proficient": 0, "practicing": 0, "critical": 0, "untested": 0, "coverage_percent": 0.0},
+        "Mathematics": {"total": 0, "tested": 0, "mastered": 0, "proficient": 0, "practicing": 0, "critical": 0, "untested": 0, "coverage_percent": 0.0}
+    }
+
+    active_chapters_list = []
+    proficient_or_mastered = []
+
+    for subject, units in JEE_SYLLABUS.items():
+        for unit_item in units:
+            unit_name = unit_item["unit"]
+            for ch in unit_item["chapters"]:
+                norm_ch = normalize_chapter_name(ch)
+
+                rec_elo = elo_map.get(norm_ch) or elo_map.get(ch)
+                rec_act = act_map.get(norm_ch) or act_map.get(ch)
+                rec_leg = legacy_map.get(norm_ch) or legacy_map.get(ch)
+
+                # Consolidate attempts and correct count across sources
+                att_elo = int(rec_elo.get("attempts") or 0) if rec_elo else 0
+                att_act = int(rec_act.get("att") or 0) if rec_act else 0
+                att_leg = int(rec_leg.get("attempts") or 0) if isinstance(rec_leg, dict) else (int(rec_leg) if isinstance(rec_leg, (int, float)) else 0)
+                attempts = max(att_elo, att_act, att_leg)
+
+                corr_elo = int(rec_elo.get("correct") or 0) if rec_elo else 0
+                corr_act = int(rec_act.get("corr") or 0) if rec_act else 0
+                corr_leg = int(rec_leg.get("correct") or 0) if isinstance(rec_leg, dict) else 0
+                correct = max(corr_elo, corr_act, corr_leg)
+
+                if attempts > 0 and correct > attempts:
+                    correct = attempts
+
+                acc = round((correct / attempts * 100.0), 1) if attempts > 0 else 0.0
+
+                if rec_elo and rec_elo.get("elo"):
+                    elo_val = float(rec_elo["elo"])
+                elif rec_leg and isinstance(rec_leg, dict) and rec_leg.get("elo"):
+                    elo_val = float(rec_leg["elo"])
+                else:
+                    elo_val = 1200.0
+
+                last_upd = (rec_elo.get("last_updated") if rec_elo else None)
+
+                # Determine Proficiency Tier strictly from questions solved & performance
+                if attempts == 0:
+                    tier = "UNTESTED"
+                elif (attempts >= 10 and acc >= 70.0) or elo_val >= 1800.0:
+                    tier = "MASTERED"
+                elif (attempts >= 5 and acc >= 50.0) or elo_val >= 1500.0:
+                    tier = "PROFICIENT"
+                elif attempts >= 5 and acc < 40.0 and elo_val < 1300.0:
+                    tier = "CRITICAL"
+                else:
+                    tier = "PRACTICING"
+
+                tier_summary[tier] += 1
+
+                # Subject-wise tracking
+                subj_group = by_subject.get(subject)
+                if subj_group:
+                    subj_group["total"] += 1
+                    if attempts > 0:
+                        subj_group["tested"] += 1
+                    if tier == "MASTERED": subj_group["mastered"] += 1
+                    elif tier == "PROFICIENT": subj_group["proficient"] += 1
+                    elif tier == "PRACTICING": subj_group["practicing"] += 1
+                    elif tier == "CRITICAL": subj_group["critical"] += 1
+                    elif tier == "UNTESTED": subj_group["untested"] += 1
+
+                if attempts > 0:
+                    active_chapters_list.append(norm_ch)
+
+                if tier in ("MASTERED", "PROFICIENT"):
+                    proficient_or_mastered.append(norm_ch)
+
+                # Speed rating
+                ideal_t = IDEAL_PACE_MAP.get(subject, 110)
+                avg_t = round(float(rec_act["avg_time"])) if rec_act and rec_act.get("avg_time") else None
+                if avg_t:
+                    if avg_t < ideal_t * 0.8: sp_rating = "FAST"
+                    elif avg_t <= ideal_t * 1.25: sp_rating = "OPTIMAL"
+                    else: sp_rating = "SLOW"
+                else:
+                    sp_rating = "UNTESTED"
+
+                yield_str = "HIGH" if norm_ch in HIGH_YIELD_CHAPTERS_SET else ("MEDIUM" if norm_ch in MEDIUM_YIELD_CHAPTERS_SET else "LOW")
+                weight_val = get_chapter_weightage(norm_ch)
+
+                chapters_out.append({
+                    "subject": subject,
+                    "unit": unit_name,
+                    "chapter": norm_ch,
+                    "elo": round(elo_val, 1),
+                    "attempts": attempts,
+                    "correct": correct,
+                    "accuracy": acc,
+                    "avg_time_seconds": avg_t,
+                    "ideal_time_seconds": ideal_t,
+                    "speed_rating": sp_rating,
+                    "weightage": yield_str,
+                    "weightage_score": weight_val,
+                    "mastery_tier": tier,
+                    "last_updated": last_upd
+                })
+
+    tot_canonical = len(chapters_out)
+    tested_cnt = len(active_chapters_list)
+    cov_ratio = (tested_cnt / tot_canonical) if tot_canonical > 0 else 0.0
+    cov_pct = round(cov_ratio * 100.0, 1)
+
+    for s_info in by_subject.values():
+        s_tot = s_info["total"]
+        s_tst = s_info["tested"]
+        s_info["coverage_percent"] = round((s_tst / s_tot * 100.0), 1) if s_tot > 0 else 0.0
+
+    res = {
+        "total_chapters": tot_canonical,
+        "tested_chapters_count": tested_cnt,
+        "mastered_count": tier_summary["MASTERED"],
+        "proficient_count": tier_summary["PROFICIENT"],
+        "practicing_count": tier_summary["PRACTICING"],
+        "critical_count": tier_summary["CRITICAL"],
+        "untested_count": tier_summary["UNTESTED"],
+        "coverage_ratio": round(cov_ratio, 3),
+        "coverage_percent": cov_pct,
+        "active_chapters": active_chapters_list,
+        "proficient_or_mastered_chapters": proficient_or_mastered,
+        "tier_summary": tier_summary,
+        "by_subject": by_subject,
+        "chapters": chapters_out
+    }
+
+    _UNIFIED_CHAPTER_CACHE[cache_key] = (now_t, res)
+    return res
+
 

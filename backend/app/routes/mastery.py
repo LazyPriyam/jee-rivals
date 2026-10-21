@@ -8,7 +8,12 @@ from pydantic import BaseModel
 
 from backend.app.database import get_connection
 from backend.app.auth import get_current_user
-from backend.app.tools.jee_syllabus import JEE_SYLLABUS, normalize_chapter_name
+from backend.app.tools.jee_syllabus import (
+    JEE_SYLLABUS,
+    normalize_chapter_name,
+    get_unified_chapter_metrics,
+    invalidate_unified_chapter_cache
+)
 from backend.app.routes.questions import row_to_question_out
 from backend.app.routes.rooms import create_room
 from backend.app.models import RoomCreateRequest
@@ -137,112 +142,24 @@ def get_chapters_mastery(user: dict = Depends(get_current_user)):
 
     conn = get_connection()
     c = conn.cursor()
-
-    # Fetch recorded chapter Elos
-    c.execute("""
-        SELECT subject, chapter, elo, attempts, correct, last_updated
-        FROM user_chapter_elo
-        WHERE user_id = ?
-    """, (user_id,))
-    records = {r["chapter"]: dict(r) for r in c.fetchall()}
-    _MASTERY_USER_CACHE[(user_id, "elo_rows")] = (now, state_sig, records)
-
-    # Also query activity_log for real pacing & speed metrics per chapter
-    c.execute("""
-        SELECT chapter, AVG(time_spent_seconds) as avg_time, COUNT(*) as cnt
-        FROM activity_log
-        WHERE user_id = ? AND time_spent_seconds > 0
-        GROUP BY chapter
-    """, (user_id,))
-    speed_records = {r["chapter"]: dict(r) for r in c.fetchall()}
-
-    # Also check questions database to see available questions count per chapter (cached)
     db_counts = get_cached_chapter_q_counts(c)
+    metrics = get_unified_chapter_metrics(cursor=c, user_id=user_id, user_dict=user)
     conn.close()
 
-    # Ideal benchmarks per subject
-    IDEAL_PACE_MAP = {
-        "Chemistry": 70,
-        "Physics": 120,
-        "Mathematics": 170
-    }
-
-    # Build matrix from authoritative syllabus
-    chapters_out = []
-    tier_counts = {"MASTERED": 0, "PROFICIENT": 0, "EMERGING": 0, "CRITICAL": 0}
-
-    raw_stats = user.get("chapter_stats") or "{}"
-    try:
-        user_ch_stats = json.loads(raw_stats) if isinstance(raw_stats, str) else raw_stats
-        if not isinstance(user_ch_stats, dict):
-            user_ch_stats = {}
-    except Exception:
-        user_ch_stats = {}
-
-    for subject, units in JEE_SYLLABUS.items():
-        for unit_item in units:
-            unit_name = unit_item["unit"]
-            for ch in unit_item["chapters"]:
-                norm_ch = normalize_chapter_name(ch)
-                user_rec = records.get(norm_ch) or records.get(ch)
-
-                if user_rec:
-                    elo = float(user_rec.get("elo") or 1200.0)
-                    attempts = int(user_rec.get("attempts") or 0)
-                    correct = int(user_rec.get("correct") or 0)
-                    last_updated = user_rec.get("last_updated")
-                else:
-                    legacy = user_ch_stats.get(norm_ch) or user_ch_stats.get(ch) or {}
-                    elo = float(legacy.get("elo") or 1200.0)
-                    attempts = int(legacy.get("attempts") or 0)
-                    correct = int(legacy.get("correct") or 0)
-                    last_updated = None
-
-                acc = round((correct / attempts * 100), 1) if attempts > 0 else 0.0
-                tier = get_mastery_tier(elo)
-                tier_counts[tier] += 1
-                weightage = get_chapter_weightage(norm_ch)
-
-                q_available = db_counts.get(norm_ch) or db_counts.get(ch) or 0
-
-                # Speed & Pacing calculation
-                ideal_t = IDEAL_PACE_MAP.get(subject, 110)
-                sp_rec = speed_records.get(norm_ch) or speed_records.get(ch)
-                if sp_rec and sp_rec.get("avg_time"):
-                    avg_t = round(float(sp_rec["avg_time"]))
-                    if avg_t < ideal_t * 0.8:
-                        sp_rating = "FAST"
-                    elif avg_t <= ideal_t * 1.25:
-                        sp_rating = "OPTIMAL"
-                    else:
-                        sp_rating = "SLOW"
-                else:
-                    avg_t = None
-                    sp_rating = "UNTESTED"
-
-                chapters_out.append({
-                    "subject": subject,
-                    "unit": unit_name,
-                    "chapter": norm_ch,
-                    "elo": round(elo, 1),
-                    "attempts": attempts,
-                    "correct": correct,
-                    "accuracy": acc,
-                    "avg_time_seconds": avg_t,
-                    "ideal_time_seconds": ideal_t,
-                    "speed_rating": sp_rating,
-                    "weightage": weightage,
-                    "mastery_tier": tier,
-                    "questions_available": q_available,
-                    "last_updated": last_updated
-                })
-
+    enriched_chapters = []
+    for ch in metrics.get("chapters", []):
+        c_dict = dict(ch)
+        c_dict["questions_available"] = db_counts.get(ch["chapter"], 0)
+        enriched_chapters.append(c_dict)
 
     res = {
-        "total_chapters": len(chapters_out),
-        "tier_summary": tier_counts,
+        "total_chapters": metrics.get("total_chapters", 92),
+        "tier_summary": metrics.get("tier_summary", {}),
         "overall_elo": round(user.get("overall_elo", 1200.0), 1),
-        "chapters": chapters_out
+        "tested_chapters_count": metrics.get("tested_chapters_count", 0),
+        "coverage_percent": metrics.get("coverage_percent", 0.0),
+        "by_subject": metrics.get("by_subject", {}),
+        "chapters": enriched_chapters
     }
     _MASTERY_USER_CACHE[cache_key] = (now, state_sig, res)
     return res

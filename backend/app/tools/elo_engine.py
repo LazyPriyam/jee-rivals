@@ -314,86 +314,20 @@ def reseed_questions_gradient(cursor: sqlite3.Cursor) -> int:
 def get_user_syllabus_coverage(cursor: sqlite3.Cursor, user_id: str, user_dict: Optional[dict] = None) -> dict:
     """
     Computes exact syllabus exploration and breadth metrics across the official 92 canonical chapters.
-    Aggregates chapter exploration from:
-    1. activity_log & user_chapter_elo (combined via fast single UNION query)
-    2. users.chapter_stats (where attempts > 0)
+    Delegates directly to the authoritative single-point-of-truth get_unified_chapter_metrics.
     """
-    import json
-    from backend.app.tools.jee_syllabus import normalize_chapter_name, ALL_CANONICAL_CHAPTERS, JEE_SYLLABUS
-
-    total_canonical = len(ALL_CANONICAL_CHAPTERS)
-    active_chaps: Set[str] = set()
-    active_subjs: Set[str] = set()
-
-    def record_chap(ch_name: Optional[str], s_name: Optional[str] = None):
-        if not ch_name:
-            return
-        norm = normalize_chapter_name(str(ch_name).strip())
-        if norm:
-            active_chaps.add(norm)
-            subj = (s_name or "").strip()
-            if not subj:
-                for s_key, units in JEE_SYLLABUS.items():
-                    for u in units:
-                        if norm in u["chapters"]:
-                            subj = s_key
-                            break
-                    if subj:
-                        break
-            if subj:
-                s_low = subj.lower()
-                if "phys" in s_low:
-                    active_subjs.add("Physics")
-                elif "chem" in s_low:
-                    active_subjs.add("Chemistry")
-                elif "math" in s_low:
-                    active_subjs.add("Mathematics")
-
-    # 1. Combined single UNION query for attempts across activity_log and user_chapter_elo
-    try:
-        cursor.execute("""
-            SELECT DISTINCT chapter, subject FROM activity_log WHERE user_id = ?
-            UNION
-            SELECT DISTINCT chapter, subject FROM user_chapter_elo WHERE user_id = ? AND attempts > 0
-        """, (user_id, user_id))
-        for r in cursor.fetchall():
-            record_chap(r["chapter"], r["subject"])
-    except Exception:
-        pass
-
-    # 2. Extract chapter_stats (reuse user_dict if passed to save a DB round trip)
-    try:
-        raw_cstats = None
-        if user_dict is not None:
-            raw_cstats = user_dict.get("chapter_stats")
-        else:
-            cursor.execute("SELECT chapter_stats FROM users WHERE id = ?", (user_id,))
-            u_row = cursor.fetchone()
-            if u_row:
-                raw_cstats = u_row["chapter_stats"]
-
-        if raw_cstats:
-            cstats = json.loads(raw_cstats) if isinstance(raw_cstats, str) else raw_cstats
-            if isinstance(cstats, dict):
-                for ch_k, ch_v in cstats.items():
-                    if isinstance(ch_v, dict) and ch_v.get("attempts", 0) > 0:
-                        record_chap(ch_k, ch_v.get("subject"))
-                    elif isinstance(ch_v, (int, float)) and ch_v > 0:
-                        record_chap(ch_k)
-    except Exception:
-        pass
-
-    active_count = len(active_chaps)
-    cov_ratio = (active_count / total_canonical) if total_canonical > 0 else 0.0
-
+    from backend.app.tools.jee_syllabus import get_unified_chapter_metrics
+    metrics = get_unified_chapter_metrics(cursor=cursor, user_id=user_id, user_dict=user_dict)
+    active_subjs = [s for s, s_info in metrics.get("by_subject", {}).items() if s_info.get("tested", 0) > 0]
     return {
-        "active_chapters": list(active_chaps),
-        "active_count": active_count,
-        "total_chapters": total_canonical,
-        "coverage_ratio": round(cov_ratio, 3),
-        "coverage_percent": round(cov_ratio * 100, 1),
+        "active_chapters": metrics.get("active_chapters", []),
+        "active_count": metrics.get("tested_chapters_count", 0),
+        "total_chapters": metrics.get("total_chapters", 92),
+        "coverage_ratio": metrics.get("coverage_ratio", 0.0),
+        "coverage_percent": metrics.get("coverage_percent", 0.0),
         "active_subjects_count": len(active_subjs),
-        "active_subjects": list(active_subjs)
+        "active_subjects": active_subjs,
+        "tier_summary": metrics.get("tier_summary", {})
     }
 
 

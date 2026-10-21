@@ -591,6 +591,7 @@ def predict_jee_main_dossier(
             "mocks_count": cnt,
             "admissibility": admissibility,
             "bottlenecks": bottlenecks,
+            "considered_mocks": main_mock_data.get("mocks", []),
             "is_calibrated": True
         }
 
@@ -610,6 +611,7 @@ def predict_jee_main_dossier(
         "bottlenecks": [
             "0 JEE Main Mocks completed. Complete at least 1 Full Mock in Mocks Center to generate your official NTA percentile and AIR forecast."
         ],
+        "considered_mocks": [],
         "is_calibrated": False
     }
 
@@ -728,6 +730,7 @@ def predict_jee_advanced_dossier(
             "mocks_count": cnt,
             "admissibility": admissibility,
             "bottlenecks": bottlenecks,
+            "considered_mocks": adv_mock_data.get("mocks", []),
             "is_calibrated": True
         }
 
@@ -755,6 +758,7 @@ def predict_jee_advanced_dossier(
         "bottlenecks": [
             "0 JEE Advanced Mocks completed. Complete a JEE Advanced Mock Test in Mocks Center to generate your official CRL rank and IIT cutoff prediction."
         ],
+        "considered_mocks": [],
         "is_calibrated": False
     }
 
@@ -867,5 +871,6 @@ def calculate_advanced_air(
         "full_mocks_count": tot_mocks,
         "best_mock_marks": main_mock_data.get("best_score"),
         "average_mock_marks": main_mock_data.get("weighted_score"),
+        "considered_mocks": (main_mock_data.get("mocks", []) + adv_mock_data.get("mocks", []))[:10],
         "is_mock_calibrated": main_dossier.get("is_calibrated") or adv_dossier.get("is_calibrated")
     }

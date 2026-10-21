@@ -83,21 +83,20 @@ def format_user_profile(user: dict, cursor=None) -> UserProfile:
         close_conn = True
 
     try:
-        cached_cov = _COVERAGE_CACHE.get(user_id)
-        if cached_cov and (now - cached_cov[0] < 120.0):
-            cov = cached_cov[1]
-        else:
-            try:
-                from backend.app.tools.elo_engine import get_user_syllabus_coverage
-                cov = get_user_syllabus_coverage(c, user_id, user_dict=user)
-                _COVERAGE_CACHE[user_id] = (now, cov)
-            except Exception:
-                cov = {"active_count": 0, "coverage_percent": 0.0, "active_subjects_count": 0, "total_chapters": 92}
-
-        active_count = cov.get("active_count", 0)
-        coverage_pct = cov.get("coverage_percent", 0.0)
-        active_subjs_count = cov.get("active_subjects_count", 0)
-        total_chaps = cov.get("total_chapters", 92)
+        try:
+            from backend.app.tools.jee_syllabus import get_unified_chapter_metrics
+            ch_metrics = get_unified_chapter_metrics(c, user_id, user_dict=user)
+            active_count = ch_metrics.get("tested_chapters_count", 0)
+            coverage_pct = ch_metrics.get("coverage_percent", 0.0)
+            total_chaps = ch_metrics.get("total_chapters", 92)
+            active_subjs_count = sum(1 for s in ch_metrics.get("by_subject", {}).values() if s.get("tested", 0) > 0)
+            tier_summary = ch_metrics.get("tier_summary", {})
+        except Exception:
+            active_count = 0
+            coverage_pct = 0.0
+            total_chaps = 92
+            active_subjs_count = 0
+            tier_summary = {}
 
         target_exam = user.get("target_exam") or "MIXED"
 
@@ -232,6 +231,7 @@ def format_user_profile(user: dict, cursor=None) -> UserProfile:
         syllabus_coverage_percent=coverage_pct,
         active_chapters_count=active_count,
         total_syllabus_chapters=total_chaps,
+        chapter_summary=tier_summary,
         air_gate_reason=air_gate,
         learnt_chapters=learnt,
         target_exam=target_exam,

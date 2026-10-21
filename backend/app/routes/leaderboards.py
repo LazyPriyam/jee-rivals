@@ -391,7 +391,9 @@ def get_public_profile(username: str):
         ch = q.get("chapter")
         if ch:
             q_counts[ch] = q_counts.get(ch, 0) + 1
-    skill_tree_data = build_user_skill_tree(activity_rows, q_counts)
+    from backend.app.tools.jee_syllabus import get_unified_chapter_metrics
+    unified_ch_metrics = get_unified_chapter_metrics(cursor=c, user_id=user["id"], user_dict=user)
+    skill_tree_data = build_user_skill_tree(activity_rows, q_counts, unified_metrics=unified_ch_metrics)
 
     # 3. Achievements & Trophy Shelf
     c.execute("""
