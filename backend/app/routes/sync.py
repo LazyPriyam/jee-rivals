@@ -38,6 +38,16 @@ def sync_data(payload: SyncPayload, x_sync_token: Optional[str] = Header(None, a
             except Exception as e:
                 print(f"[SYNC] Error unpacking diagram {filename}: {e}")
 
+    # Fast path: Diagram-only sync requires no DB transactions or question re-processing
+    if not payload.questions:
+        invalidate_diagram_manifest_cache()
+        return {
+            "success": True,
+            "synced_questions": 0,
+            "synced_diagrams": saved_diagrams,
+            "errors": []
+        }
+
     # 2. Upsert questions into database
     conn = get_connection()
     c = conn.cursor()
@@ -204,11 +214,43 @@ class QuestionBatchDeletePayload(BaseModel):
 
 
 _MANIFEST_CACHE: Optional[Dict[str, Any]] = None
+_DIAGRAM_MANIFEST_CACHE: Optional[Dict[str, Any]] = None
 
 def invalidate_manifest_cache():
     """Invalidates the in-memory manifest cache so subsequent requests re-compute from database."""
-    global _MANIFEST_CACHE
+    global _MANIFEST_CACHE, _DIAGRAM_MANIFEST_CACHE
     _MANIFEST_CACHE = None
+    _DIAGRAM_MANIFEST_CACHE = None
+
+def invalidate_diagram_manifest_cache():
+    """Invalidates diagram manifest cache."""
+    global _DIAGRAM_MANIFEST_CACHE
+    _DIAGRAM_MANIFEST_CACHE = None
+
+
+def get_or_build_diagram_manifest() -> Dict[str, Any]:
+    """Returns cached diagram inventory with file sizes and MD5 hashes."""
+    global _DIAGRAM_MANIFEST_CACHE
+    if _DIAGRAM_MANIFEST_CACHE is not None:
+        return _DIAGRAM_MANIFEST_CACHE
+
+    import hashlib
+    diags = {}
+    if DIAGRAMS_DIR.exists():
+        for p in DIAGRAMS_DIR.glob("*.png"):
+            try:
+                st = p.stat()
+                with open(p, "rb") as f:
+                    h = hashlib.md5(f.read()).hexdigest()
+                diags[p.name] = {"size": st.st_size, "md5": h}
+            except Exception:
+                pass
+
+    _DIAGRAM_MANIFEST_CACHE = {
+        "total": len(diags),
+        "diagrams": diags
+    }
+    return _DIAGRAM_MANIFEST_CACHE
 
 
 def get_or_build_manifest() -> Dict[str, Any]:
@@ -349,6 +391,22 @@ def get_existing_question_ids(
     if include_hashes:
         res["hashes"] = hashes
     return res
+
+
+@router.get("/diagram-manifest")
+def get_diagram_manifest_endpoint(
+    x_sync_token: Optional[str] = Header(None, alias="X-Sync-Token")
+):
+    """
+    Returns inventory of diagram files currently stored on the cloud server
+    with file sizes and MD5 checksums for instant zero-force delta sync of diagrams.
+    """
+    if not x_sync_token or x_sync_token != ADMIN_SYNC_TOKEN:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or missing sync authentication token."
+        )
+    return get_or_build_diagram_manifest()
 
 
 @router.get("/question-manifest")
