@@ -2,6 +2,7 @@ import math
 import hashlib
 import sqlite3
 import datetime
+import time
 from typing import List, Dict, Optional, Tuple, Set
 
 # Minimum engagement times (in seconds) required for an attempt to be deemed genuine
@@ -455,6 +456,16 @@ def calculate_chapter_diminishing_factor(
     norm_chaps = [normalize_chapter_name(c) for c in chaps if normalize_chapter_name(c)]
     all_query_chaps = list(set(norm_chaps + chaps))
 
+    # Fast in-memory cache check (avoids repeating unindexed COUNT(*) over activity_log)
+    calib_cache_key = (str(user_id), ",".join(sorted(all_query_chaps)))
+    now_t = time.time()
+    if hasattr(calculate_chapter_diminishing_factor, "_cache"):
+        cached = calculate_chapter_diminishing_factor._cache.get(calib_cache_key)
+        if cached and (now_t - cached[0] < 120.0):
+            return cached[1], cached[2]
+    else:
+        calculate_chapter_diminishing_factor._cache = {}
+
     prior_attempts = 0
     if all_query_chaps and cursor:
         placeholders = ','.join(['?'] * len(all_query_chaps))
@@ -473,6 +484,7 @@ def calculate_chapter_diminishing_factor(
     final_factor = round(max(0.20, min(1.0, base_factor * repetition_damp)), 2)
 
     reason = f"Rating Calibrated ({int(final_factor * 100)}%): {scope_desc} selected instead of Full Syllabus"
+    calculate_chapter_diminishing_factor._cache[calib_cache_key] = (now_t, final_factor, reason)
     return final_factor, reason
 
 

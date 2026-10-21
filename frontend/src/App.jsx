@@ -541,6 +541,7 @@ export default function App() {
           ) : roomViewMode === 'results' && currentRoom ? (
             <ResultsView
               roomCode={currentRoom.code}
+              room={currentRoom}
               user={user}
               onViewProfile={handleViewProfile}
               onReturnArena={() => {

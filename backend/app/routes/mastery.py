@@ -389,12 +389,9 @@ def get_failure_graveyard(user: dict = Depends(get_current_user)):
         _MASTERY_USER_CACHE[cache_key] = (now, state_sig, res)
         return res
 
-    from backend.app.tools.question_cache import get_question_cached
-    q_rows = []
-    for qid in target_qids:
-        qd = get_question_cached(qid, cursor=c)
-        if qd:
-            q_rows.append(qd)
+    from backend.app.tools.question_cache import get_questions_cached_batch
+    q_batch_map = get_questions_cached_batch(target_qids, cursor=c)
+    q_rows = [q_batch_map[str(qid)] for qid in target_qids if str(qid) in q_batch_map]
     conn.close()
 
     graveyard_list = []

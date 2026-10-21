@@ -348,15 +348,11 @@ def create_room(req: RoomCreateRequest, user: dict = Depends(get_current_user)):
             req.preset_name = "Curated Question Set"
         elif "curated" not in req.preset_name.lower() and "graveyard" not in req.preset_name.lower():
             req.preset_name = f"Curated: {req.preset_name}"
-        from backend.app.tools.question_cache import get_question_cached
+        from backend.app.tools.question_cache import get_questions_cached_batch
         verified_rows = []
+        batch_cand_map = get_questions_cached_batch(req.question_ids, cursor=c)
         for qid in req.question_ids:
-            cand = get_question_cached(qid, cursor=c)
-            if not cand:
-                c.execute("SELECT * FROM questions WHERE id = ?", (qid,))
-                r = c.fetchone()
-                if r:
-                    cand = dict(r)
+            cand = batch_cand_map.get(str(qid))
             if cand:
                 is_valid, healed_q, _ = audit_and_heal_question(cand)
                 if is_valid and healed_q:
@@ -593,10 +589,11 @@ def get_room_state(code: str, user: dict) -> RoomState:
     all_qs = []
 
     if is_mock or in_progress or room["status"] == "COMPLETED":
-        # Load questions from in-memory hot cache (0ms instead of N sequential Turso queries)
-        from backend.app.tools.question_cache import get_question_cached
+        # Load questions from in-memory hot cache (0ms instant batch retrieval)
+        from backend.app.tools.question_cache import get_questions_cached_batch
+        q_batch_map = get_questions_cached_batch(q_ids, cursor=c)
         for q_id in q_ids:
-            qd = get_question_cached(q_id, cursor=c)
+            qd = q_batch_map.get(str(q_id))
             if qd:
                 all_qs.append(row_to_question_out(qd))
 
@@ -1179,14 +1176,15 @@ async def submit_bulk_mock(
     base_score = room.get("base_correct_score", 100.0)
     neg_penalty = room.get("negative_marking", -25.0)
 
-    from backend.app.tools.question_cache import get_question_cached
+    from backend.app.tools.question_cache import get_questions_cached_batch
+    questions_map = get_questions_cached_batch(q_ids, cursor=c)
     for q_id in q_ids:
         user_choice = req.answers.get(q_id, "NONE")
         q_time = (req.question_times.get(q_id) if req.question_times else None)
         if q_time is None or q_time <= 0:
             q_time = max(1, req.total_time_seconds // max(1, len(q_ids)))
 
-        q = get_question_cached(q_id, cursor=c)
+        q = questions_map.get(str(q_id))
         if not q:
             continue
 
@@ -1290,12 +1288,7 @@ async def submit_bulk_mock(
             if len(finished_parts) > 2:
                 c.execute("UPDATE users SET bronze_medals = bronze_medals + 1 WHERE id = ?", (finished_parts[2]["user_id"],))
 
-            q_info_map = {}
-            if q_ids:
-                placeholders = ','.join(['?'] * len(q_ids))
-                c.execute(f"SELECT id, subject, chapter, elo_rating FROM questions WHERE id IN ({placeholders})", q_ids)
-                for qr in c.fetchall():
-                    q_info_map[qr["id"]] = dict(qr)
+            q_info_map = questions_map
 
             user_answers_map = {}
             for part in finished_parts:
@@ -1808,9 +1801,10 @@ def get_room_results(code: str, user: dict = Depends(get_current_user)):
 
     q_ids = json.loads(room["question_ids"])
     questions_data = []
-    from backend.app.tools.question_cache import get_question_cached
+    from backend.app.tools.question_cache import get_questions_cached_batch
+    questions_map = get_questions_cached_batch(q_ids, cursor=c)
     for q_id in q_ids:
-        qd = get_question_cached(q_id, cursor=c)
+        qd = questions_map.get(str(q_id))
         if qd:
             raw_formulas = qd.get("key_formulas")
             try:

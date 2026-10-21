@@ -5,9 +5,10 @@ import MathRenderer from './MathRenderer';
 import OnDemandDerivationBox from './OnDemandDerivationBox';
 import { Trophy, Crown, ArrowLeft, RefreshCw, CheckCircle2, XCircle, BookOpen, AlertTriangle, Lightbulb, Image as ImageIcon, Flame } from 'lucide-react';
 
-export default function ResultsView({ roomCode, user, onReturnArena, onRematch, onViewProfile }) {
+export default function ResultsView({ roomCode, room, user, onReturnArena, onRematch, onViewProfile }) {
   const [results, setResults] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
   const [activeTab, setActiveTab] = useState('summary'); // 'summary' or 'solutions'
 
   useEffect(() => {
@@ -19,24 +20,90 @@ export default function ResultsView({ roomCode, user, onReturnArena, onRematch, 
       });
     } catch (_) {}
 
-    api.rooms.results(roomCode)
-      .then((data) => {
-        setResults(data);
-        setLoading(false);
-      })
-      .catch((err) => {
-        console.error(err);
-        setLoading(false);
-      });
+    let isMounted = true;
+    const loadResults = (attempt = 1) => {
+      api.rooms.results(roomCode)
+        .then((data) => {
+          if (!isMounted) return;
+          setResults(data);
+          setLoading(false);
+        })
+        .catch((err) => {
+          if (!isMounted) return;
+          console.warn(`Results fetch attempt ${attempt} note:`, err);
+          if (attempt < 4) {
+            setTimeout(() => loadResults(attempt + 1), 600);
+          } else {
+            setError(err.message || 'Unable to tabulate scorecard.');
+            setLoading(false);
+          }
+        });
+    };
+
+    loadResults();
+    return () => { isMounted = false; };
   }, [roomCode]);
 
   if (loading || !results) {
     return (
-      <div className="max-w-4xl mx-auto px-4 py-20 text-center font-mono">
-        <div className="inline-block animate-spin text-orange-500 mb-4">
-          <RefreshCw className="w-10 h-10" />
+      <div className="max-w-4xl mx-auto px-4 py-16 font-mono page-transition">
+        <div className="flex items-center justify-between mb-8">
+          <button
+            onClick={onReturnArena}
+            className="flex items-center gap-2 text-sm text-slate-400 hover:text-white transition cursor-pointer"
+          >
+            <ArrowLeft className="w-4 h-4" />
+            <span>Return to Arena</span>
+          </button>
         </div>
-        <h2 className="text-2xl font-bold text-white">Tabulating Combat Results...</h2>
+
+        <div className="bg-[#101524] border border-white/10 rounded-3xl p-8 sm:p-12 text-center max-w-xl mx-auto shadow-2xl relative overflow-hidden">
+          <div className="absolute inset-0 bg-gradient-to-b from-orange-500/5 via-transparent to-transparent pointer-events-none" />
+          
+          <div className="relative mb-6 inline-flex items-center justify-center">
+            <div className="w-16 h-16 rounded-full border-4 border-orange-500/20 border-t-orange-500 animate-spin" />
+            <div className="absolute inset-0 flex items-center justify-center">
+              <RefreshCw className="w-6 h-6 text-orange-400" />
+            </div>
+          </div>
+
+          <h2 className="text-xl sm:text-2xl font-black text-white tracking-wide">
+            Tabulating Combat Results...
+          </h2>
+          <p className="text-xs text-slate-400 mt-2 font-mono">
+            {roomCode ? `Evaluating Room #${roomCode} across official NTA percentile rubric` : 'Calculating score and rating adjustments...'}
+          </p>
+
+          <div className="mt-6 flex items-center justify-center gap-2 text-[11px] font-mono text-orange-400 bg-orange-500/10 px-4 py-2 rounded-full border border-orange-500/20 max-w-xs mx-auto">
+            <span className="w-2 h-2 rounded-full bg-orange-500 animate-pulse" />
+            <span>Syncing rankings & performance</span>
+          </div>
+
+          {error && (
+            <div className="mt-6 p-4 rounded-xl bg-red-950/60 border border-red-500/30 text-red-300 text-xs">
+              <p className="font-bold mb-2">Tabulation Notice</p>
+              <p className="mb-3">{error}</p>
+              <div className="flex items-center justify-center gap-3">
+                <button
+                  onClick={() => {
+                    setError(null);
+                    setLoading(true);
+                    api.rooms.results(roomCode).then(setResults).finally(() => setLoading(false));
+                  }}
+                  className="px-4 py-1.5 rounded-lg bg-orange-500 text-white font-bold text-xs hover:bg-orange-600 transition cursor-pointer"
+                >
+                  Retry Now
+                </button>
+                <button
+                  onClick={onReturnArena}
+                  className="px-4 py-1.5 rounded-lg bg-slate-800 text-slate-300 font-bold text-xs hover:bg-slate-700 transition cursor-pointer"
+                >
+                  Return to Dashboard
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
       </div>
     );
   }

@@ -23,6 +23,7 @@ Features:
 
 import math
 import json
+import time
 from typing import Dict, Any, List, Optional, Tuple
 
 from backend.app.tools.jee_syllabus import (
@@ -256,6 +257,16 @@ def _generate_jee_advanced_admissibility(crl: int, is_cutoff_cleared: bool = Tru
 # 3. MOCK HISTORY AGGREGATOR & PARSER
 # =========================================================================
 
+_USER_MOCK_HISTORY_CACHE: Dict[str, Tuple[float, Dict[str, Any]]] = {}
+
+def invalidate_user_mock_history_cache(user_id: Optional[str] = None):
+    """Invalidates the in-memory mock history cache for a user or all users."""
+    global _USER_MOCK_HISTORY_CACHE
+    if user_id:
+        _USER_MOCK_HISTORY_CACHE.pop(str(user_id), None)
+    else:
+        _USER_MOCK_HISTORY_CACHE.clear()
+
 def get_user_full_mock_history(cursor, user_id: str) -> Dict[str, Any]:
     """
     Extracts and partitions all completed mock tests for a user from rooms & room_participants.
@@ -268,7 +279,20 @@ def get_user_full_mock_history(cursor, user_id: str) -> Dict[str, Any]:
       - Subject cutoff clearance (10% threshold in P, C, and M for Advanced)
       - Tested chapters and syllabus weightage coverage
     """
-    if not cursor or not user_id:
+    if not user_id:
+        return {
+            "total_full_mocks": 0,
+            "jee_main": {"count": 0, "mocks": []},
+            "jee_advanced": {"count": 0, "mocks": []}
+        }
+
+    uid_str = str(user_id)
+    now_t = time.time()
+    cached = _USER_MOCK_HISTORY_CACHE.get(uid_str)
+    if cached and (now_t - cached[0] < 120.0):
+        return cached[1]
+
+    if not cursor:
         return {
             "total_full_mocks": 0,
             "jee_main": {"count": 0, "mocks": []},
@@ -459,7 +483,7 @@ def get_user_full_mock_history(cursor, user_id: str) -> Dict[str, Any]:
     main_summary = _calc_cohort_summary(main_mocks, "norm_marks_300")
     adv_summary = _calc_cohort_summary(adv_mocks, "norm_marks_360")
 
-    return {
+    res = {
         "total_full_mocks": len(main_mocks) + len(adv_mocks),
         "jee_main": main_summary,
         "jee_advanced": adv_summary,
@@ -469,6 +493,8 @@ def get_user_full_mock_history(cursor, user_id: str) -> Dict[str, Any]:
         "latest_mock_marks_300": main_summary["latest_score"],
         "mocks": (main_mocks + adv_mocks)[:10]
     }
+    _USER_MOCK_HISTORY_CACHE[uid_str] = (now_t, res)
+    return res
 
 
 # =========================================================================

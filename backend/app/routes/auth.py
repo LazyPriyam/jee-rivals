@@ -1,7 +1,7 @@
 import uuid
 import datetime
 import json
-from fastapi import APIRouter, HTTPException, Depends, status
+from fastapi import APIRouter, HTTPException, Depends, status, BackgroundTasks
 
 import re
 from backend.app.models import (
@@ -12,7 +12,7 @@ from backend.app.models import (
 from backend.app.database import get_connection, get_user_by_username, get_user_by_id
 from backend.app.auth import (
     hash_pin, verify_pin, create_access_token, get_current_user,
-    invalidate_user_cache, invalidate_tombstones_cache
+    invalidate_user_cache, invalidate_tombstones_cache, get_cached_tombstones
 )
 from backend.app.websockets.room_hub import room_hub
 import time
@@ -24,6 +24,11 @@ _PROFILE_OUT_CACHE: dict = {}
 
 def invalidate_coverage_cache(user_id: str = None):
     global _COVERAGE_CACHE, _PROFILE_OUT_CACHE
+    try:
+        from backend.app.tools.air_engine import invalidate_user_mock_history_cache
+        invalidate_user_mock_history_cache(user_id)
+    except Exception:
+        pass
     if user_id:
         _COVERAGE_CACHE.pop(str(user_id), None)
         _PROFILE_OUT_CACHE.pop(str(user_id), None)
@@ -62,123 +67,129 @@ def format_user_profile(user: dict, cursor=None) -> UserProfile:
         user.get("daily_goal_date"),
     )
     cached_prof = _PROFILE_OUT_CACHE.get(user_id)
-    if cached_prof and (now - cached_prof[0] < 45.0) and cached_prof[1] == state_sig:
+    if cached_prof and (now - cached_prof[0] < 60.0) and cached_prof[1] == state_sig:
         return cached_prof[2]
 
     solved = user.get("total_solved", 0)
     correct = user.get("total_correct", 0)
     acc = round((correct / solved * 100), 1) if solved > 0 else 0.0
 
-    cached_cov = _COVERAGE_CACHE.get(user_id)
+    conn = None
+    close_conn = False
+    c = cursor
+    if c is None:
+        conn = get_connection()
+        c = conn.cursor()
+        close_conn = True
 
-    if cached_cov and (now - cached_cov[0] < 60.0):
-        cov = cached_cov[1]
-    else:
-        conn = None
-        close_conn = False
-        if cursor is None:
-            conn = get_connection()
-            cursor = conn.cursor()
-            close_conn = True
+    try:
+        cached_cov = _COVERAGE_CACHE.get(user_id)
+        if cached_cov and (now - cached_cov[0] < 120.0):
+            cov = cached_cov[1]
+        else:
+            try:
+                from backend.app.tools.elo_engine import get_user_syllabus_coverage
+                cov = get_user_syllabus_coverage(c, user_id, user_dict=user)
+                _COVERAGE_CACHE[user_id] = (now, cov)
+            except Exception:
+                cov = {"active_count": 0, "coverage_percent": 0.0, "active_subjects_count": 0, "total_chapters": 92}
 
+        active_count = cov.get("active_count", 0)
+        coverage_pct = cov.get("coverage_percent", 0.0)
+        active_subjs_count = cov.get("active_subjects_count", 0)
+        total_chaps = cov.get("total_chapters", 92)
+
+        target_exam = user.get("target_exam") or "MIXED"
+
+        from backend.app.tools.air_engine import calculate_advanced_air, get_user_full_mock_history
+        full_mocks_metrics = get_user_full_mock_history(c, user_id)
+        air_data = calculate_advanced_air(
+            overall_elo=user.get("overall_elo", 1200.0),
+            physics_elo=user.get("physics_elo", 1200.0),
+            chemistry_elo=user.get("chemistry_elo", 1200.0),
+            math_elo=user.get("math_elo", 1200.0),
+            active_chapters_count=active_count,
+            active_subjects_count=active_subjs_count,
+            total_solved=solved,
+            total_correct=correct,
+            target_exam=target_exam,
+            full_mocks_metrics=full_mocks_metrics
+        )
+        air = air_data["predicted_air_bracket"]
+        air_gate = air_data["air_gate_reason"]
+
+        elo = float(user.get("overall_elo", 1200.0))
+        if elo >= 2100: speed_p = 99
+        elif elo >= 1900: speed_p = 98
+        elif elo >= 1750: speed_p = 95
+        elif elo >= 1600: speed_p = 88
+        elif elo >= 1450: speed_p = 76
+        elif elo >= 1300: speed_p = 60
+        else: speed_p = 45
+
+        ch_raw = user.get("chapter_stats") or "{}"
         try:
-            from backend.app.tools.elo_engine import get_user_syllabus_coverage
-            cov = get_user_syllabus_coverage(cursor, user_id, user_dict=user)
-            _COVERAGE_CACHE[user_id] = (now, cov)
+            ch_stats = json.loads(ch_raw) if isinstance(ch_raw, str) else ch_raw
         except Exception:
-            cov = {"active_count": 0, "coverage_percent": 0.0, "active_subjects_count": 0, "total_chapters": 92}
-        finally:
-            if close_conn and conn:
-                conn.close()
+            ch_stats = {}
 
-    active_count = cov.get("active_count", 0)
-    coverage_pct = cov.get("coverage_percent", 0.0)
-    active_subjs_count = cov.get("active_subjects_count", 0)
-    total_chaps = cov.get("total_chapters", 92)
-
-    target_exam = user.get("target_exam") or "MIXED"
-
-    from backend.app.tools.air_engine import calculate_advanced_air, get_user_full_mock_history
-    full_mocks_metrics = get_user_full_mock_history(cursor, user_id)
-    air_data = calculate_advanced_air(
-        overall_elo=user.get("overall_elo", 1200.0),
-        physics_elo=user.get("physics_elo", 1200.0),
-        chemistry_elo=user.get("chemistry_elo", 1200.0),
-        math_elo=user.get("math_elo", 1200.0),
-        active_chapters_count=active_count,
-        active_subjects_count=active_subjs_count,
-        total_solved=solved,
-        total_correct=correct,
-        target_exam=target_exam,
-        full_mocks_metrics=full_mocks_metrics
-    )
-    air = air_data["predicted_air_bracket"]
-    air_gate = air_data["air_gate_reason"]
-
-    elo = float(user.get("overall_elo", 1200.0))
-    if elo >= 2100: speed_p = 99
-    elif elo >= 1900: speed_p = 98
-    elif elo >= 1750: speed_p = 95
-    elif elo >= 1600: speed_p = 88
-    elif elo >= 1450: speed_p = 76
-    elif elo >= 1300: speed_p = 60
-    else: speed_p = 45
-
-    ch_raw = user.get("chapter_stats") or "{}"
-    try:
-        ch_stats = json.loads(ch_raw) if isinstance(ch_raw, str) else ch_raw
-    except Exception:
-        ch_stats = {}
-
-    pinned_raw = user.get("pinned_badges") or '["elo_bronze", "first_blood"]'
-    try:
-        pinned = json.loads(pinned_raw) if isinstance(pinned_raw, str) else pinned_raw
-        if not isinstance(pinned, list):
+        pinned_raw = user.get("pinned_badges") or '["elo_bronze", "first_blood"]'
+        try:
+            pinned = json.loads(pinned_raw) if isinstance(pinned_raw, str) else pinned_raw
+            if not isinstance(pinned, list):
+                pinned = ["elo_bronze", "first_blood"]
+        except Exception:
             pinned = ["elo_bronze", "first_blood"]
-    except Exception:
-        pinned = ["elo_bronze", "first_blood"]
 
-    learnt_raw = user.get("learnt_chapters") or "[]"
-    try:
-        learnt = json.loads(learnt_raw) if isinstance(learnt_raw, str) else learnt_raw
-        if not isinstance(learnt, list):
-            learnt = []
-    except Exception:
-        learnt = []
-
-    chat_raw = user.get("chat_settings") or "{}"
-    try:
-        chat_set = json.loads(chat_raw) if isinstance(chat_raw, str) else chat_raw
-        if not isinstance(chat_set, dict):
-            chat_set = {}
-    except Exception:
-        chat_set = {}
-
-    from backend.app.tools.division_engine import evaluate_user_division
-    div_eval = evaluate_user_division(
-        weekly_rp=user.get("weekly_rp", 0),
-        overall_elo=user.get("overall_elo", 1200.0),
-        total_solved=solved,
-        total_correct=correct,
-        physics_elo=user.get("physics_elo", 1200.0),
-        chemistry_elo=user.get("chemistry_elo", 1200.0),
-        math_elo=user.get("math_elo", 1200.0)
-    )
-    evaluated_division = div_eval["full_name"]
-    if cursor and evaluated_division != user.get("current_division"):
+        learnt_raw = user.get("learnt_chapters") or "[]"
         try:
-            cursor.execute("UPDATE users SET current_division = ? WHERE id = ?", (evaluated_division, user["id"]))
+            learnt = json.loads(learnt_raw) if isinstance(learnt_raw, str) else learnt_raw
+            if not isinstance(learnt, list):
+                learnt = []
         except Exception:
-            pass
+            learnt = []
 
-    from backend.app.tools.streaks_engine import get_user_streak_meta
-    streak_meta = get_user_streak_meta(user, cursor)
+        chat_raw = user.get("chat_settings") or "{}"
+        try:
+            chat_set = json.loads(chat_raw) if isinstance(chat_raw, str) else chat_raw
+            if not isinstance(chat_set, dict):
+                chat_set = {}
+        except Exception:
+            chat_set = {}
 
-    from backend.app.tools.growth_triad_engine import calculate_growth_triad
-    triad_meta = calculate_growth_triad(user, cursor)
+        from backend.app.tools.division_engine import evaluate_user_division
+        div_eval = evaluate_user_division(
+            weekly_rp=user.get("weekly_rp", 0),
+            overall_elo=user.get("overall_elo", 1200.0),
+            total_solved=solved,
+            total_correct=correct,
+            physics_elo=user.get("physics_elo", 1200.0),
+            chemistry_elo=user.get("chemistry_elo", 1200.0),
+            math_elo=user.get("math_elo", 1200.0)
+        )
+        evaluated_division = div_eval["full_name"]
+        if c and evaluated_division != user.get("current_division"):
+            try:
+                c.execute("UPDATE users SET current_division = ? WHERE id = ?", (evaluated_division, user["id"]))
+                if conn:
+                    conn.commit()
+            except Exception:
+                pass
 
-    from backend.app.tools.daily_goal_engine import get_user_daily_goal_status
-    daily_goal_meta = get_user_daily_goal_status(user)
+        from backend.app.tools.streaks_engine import get_user_streak_meta
+        streak_meta = get_user_streak_meta(user, c)
+
+        from backend.app.tools.growth_triad_engine import calculate_growth_triad
+        triad_meta = calculate_growth_triad(user, c)
+
+        from backend.app.tools.daily_goal_engine import get_user_daily_goal_status
+        daily_goal_meta = get_user_daily_goal_status(user, c)
+    finally:
+        if close_conn and conn:
+            try:
+                conn.close()
+            except Exception:
+                pass
 
     prof_out = UserProfile(
         id=user["id"],
@@ -304,25 +315,17 @@ def register(req: UserRegisterRequest):
 
 
 @router.post("/login", response_model=AuthResponse)
-def login(req: UserLoginRequest):
+def login(req: UserLoginRequest, background_tasks: BackgroundTasks):
     username = req.username.strip()
+    username_lower = username.lower()
 
-    # Tombstone barrier: reject permanently deleted accounts
-    try:
-        conn = get_connection()
-        c = conn.cursor()
-        c.execute("SELECT 1 FROM deleted_accounts WHERE LOWER(username) = LOWER(?)", (username,))
-        is_del = c.fetchone() is not None
-        conn.close()
-        if is_del:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail=f"Account '{username}' was permanently deleted and cannot be accessed."
-            )
-    except HTTPException:
-        raise
-    except Exception:
-        pass
+    # Fast in-memory tombstone barrier (0.001ms - zero network round trips)
+    tombstones = get_cached_tombstones()
+    if username_lower in tombstones:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=f"Account '{username}' was permanently deleted and cannot be accessed."
+        )
 
     user = get_user_by_username(username)
     if not user:
@@ -346,13 +349,19 @@ def login(req: UserLoginRequest):
             detail="Incorrect username or PIN."
         )
 
-    # Update last_active
+    # Non-blocking async update of last_active: never delays the user sign-in response
     now = datetime.datetime.utcnow().isoformat()
-    conn = get_connection()
-    c = conn.cursor()
-    c.execute("UPDATE users SET last_active = ? WHERE id = ?", (now, user["id"]))
-    conn.commit()
-    conn.close()
+    def _bg_update_last_active(uid: str, ts: str):
+        try:
+            conn = get_connection()
+            c = conn.cursor()
+            c.execute("UPDATE users SET last_active = ? WHERE id = ?", (ts, uid))
+            conn.commit()
+            conn.close()
+        except Exception:
+            pass
+
+    background_tasks.add_task(_bg_update_last_active, user["id"], now)
 
     token = create_access_token(user["id"], user["username"], user["pin_hash"])
     return AuthResponse(token=token, user=format_user_profile(user))
