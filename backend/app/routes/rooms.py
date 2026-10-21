@@ -1917,6 +1917,8 @@ def get_room_results(code: str, user: dict = Depends(get_current_user)):
             "room_code": code,
             "mode": room.get("mode") or "MOCK_TEST",
             "status": room.get("status") or "COMPLETED",
+            "created_at": room.get("created_at"),
+            "completed_at": room.get("completed_at"),
             "total_questions": total_q,
             "max_marks": float(total_q * 4),
             "calibration_factor": calib_factor,

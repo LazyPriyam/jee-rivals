@@ -15,15 +15,19 @@ export function parseDate(dateOrIso) {
   if (dateOrIso instanceof Date) return isNaN(dateOrIso.getTime()) ? null : dateOrIso;
 
   if (typeof dateOrIso === "number") {
-    const d = new Date(dateOrIso);
+    const ts = dateOrIso < 1e11 ? dateOrIso * 1000 : dateOrIso;
+    const d = new Date(ts);
     return isNaN(d.getTime()) ? null : d;
   }
 
   let str = String(dateOrIso).trim();
   if (!str) return null;
 
-  // If ISO string without timezone indicator, treat as UTC
-  if (/^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(\.\d+)?$/.test(str)) {
+  // Check if string contains timezone indicator (Z, +HH:MM, -HH:MM, or GMT/UTC)
+  const hasTimezone = /(?:Z|[+-]\d{2}:?\d{2}|GMT|UTC)$/i.test(str);
+
+  // If ISO-like date string without timezone indicator, treat as UTC
+  if (!hasTimezone && /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(:\d{2})?(\.\d+)?$/.test(str)) {
     str = str.replace(" ", "T") + "Z";
   }
 
@@ -40,6 +44,16 @@ export function formatIST(dateOrIso, options = {}) {
   if (!d) return options.fallback || "Recently";
 
   try {
+    const isDateOnlyInput = typeof dateOrIso === "string" && /^\d{4}-\d{2}-\d{2}$/.test(dateOrIso.trim());
+    if (isDateOnlyInput || options.dateOnly) {
+      return new Intl.DateTimeFormat("en-IN", {
+        timeZone: IST_TIMEZONE,
+        day: "2-digit",
+        month: "short",
+        year: "numeric",
+      }).format(d);
+    }
+
     const datePart = new Intl.DateTimeFormat("en-IN", {
       timeZone: IST_TIMEZONE,
       day: "2-digit",
@@ -47,14 +61,15 @@ export function formatIST(dateOrIso, options = {}) {
       year: "numeric",
     }).format(d);
 
-    const timePart = new Intl.DateTimeFormat("en-IN", {
+    let timePart = new Intl.DateTimeFormat("en-IN", {
       timeZone: IST_TIMEZONE,
       hour: "2-digit",
       minute: "2-digit",
       hour12: true,
     }).format(d);
 
-    if (options.dateOnly) return datePart;
+    timePart = timePart.replace(/\b(am|pm)\b/i, (m) => m.toUpperCase());
+
     if (options.timeOnly) return `${timePart} IST`;
 
     return `${datePart}, ${timePart} IST`;
@@ -76,7 +91,20 @@ export function formatISTDate(dateOrIso, fallback = "N/A") {
  * e.g. "11:08 PM IST"
  */
 export function formatISTTime(dateOrIso, fallback = "N/A") {
-  return formatIST(dateOrIso, { timeOnly: true, fallback });
+  const d = parseDate(dateOrIso);
+  if (!d) return fallback;
+  try {
+    let timePart = new Intl.DateTimeFormat("en-IN", {
+      timeZone: IST_TIMEZONE,
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: true,
+    }).format(d);
+    timePart = timePart.replace(/\b(am|pm)\b/i, (m) => m.toUpperCase());
+    return `${timePart} IST`;
+  } catch (_) {
+    return fallback;
+  }
 }
 
 /**
@@ -88,18 +116,29 @@ export function formatISTDateTimeShort(dateOrIso, fallback = "Recently") {
   if (!d) return fallback;
 
   try {
+    const isDateOnlyInput = typeof dateOrIso === "string" && /^\d{4}-\d{2}-\d{2}$/.test(dateOrIso.trim());
+    if (isDateOnlyInput) {
+      return new Intl.DateTimeFormat("en-IN", {
+        timeZone: IST_TIMEZONE,
+        day: "2-digit",
+        month: "short",
+      }).format(d);
+    }
+
     const dayMonth = new Intl.DateTimeFormat("en-IN", {
       timeZone: IST_TIMEZONE,
       day: "2-digit",
       month: "short",
     }).format(d);
 
-    const timePart = new Intl.DateTimeFormat("en-IN", {
+    let timePart = new Intl.DateTimeFormat("en-IN", {
       timeZone: IST_TIMEZONE,
       hour: "2-digit",
       minute: "2-digit",
       hour12: true,
     }).format(d);
+
+    timePart = timePart.replace(/\b(am|pm)\b/i, (m) => m.toUpperCase());
 
     return `${dayMonth}, ${timePart} IST`;
   } catch (_) {

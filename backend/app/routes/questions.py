@@ -171,8 +171,9 @@ from backend.app.tools.question_verifier import audit_and_heal_question
 
 @router.get("/daily", response_model=List[QuestionOut])
 def get_daily_challenge():
-    """Generates 5 synchronized daily challenge questions based on today's UTC date seed."""
-    today_seed = datetime.datetime.utcnow().strftime("%Y%m%d")
+    """Generates 5 synchronized daily challenge questions based on today's Indian Standard Time (IST) date seed."""
+    ist_now = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=5, minutes=30)
+    today_seed = ist_now.strftime("%Y%m%d")
     cached_daily = _DAILY_CHALLENGE_CACHE.get(today_seed)
     if cached_daily:
         return cached_daily

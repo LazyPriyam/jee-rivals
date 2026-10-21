@@ -3,6 +3,7 @@ import { api } from '../utils/api';
 import MathRenderer from './MathRenderer';
 import OnDemandDerivationBox from './OnDemandDerivationBox';
 import { sound } from '../utils/sound';
+import { formatIST } from '../utils/dateUtils';
 import {
   ArrowLeft,
   ArrowRight,
@@ -701,8 +702,18 @@ export default function TestAnalysisView({
                 <h1 className="text-2xl sm:text-3xl font-black text-white tracking-tight print:text-black">
                   {data.preset_name || 'NTA Full Mock Examination'}
                 </h1>
-                <p className="text-slate-400 text-xs mt-1 font-mono print:text-slate-600">
-                  Paper Ref #{data.room_code} • NTA JEE Scheme (+4.0 Correct / -1.0 Negative Marking)
+                <p className="text-slate-400 text-xs mt-1 font-mono print:text-slate-600 flex flex-wrap items-center gap-1.5">
+                  <span>Paper Ref #{data.room_code}</span>
+                  <span>•</span>
+                  <span>NTA JEE Scheme (+4.0 Correct / -1.0 Negative Marking)</span>
+                  {(data.completed_at || data.created_at) && (
+                    <>
+                      <span>•</span>
+                      <span className="text-amber-300/90 font-bold">
+                        Examined on {formatIST(data.completed_at || data.created_at)}
+                      </span>
+                    </>
+                  )}
                 </p>
               </div>
 
