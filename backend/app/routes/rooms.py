@@ -1806,10 +1806,12 @@ def _safe_parse_list_or_json(val: Any) -> List[str]:
 @router.get("/{code}/results")
 def get_room_results(code: str, user: dict = Depends(get_current_user)):
     code = code.strip().upper()
-    conn = get_connection()
-    c = conn.cursor()
+    conn = None
 
     try:
+        conn = get_connection()
+        c = conn.cursor()
+
         c.execute("SELECT * FROM rooms WHERE code = ?", (code,))
         room_row = c.fetchone()
         if not room_row:
@@ -1819,24 +1821,47 @@ def get_room_results(code: str, user: dict = Depends(get_current_user)):
         room_id = room["id"]
 
         order_clause = "p.marks DESC, p.score DESC" if room.get("mode") == "MOCK_TEST" else "p.score DESC, p.marks DESC"
-        c.execute(f"""
-            SELECT p.*, u.username, u.avatar_id, u.avatar_image_url, u.title, u.overall_elo
-            FROM room_participants p
-            JOIN users u ON p.user_id = u.id
-            WHERE p.room_id = ?
-            ORDER BY {order_clause}
-        """, (room_id,))
-        part_rows = [dict(r) for r in c.fetchall()]
+        part_rows = []
+        try:
+            c.execute(f"""
+                SELECT p.*, u.username, u.avatar_id, u.avatar_image_url, u.title, u.overall_elo
+                FROM room_participants p
+                LEFT JOIN users u ON p.user_id = u.id
+                WHERE p.room_id = ?
+                ORDER BY {order_clause}
+            """, (room_id,))
+            part_rows = [dict(r) for r in c.fetchall()]
+        except Exception as part_err:
+            logger.warning(f"[ROOM_RESULTS] Fallback querying room participants: {part_err}")
+            try:
+                c.execute("SELECT * FROM room_participants WHERE room_id = ?", (room_id,))
+                part_rows = [dict(r) for r in c.fetchall()]
+            except Exception:
+                part_rows = []
 
         q_ids = _safe_parse_list_or_json(room.get("question_ids"))
         questions_data = []
         if q_ids:
-            from backend.app.tools.question_cache import get_questions_cached_batch
-            questions_map = get_questions_cached_batch(q_ids, cursor=c)
+            questions_map = {}
+            try:
+                from backend.app.tools.question_cache import get_questions_cached_batch
+                questions_map = get_questions_cached_batch(q_ids, cursor=c)
+            except Exception as batch_err:
+                logger.warning(f"[ROOM_RESULTS] question_cache batch error: {batch_err}")
+
             for q_id in q_ids:
-                qd = questions_map.get(str(q_id))
-                if qd:
-                    try:
+                try:
+                    qd = questions_map.get(str(q_id))
+                    if not qd:
+                        try:
+                            c.execute("SELECT * FROM questions WHERE id = ?", (str(q_id),))
+                            row_q = c.fetchone()
+                            if row_q:
+                                qd = dict(row_q)
+                        except Exception:
+                            qd = None
+
+                    if qd:
                         raw_formulas = qd.get("key_formulas")
                         try:
                             formulas = json.loads(raw_formulas) if isinstance(raw_formulas, str) else (raw_formulas or [])
@@ -1848,6 +1873,8 @@ def get_room_results(code: str, user: dict = Depends(get_current_user)):
                             clean_formulas = []
 
                         q_out = row_to_question_out(qd)
+                        q_dict = q_out.dict() if hasattr(q_out, "dict") else q_out.model_dump()
+
                         sol_out = QuestionSolutionOut(
                             id=str(qd.get("id") or q_id),
                             correct_answer=qd.get("correct_answer") if qd.get("correct_answer") is not None else "",
@@ -1855,12 +1882,14 @@ def get_room_results(code: str, user: dict = Depends(get_current_user)):
                             key_formulas=clean_formulas,
                             common_pitfall=qd.get("common_pitfall")
                         )
+                        sol_dict = sol_out.dict() if hasattr(sol_out, "dict") else sol_out.model_dump()
+
                         questions_data.append({
-                            "question": q_out.dict(),
-                            "solution": sol_out.dict()
+                            "question": q_dict,
+                            "solution": sol_dict
                         })
-                    except Exception as q_err:
-                        logger.warning(f"[ROOM_RESULTS] Skipping question {q_id} due to serialization note: {q_err}")
+                except Exception as q_err:
+                    logger.warning(f"[ROOM_RESULTS] Skipping question {q_id} due to serialization note: {q_err}")
 
         r_subjs_all = _safe_parse_list_or_json(room.get("subjects"))
         r_chaps_all = _safe_parse_list_or_json(room.get("chapters"))
@@ -1880,38 +1909,41 @@ def get_room_results(code: str, user: dict = Depends(get_current_user)):
         total_q = room.get("total_questions") or len(q_ids) or len(questions_data) or 1
         participants_summary = []
         for idx, p in enumerate(part_rows, start=1):
-            raw_ans = p.get("answers") or "{}"
             try:
-                answers_dict = json.loads(raw_ans) if isinstance(raw_ans, str) else raw_ans
-            except Exception:
-                answers_dict = {}
+                raw_ans = p.get("answers") or "{}"
+                try:
+                    answers_dict = json.loads(raw_ans) if isinstance(raw_ans, str) else raw_ans
+                except Exception:
+                    answers_dict = {}
 
-            if not isinstance(answers_dict, dict):
-                answers_dict = {}
+                if not isinstance(answers_dict, dict):
+                    answers_dict = {}
 
-            attempted_items = [
-                v for v in answers_dict.values()
-                if isinstance(v, dict) and v.get("selected") not in ("NONE", "SKIPPED", "", None) and v.get("attempted") is not False
-            ]
-            attempted_cnt = len(attempted_items)
-            corr_cnt = sum(1 for v in attempted_items if v.get("correct"))
-            acc = round((corr_cnt / attempted_cnt) * 100, 1) if attempted_cnt > 0 else 0.0
+                attempted_items = [
+                    v for v in answers_dict.values()
+                    if isinstance(v, dict) and v.get("selected") not in ("NONE", "SKIPPED", "", None) and v.get("attempted") is not False
+                ]
+                attempted_cnt = len(attempted_items)
+                corr_cnt = sum(1 for v in attempted_items if v.get("correct"))
+                acc = round((corr_cnt / attempted_cnt) * 100, 1) if attempted_cnt > 0 else 0.0
 
-            participants_summary.append({
-                "rank": idx,
-                "user_id": str(p.get("user_id") or ""),
-                "username": p.get("username") or "Candidate",
-                "avatar_id": p.get("avatar_id") or "default",
-                "avatar_image_url": p.get("avatar_image_url"),
-                "title": p.get("title") or "JEE Aspirant",
-                "score": float(p.get("score") or 0.0),
-                "marks": float(p.get("marks") if p.get("marks") is not None else 0.0),
-                "answers": answers_dict,
-                "total_attempted": attempted_cnt,
-                "correct_count": corr_cnt,
-                "accuracy": acc,
-                "is_finished": bool(p.get("is_finished"))
-            })
+                participants_summary.append({
+                    "rank": idx,
+                    "user_id": str(p.get("user_id") or ""),
+                    "username": p.get("username") or "Candidate",
+                    "avatar_id": p.get("avatar_id") or "default",
+                    "avatar_image_url": p.get("avatar_image_url"),
+                    "title": p.get("title") or "JEE Aspirant",
+                    "score": float(p.get("score") or 0.0),
+                    "marks": float(p.get("marks") if p.get("marks") is not None else 0.0),
+                    "answers": answers_dict,
+                    "total_attempted": attempted_cnt,
+                    "correct_count": corr_cnt,
+                    "accuracy": acc,
+                    "is_finished": bool(p.get("is_finished"))
+                })
+            except Exception as p_err:
+                logger.warning(f"[ROOM_RESULTS] Error formatting participant {p.get('user_id')}: {p_err}")
 
         return {
             "room_code": code,
@@ -1933,7 +1965,8 @@ def get_room_results(code: str, user: dict = Depends(get_current_user)):
         logger.error(f"[ROOM_RESULTS] Unhandled error tabulating results for room {code}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Failed to tabulate test analysis: {str(e)}")
     finally:
-        try:
-            conn.close()
-        except Exception:
-            pass
+        if conn:
+            try:
+                conn.close()
+            except Exception:
+                pass

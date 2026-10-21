@@ -1,10 +1,16 @@
 import os
+import logging
+import traceback
+import datetime
 from pathlib import Path
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Query, status
+from fastapi.requests import Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
+
+logger = logging.getLogger("jee_rivals.main")
 
 from backend.app.config import DIAGRAMS_DIR, BACKEND_DIR, STATIC_DIR
 from backend.app.database import init_db
@@ -107,6 +113,27 @@ app.include_router(updates_router)
 app.include_router(mastery_router)
 app.include_router(streaks_router)
 app.include_router(safety_router)
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    logger.error(f"[UNHANDLED_EXCEPTION] {request.method} {request.url.path}: {exc}", exc_info=True)
+    return JSONResponse(
+        status_code=500,
+        content={
+            "detail": f"Internal Server Error: {str(exc)}",
+            "type": exc.__class__.__name__,
+            "path": request.url.path
+        }
+    )
+
+@app.get("/api/version")
+def get_version():
+    ist_tz = datetime.timezone(datetime.timedelta(hours=5, minutes=30))
+    return {
+        "app": "JEE Rivals API",
+        "version": "1.0.1",
+        "timestamp_ist": datetime.datetime.now(ist_tz).strftime("%Y-%m-%d %H:%M:%S IST")
+    }
 
 
 # WebSocket Endpoint for Live Rooms

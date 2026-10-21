@@ -820,8 +820,16 @@ def get_all_reports(
     status: Optional[str] = Query(None),
     reporter_id: Optional[str] = Query(None),
     limit: int = Query(150, ge=1, le=500),
-    admin: bool = Depends(verify_admin_sync)
+    x_sync_token: Optional[str] = Header(None, alias="X-Sync-Token"),
+    current_user: Optional[dict] = Depends(get_optional_user)
 ):
+    is_admin = bool(x_sync_token and x_sync_token == ADMIN_SYNC_TOKEN)
+    is_self = bool(current_user and reporter_id and str(current_user.get("id")) == str(reporter_id))
+    if not is_admin and not is_self:
+        raise HTTPException(
+            status_code=403,
+            detail="Forbidden. Admin privileges or self-ownership required to view reports."
+        )
 
     conn = get_connection()
     c = conn.cursor()
