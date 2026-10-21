@@ -1794,6 +1794,120 @@ export default function TestAnalysisView({
                       );
                     })()}
 
+                    {/* Multiple Choice Options List with Color-Coded Answer Feedback */}
+                    {(() => {
+                      let rawOpts = q.options;
+                      if (typeof rawOpts === 'string') {
+                        try {
+                          rawOpts = JSON.parse(rawOpts);
+                        } catch (_) {
+                          rawOpts = [];
+                        }
+                      }
+                      if (!Array.isArray(rawOpts) || rawOpts.length === 0) return null;
+
+                      const normalizedOptions = rawOpts.map((opt, oIdx) => {
+                        if (typeof opt === 'string') {
+                          return { key: String.fromCharCode(65 + oIdx), text: opt };
+                        }
+                        return {
+                          key: opt?.key || String.fromCharCode(65 + oIdx),
+                          text: opt?.text || ''
+                        };
+                      });
+
+                      const correctKey = String(sol.correct_answer || '').trim().toUpperCase();
+                      const userKey = item.isAttempted ? String(item.userSelected || '').trim().toUpperCase() : null;
+
+                      // Support comma/space separated keys for multi-correct questions (e.g. "A, C")
+                      const correctSet = new Set(correctKey.split(/[, ]+/).filter(Boolean));
+                      const userSet = userKey ? new Set(userKey.split(/[, ]+/).filter(Boolean)) : new Set();
+
+                      return (
+                        <div className="my-4 space-y-2">
+                          <div className="text-[11px] font-mono uppercase tracking-wider text-slate-400 font-bold flex items-center justify-between pb-1">
+                            <span className="flex items-center gap-1.5">
+                              <span>Options</span>
+                              <span className="text-[10px] text-slate-500 font-normal">({normalizedOptions.length} choices)</span>
+                            </span>
+                            <span className="text-[11px] font-mono">
+                              {item.isCorrect ? (
+                                <span className="text-emerald-400 font-bold flex items-center gap-1">
+                                  <CheckCircle2 className="w-3 h-3" />
+                                  <span>Option {userKey} Correct (+4)</span>
+                                </span>
+                              ) : item.isAttempted ? (
+                                <span className="text-rose-400 font-bold flex items-center gap-1">
+                                  <XCircle className="w-3 h-3" />
+                                  <span>Selected {userKey} • Key is {correctKey} (-1)</span>
+                                </span>
+                              ) : (
+                                <span className="text-slate-500 font-normal">Skipped (Key: {correctKey})</span>
+                              )}
+                            </span>
+                          </div>
+
+                          <div className="grid grid-cols-1 gap-2.5">
+                            {normalizedOptions.map((opt) => {
+                              const optKey = String(opt.key).trim().toUpperCase();
+                              const isThisCorrect = correctSet.has(optKey) || correctKey === optKey;
+                              const isThisSelected = userSet.has(optKey) || userKey === optKey;
+
+                              let badgeStyle = "bg-white/5 border border-white/10 text-slate-400";
+                              let cardStyle = "bg-white/[0.02] border border-white/5 text-slate-300";
+                              let tag = null;
+
+                              if (isThisCorrect && isThisSelected) {
+                                cardStyle = "bg-emerald-950/35 border-emerald-500/60 text-emerald-100 ring-1 ring-emerald-500/30";
+                                badgeStyle = "bg-emerald-500 text-black font-black";
+                                tag = (
+                                  <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 font-bold flex items-center gap-1 shrink-0">
+                                    <CheckCircle2 className="w-3 h-3 text-emerald-400" />
+                                    <span>Your Selection • Correct</span>
+                                  </span>
+                                );
+                              } else if (isThisCorrect) {
+                                cardStyle = "bg-emerald-950/25 border-emerald-500/40 text-emerald-100";
+                                badgeStyle = "bg-emerald-500/30 text-emerald-300 border border-emerald-500/50 font-black";
+                                tag = (
+                                  <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 font-bold flex items-center gap-1 shrink-0">
+                                    <CheckCircle2 className="w-3 h-3 text-emerald-400" />
+                                    <span>Correct Answer</span>
+                                  </span>
+                                );
+                              } else if (isThisSelected) {
+                                cardStyle = "bg-rose-950/35 border-rose-500/60 text-rose-100 ring-1 ring-rose-500/30";
+                                badgeStyle = "bg-rose-500 text-white font-black";
+                                tag = (
+                                  <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-rose-500/20 text-rose-300 border border-rose-500/30 font-bold flex items-center gap-1 shrink-0">
+                                    <XCircle className="w-3 h-3 text-rose-400" />
+                                    <span>Your Incorrect Selection</span>
+                                  </span>
+                                );
+                              }
+
+                              return (
+                                <div
+                                  key={opt.key}
+                                  className={`p-3.5 rounded-2xl transition flex items-start justify-between gap-3 ${cardStyle}`}
+                                >
+                                  <div className="flex items-start gap-3 flex-1 min-w-0">
+                                    <span className={`w-6 h-6 rounded-lg flex items-center justify-center font-mono text-xs shrink-0 ${badgeStyle}`}>
+                                      {opt.key}
+                                    </span>
+                                    <div className="text-sm font-sans pt-0.5 flex-1 min-w-0 break-words leading-relaxed">
+                                      <MathRenderer content={opt.text} />
+                                    </div>
+                                  </div>
+                                  {tag}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      );
+                    })()}
+
                     {/* User Answer vs Correct Answer */}
                     <div className="p-3.5 rounded-2xl bg-black/40 border border-white/5 grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs font-mono">
                       <div>
