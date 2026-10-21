@@ -35,6 +35,18 @@ export default function TestHistoryView({ user, inspectUsername, onSelectTest, o
       setLoading(false);
       return;
     }
+    const cacheKey = `jee_cached_history_${targetUsername || 'me'}`;
+    try {
+      const cached = sessionStorage.getItem(cacheKey);
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          setHistory(parsed);
+          setLoading(false);
+        }
+      }
+    } catch (_) {}
+
     if (!history || history.length === 0) {
       setLoading(true);
     }
@@ -45,11 +57,21 @@ export default function TestHistoryView({ user, inspectUsername, onSelectTest, o
 
     req
       .then((data) => {
-        setHistory(data || []);
+        const list = Array.isArray(data) ? data : [];
+        setHistory(list);
         setLoading(false);
+        try {
+          sessionStorage.setItem(cacheKey, JSON.stringify(list));
+        } catch (_) {}
+        // Pre-warm the analysis cache for the latest completed test
+        if (list.length > 0 && list[0].code) {
+          api.rooms.results(list[0].code).catch(() => {});
+        }
       })
       .catch((err) => {
-        setError(err.message || 'Failed to retrieve test archives.');
+        if (!history || history.length === 0) {
+          setError(err.message || 'Failed to retrieve test archives.');
+        }
         setLoading(false);
       });
   };
@@ -390,6 +412,7 @@ export default function TestHistoryView({ user, inspectUsername, onSelectTest, o
                     </button>
                   ) : (
                     <button
+                      onMouseEnter={() => api.rooms.results(item.code).catch(() => {})}
                       onClick={() => {
                         sound.click();
                         onSelectTest(item.code, targetUsername);

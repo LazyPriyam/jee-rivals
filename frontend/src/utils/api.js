@@ -383,6 +383,7 @@ export const api = {
         body: JSON.stringify({ code, passcode }),
       }),
     get: (code) => request(`/api/rooms/${code}`),
+    getDetails: (code) => request(`/api/rooms/${code}`),
     leave: (code) =>
       request(`/api/rooms/${code}/leave`, {
         method: "POST",
@@ -415,7 +416,31 @@ export const api = {
         method: "POST",
         body: JSON.stringify({ answers, total_time_seconds, question_times, timeline }),
       }),
-    results: (code) => request(`/api/rooms/${code}/results`),
+    results: async (code) => {
+      const cleanCode = (code || "").trim().toUpperCase();
+      const cacheKey = `jee_cached_results_${cleanCode}`;
+      try {
+        const stored = sessionStorage.getItem(cacheKey);
+        if (stored) {
+          const parsed = JSON.parse(stored);
+          if (parsed && (parsed.questions?.length || parsed.participants?.length)) {
+            request(`/api/rooms/${cleanCode}/results`)
+              .then((fresh) => {
+                try {
+                  sessionStorage.setItem(cacheKey, JSON.stringify(fresh));
+                } catch (_) {}
+              })
+              .catch(() => {});
+            return parsed;
+          }
+        }
+      } catch (_) {}
+      const res = await request(`/api/rooms/${cleanCode}/results`);
+      try {
+        sessionStorage.setItem(cacheKey, JSON.stringify(res));
+      } catch (_) {}
+      return res;
+    },
     getMyHistory: () => request("/api/rooms/my/history"),
     getUserHistory: (username) => request(`/api/rooms/user/${encodeURIComponent(username)}/history`),
     getActive: () => request("/api/rooms/user/active"),

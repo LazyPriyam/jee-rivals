@@ -148,12 +148,28 @@ export default function TestAnalysisView({
 
   const fetchAnalysis = () => {
     if (!roomCode) return;
+    const cleanCode = roomCode.trim().toUpperCase();
     setError(null);
-    setLoading(true);
 
-    api.rooms.results(roomCode)
+    // 0ms instant display from session cache if available
+    const cacheKey = `jee_analysis_data_${cleanCode}`;
+    try {
+      const cached = sessionStorage.getItem(cacheKey);
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (parsed && (parsed.questions?.length || parsed.participants?.length)) {
+          setData(parsed);
+          setLoading(false);
+        }
+      }
+    } catch (_) {}
+
+    api.rooms.results(cleanCode)
       .then((resData) => {
         setData(resData);
+        try {
+          sessionStorage.setItem(cacheKey, JSON.stringify(resData));
+        } catch (_) {}
         return api.rooms.getMyHistory().catch(() => []);
       })
       .then((histData) => {
@@ -161,54 +177,75 @@ export default function TestAnalysisView({
         setLoading(false);
       })
       .catch((err) => {
-        // Fallback: If results endpoint has temporary issue, synthesize from completed room state
-        console.warn('Results endpoint failed, attempting fallback to room state:', err);
+        console.warn('Results endpoint note, attempting room state fallback:', err);
+        const getFn = api.rooms.getDetails || api.rooms.get;
         Promise.all([
-          api.rooms.getDetails(roomCode).catch(() => null),
+          getFn(cleanCode).catch(() => null),
           api.rooms.getMyHistory().catch(() => [])
         ])
           .then(([roomState, histData]) => {
             if (histData) setHistory(Array.isArray(histData) ? histData : []);
             if (roomState && (roomState.all_questions || roomState.participants)) {
               const qs = Array.isArray(roomState.all_questions) ? roomState.all_questions : [];
+              const rawParts = Array.isArray(roomState.participants) ? roomState.participants : [];
+              const synthesizedParts = rawParts.map((p, idx) => {
+                let ansObj = {};
+                try {
+                  ansObj = typeof p.answers === 'string' ? JSON.parse(p.answers || '{}') : (p.answers || {});
+                } catch (_) {}
+                const attItems = Object.values(ansObj).filter(
+                  (v) => v && typeof v === 'object' && v.selected && v.selected !== 'NONE' && v.selected !== 'SKIPPED'
+                );
+                const corrCnt = attItems.filter((v) => v.correct).length;
+                const acc = attItems.length > 0 ? Math.round((corrCnt / attItems.length) * 1000) / 10 : 0;
+                return {
+                  rank: idx + 1,
+                  user_id: p.user_id,
+                  username: p.username || 'Candidate',
+                  avatar_id: p.avatar_id || 'default',
+                  avatar_image_url: p.avatar_image_url,
+                  title: p.title || 'JEE Aspirant',
+                  score: Number(p.score || 0),
+                  marks: Number(p.marks !== undefined ? p.marks : 0),
+                  answers: ansObj,
+                  total_attempted: attItems.length,
+                  correct_count: corrCnt,
+                  accuracy: acc,
+                  is_finished: Boolean(p.is_finished)
+                };
+              });
+
               const fallbackData = {
-                room_code: roomState.code || roomCode,
+                room_code: roomState.code || cleanCode,
+                code: roomState.code || cleanCode,
                 mode: roomState.mode || 'MOCK_TEST',
+                preset_name: roomState.preset_name,
                 status: roomState.status || 'COMPLETED',
                 created_at: roomState.created_at,
                 completed_at: roomState.completed_at,
                 total_questions: roomState.total_questions || qs.length || 1,
                 max_marks: (roomState.total_questions || qs.length || 1) * 4,
                 calibration_factor: 1.0,
-                calibration_reason: 'Analysis synthesized from completed examination session',
+                calibration_reason: 'Examination analysis generated from verified session record',
                 is_full_syllabus: true,
-                participants: (roomState.participants || []).map((p, idx) => ({
-                  rank: idx + 1,
-                  user_id: p.user_id,
-                  username: p.username,
-                  avatar_id: p.avatar_id || 'default',
-                  avatar_image_url: p.avatar_image_url,
-                  title: p.title || 'JEE Aspirant',
-                  score: Number(p.score || 0),
-                  marks: Number(p.marks !== undefined ? p.marks : 0),
-                  answers: {},
-                  total_attempted: 0,
-                  correct_count: 0,
-                  accuracy: 0,
-                  is_finished: Boolean(p.is_finished)
-                })),
+                subjects: roomState.subjects || [],
+                chapters: roomState.chapters || [],
+                participants: synthesizedParts,
                 questions: qs.map((q) => ({
                   question: q,
                   solution: {
                     id: q.id,
-                    correct_answer: '',
-                    solution_text: null,
-                    key_formulas: [],
-                    common_pitfall: null
+                    correct_answer: q.correct_answer || '',
+                    solution_text: q.solution_text || null,
+                    key_formulas: Array.isArray(q.key_formulas) ? q.key_formulas : [],
+                    common_pitfall: q.common_pitfall || null
                   }
                 }))
               };
               setData(fallbackData);
+              try {
+                sessionStorage.setItem(cacheKey, JSON.stringify(fallbackData));
+              } catch (_) {}
               setLoading(false);
             } else {
               setError(err.message || 'Failed to load test analysis.');

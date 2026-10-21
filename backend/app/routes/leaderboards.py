@@ -103,7 +103,7 @@ def get_my_division_details(current_user: dict = Depends(get_current_user)):
 def get_weekly_leaderboard(limit: int = Query(50, ge=1, le=100)):
     now = time.time()
     cached = _WEEKLY_LB_CACHE.get(limit)
-    if cached and (now - cached[0] < 15.0):
+    if cached and (now - cached[0] < 60.0):
         return cached[1]
 
     try:
@@ -193,7 +193,7 @@ def get_elo_leaderboard(subject: str = Query("overall"), limit: int = Query(50, 
     now = time.time()
     cache_key = (subj, limit)
     cached = _ELO_LB_CACHE.get(cache_key)
-    if cached and (now - cached[0] < 15.0):
+    if cached and (now - cached[0] < 60.0):
         return cached[1]
 
     elo_col = "overall_elo"

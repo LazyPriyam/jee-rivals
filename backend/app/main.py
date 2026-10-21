@@ -55,7 +55,7 @@ async def run_periodic_season_checker():
             await asyncio.to_thread(check_and_execute_season_rollover)
         except Exception:
             pass
-        await asyncio.sleep(60)
+        await asyncio.sleep(300)
 
 async def run_question_cache_warmup():
     try:
@@ -75,7 +75,7 @@ async def run_abandoned_room_cleaner():
             clean_abandoned_rooms()
         except Exception:
             pass
-        await asyncio.sleep(90)
+        await asyncio.sleep(180)
 
 async def run_periodic_accounts_backup():
     while True:
@@ -84,7 +84,7 @@ async def run_periodic_accounts_backup():
             backup_all_users()
         except Exception:
             pass
-        await asyncio.sleep(600)
+        await asyncio.sleep(900)
 
 # CORS Middleware (permits local dev, mobile access, and cloud deploys)
 app.add_middleware(
@@ -116,13 +116,15 @@ app.include_router(safety_router)
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
-    logger.error(f"[UNHANDLED_EXCEPTION] {request.method} {request.url.path}: {exc}", exc_info=True)
+    tb = traceback.format_exc()
+    logger.error(f"[UNHANDLED_EXCEPTION] {request.method} {request.url.path}: {exc}\n{tb}")
     return JSONResponse(
         status_code=500,
         content={
             "detail": f"Internal Server Error: {str(exc)}",
             "type": exc.__class__.__name__,
-            "path": request.url.path
+            "path": request.url.path,
+            "traceback": tb
         }
     )
 

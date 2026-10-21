@@ -224,7 +224,7 @@ def get_current_user(credentials: Optional[HTTPAuthorizationCredentials] = Depen
     # 2. Fast In-Memory User Session Lookup (0.001ms - 1000x faster than remote HTTP)
     now = time.time()
     cached = _USER_CACHE.get(user_id)
-    if cached and (now - cached[0] < 60.0):
+    if cached and (now - cached[0] < 300.0):
         return cached[1]
 
     # 3. Database fetch on cache miss
@@ -237,7 +237,7 @@ def get_current_user(credentials: Optional[HTTPAuthorizationCredentials] = Depen
             detail="User account not found."
         )
 
-    # 4. Throttled Heartbeat: update last_active at most once every 120 seconds
+    # 4. Asynchronous Non-Blocking Throttled Heartbeat (0ms overhead)
     try:
         now_dt = datetime.datetime.now(datetime.timezone.utc)
         last_str = user.get("last_active")
@@ -252,11 +252,17 @@ def get_current_user(credentials: Optional[HTTPAuthorizationCredentials] = Depen
         if should_update:
             now_iso = now_dt.isoformat()
             user["last_active"] = now_iso
-            conn = get_connection()
-            c = conn.cursor()
-            c.execute("UPDATE users SET last_active = ? WHERE id = ?", (now_iso, user["id"]))
-            conn.commit()
-            conn.close()
+            import threading
+            def _async_heartbeat(uid, ts):
+                try:
+                    h_conn = get_connection()
+                    h_c = h_conn.cursor()
+                    h_c.execute("UPDATE users SET last_active = ? WHERE id = ?", (ts, uid))
+                    h_conn.commit()
+                    h_conn.close()
+                except Exception:
+                    pass
+            threading.Thread(target=_async_heartbeat, args=(user["id"], now_iso), daemon=True).start()
     except Exception:
         pass
 
@@ -272,7 +278,7 @@ def get_optional_user(credentials: Optional[HTTPAuthorizationCredentials] = Depe
     uid = str(payload["sub"])
     now = time.time()
     cached = _USER_CACHE.get(uid)
-    if cached and (now - cached[0] < 60.0):
+    if cached and (now - cached[0] < 300.0):
         return cached[1]
     user = get_user_by_id(uid)
     if not user:

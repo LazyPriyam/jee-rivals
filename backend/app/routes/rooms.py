@@ -4,9 +4,12 @@ import datetime
 import random
 import string
 import asyncio
+import logging
 from typing import List, Optional, Dict, Any
 from fastapi import APIRouter, HTTPException, Depends, status, BackgroundTasks
 from pydantic import BaseModel
+
+logger = logging.getLogger("jee_rivals.rooms")
 
 from backend.app.models import (
     RoomCreateRequest,
@@ -21,7 +24,7 @@ from backend.app.models import (
     ClassifyCumulativeRequest
 )
 from backend.app.database import get_connection, get_user_by_id
-from backend.app.auth import get_current_user, get_user_by_username, invalidate_user_cache
+from backend.app.auth import get_current_user, get_optional_user, get_user_by_username, invalidate_user_cache
 from backend.app.websockets.room_hub import room_hub
 from backend.app.routes.questions import row_to_question_out
 from backend.app.tools.question_verifier import audit_and_heal_question
@@ -1804,7 +1807,7 @@ def _safe_parse_list_or_json(val: Any) -> List[str]:
 
 
 @router.get("/{code}/results")
-def get_room_results(code: str, user: dict = Depends(get_current_user)):
+def get_room_results(code: str, user: Optional[dict] = Depends(get_optional_user)):
     code = code.strip().upper()
     conn = None
 
@@ -1873,7 +1876,7 @@ def get_room_results(code: str, user: dict = Depends(get_current_user)):
                             clean_formulas = []
 
                         q_out = row_to_question_out(qd)
-                        q_dict = q_out.dict() if hasattr(q_out, "dict") else q_out.model_dump()
+                        q_dict = q_out.model_dump() if hasattr(q_out, "model_dump") else q_out.dict()
 
                         sol_out = QuestionSolutionOut(
                             id=str(qd.get("id") or q_id),
@@ -1882,7 +1885,7 @@ def get_room_results(code: str, user: dict = Depends(get_current_user)):
                             key_formulas=clean_formulas,
                             common_pitfall=qd.get("common_pitfall")
                         )
-                        sol_dict = sol_out.dict() if hasattr(sol_out, "dict") else sol_out.model_dump()
+                        sol_dict = sol_out.model_dump() if hasattr(sol_out, "model_dump") else sol_out.dict()
 
                         questions_data.append({
                             "question": q_dict,
@@ -1898,8 +1901,9 @@ def get_room_results(code: str, user: dict = Depends(get_current_user)):
         calib_reason = "Full Syllabus Tri-Subject evaluation (100% Elo weight)"
         try:
             from backend.app.tools.elo_engine import calculate_chapter_calibration_factor
+            target_uid = str((user.get("id") if user else room.get("host_id")) or "")
             calib_factor, calib_reason = calculate_chapter_calibration_factor(
-                c, str(user.get("id") or ""), r_chaps_all, r_subjs_all
+                c, target_uid, r_chaps_all, r_subjs_all
             )
         except Exception as calib_err:
             logger.warning(f"[ROOM_RESULTS] Calibration factor note: {calib_err}")
@@ -1947,7 +1951,9 @@ def get_room_results(code: str, user: dict = Depends(get_current_user)):
 
         return {
             "room_code": code,
+            "code": code,
             "mode": room.get("mode") or "MOCK_TEST",
+            "preset_name": room.get("preset_name"),
             "status": room.get("status") or "COMPLETED",
             "created_at": room.get("created_at"),
             "completed_at": room.get("completed_at"),
@@ -1956,6 +1962,8 @@ def get_room_results(code: str, user: dict = Depends(get_current_user)):
             "calibration_factor": calib_factor,
             "calibration_reason": calib_reason,
             "is_full_syllabus": is_full_syllabus,
+            "subjects": r_subjs_all,
+            "chapters": r_chaps_all,
             "participants": participants_summary,
             "questions": questions_data
         }
