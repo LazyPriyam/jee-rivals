@@ -41,11 +41,47 @@ def sync_data(payload: SyncPayload, x_sync_token: Optional[str] = Header(None, a
     # 2. Upsert questions into database
     conn = get_connection()
     c = conn.cursor()
+
+    # Self-heal missing schema columns on target database
+    c.execute("PRAGMA table_info(questions)")
+    cols_info = c.fetchall()
+    valid_cols = set()
+    for row in cols_info:
+        if isinstance(row, (dict, list, tuple)):
+            valid_cols.add(row["name"] if isinstance(row, dict) else row[1])
+        else:
+            valid_cols.add(getattr(row, "name", row[1]))
+
+    expected_q_cols = [
+        ("target_exam", "TEXT DEFAULT 'MIXED'"),
+        ("passage_id", "TEXT"),
+        ("passage_title", "TEXT"),
+        ("passage_text", "TEXT"),
+        ("subquestion_index", "INTEGER DEFAULT 1"),
+        ("subquestion_total", "INTEGER DEFAULT 1"),
+        ("common_pitfall", "TEXT"),
+        ("key_formulas", "TEXT"),
+        ("source_book", "TEXT"),
+        ("validation_status", "TEXT DEFAULT 'VALIDATED'"),
+        ("validation_flags", "TEXT DEFAULT '[]'")
+    ]
+    for col_name, col_def in expected_q_cols:
+        if col_name not in valid_cols:
+            try:
+                c.execute(f"ALTER TABLE questions ADD COLUMN {col_name} {col_def}")
+                valid_cols.add(col_name)
+            except Exception as e:
+                print(f"[SYNC] Column self-heal notice ({col_name}): {e}")
+
     saved_questions = 0
+    errors = []
 
     for q in payload.questions:
         try:
-            q_id = q["id"]
+            q_id = q.get("id")
+            if not q_id:
+                continue
+
             subject = q.get("subject", "Physics")
             unit = q.get("unit", "")
             chapter = q.get("chapter", "General")
@@ -65,14 +101,19 @@ def sync_data(payload: SyncPayload, x_sync_token: Optional[str] = Header(None, a
 
             # Sanitize derivation and reconcile key if derivation concluded differently
             if sol_text:
-                from backend.app.tools.sync_solution_keys import clean_derivation_text, extract_derived_key, normalize_to_options
-                sol_text = clean_derivation_text(sol_text)
-                derived_key = extract_derived_key(sol_text, q_type, options_str)
-                if derived_key:
-                    der_norm = normalize_to_options(derived_key.upper(), options_str)
-                    cur_norm = normalize_to_options(correct_ans.upper(), options_str)
-                    if der_norm and der_norm != cur_norm:
-                        correct_ans = der_norm
+                try:
+                    from backend.app.tools.sync_solution_keys import clean_derivation_text, extract_derived_key, normalize_to_options
+                    clean_sol = clean_derivation_text(sol_text)
+                    if clean_sol:
+                        sol_text = clean_sol
+                    derived_key = extract_derived_key(sol_text, q_type, options_str)
+                    if derived_key:
+                        der_norm = normalize_to_options(derived_key.upper(), options_str)
+                        cur_norm = normalize_to_options(correct_ans.upper(), options_str)
+                        if der_norm and der_norm != cur_norm:
+                            correct_ans = der_norm
+                except Exception as ex_derive:
+                    print(f"[SYNC] Non-critical derivation sanitize note for {q_id}: {ex_derive}")
 
             raw_formulas = q.get("key_formulas", [])
             formulas_str = raw_formulas if isinstance(raw_formulas, str) else json.dumps(raw_formulas)
@@ -87,51 +128,55 @@ def sync_data(payload: SyncPayload, x_sync_token: Optional[str] = Header(None, a
             sub_tot = q.get("subquestion_total")
 
             raw_elo = q.get("elo_rating")
-            if raw_elo and int(raw_elo) not in (1350, 1500, 1850):
-                elo = int(raw_elo)
-            else:
-                from backend.app.tools.elo_engine import compute_seed_elo
-                elo = compute_seed_elo(q_id, target_exam, diff, q_type)
+            try:
+                if raw_elo and int(float(raw_elo)) not in (1350, 1500, 1850):
+                    elo = int(float(raw_elo))
+                else:
+                    from backend.app.tools.elo_engine import compute_seed_elo
+                    elo = compute_seed_elo(q_id, target_exam, diff, q_type)
+            except Exception:
+                elo = 1500
 
-            c.execute("""
-                INSERT INTO questions (
-                    id, subject, unit, chapter, question_type, text, options,
-                    has_diagram, diagram_urls, correct_answer, solution_text,
-                    key_formulas, common_pitfall, difficulty_tier, elo_rating,
-                    target_exam, passage_id, passage_title, passage_text,
-                    subquestion_index, subquestion_total
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(id) DO UPDATE SET
-                    subject = excluded.subject,
-                    unit = excluded.unit,
-                    chapter = excluded.chapter,
-                    question_type = excluded.question_type,
-                    text = excluded.text,
-                    options = excluded.options,
-                    has_diagram = excluded.has_diagram,
-                    diagram_urls = excluded.diagram_urls,
-                    correct_answer = excluded.correct_answer,
-                    solution_text = excluded.solution_text,
-                    key_formulas = excluded.key_formulas,
-                    common_pitfall = excluded.common_pitfall,
-                    difficulty_tier = excluded.difficulty_tier,
-                    elo_rating = excluded.elo_rating,
-                    target_exam = excluded.target_exam,
-                    passage_id = excluded.passage_id,
-                    passage_title = excluded.passage_title,
-                    passage_text = excluded.passage_text,
-                    subquestion_index = excluded.subquestion_index,
-                    subquestion_total = excluded.subquestion_total
-            """, (
-                q_id, subject, unit, chapter, q_type, text, options_str,
-                has_diag, urls_str, correct_ans, sol_text,
-                formulas_str, common_pitfall, diff, elo,
-                target_exam, passage_id, passage_title, passage_text,
-                sub_idx, sub_tot
-            ))
+            data_map = {
+                "id": q_id,
+                "subject": subject,
+                "unit": unit,
+                "chapter": chapter,
+                "question_type": q_type,
+                "text": text,
+                "options": options_str,
+                "has_diagram": has_diag,
+                "diagram_urls": urls_str,
+                "correct_answer": correct_ans,
+                "solution_text": sol_text,
+                "key_formulas": formulas_str,
+                "common_pitfall": common_pitfall,
+                "difficulty_tier": diff,
+                "elo_rating": elo,
+                "target_exam": target_exam,
+                "passage_id": passage_id,
+                "passage_title": passage_title,
+                "passage_text": passage_text,
+                "subquestion_index": sub_idx,
+                "subquestion_total": sub_tot
+            }
+
+            active_cols = [col for col in data_map.keys() if col in valid_cols]
+            placeholders = ", ".join(["?"] * len(active_cols))
+            update_clause = ", ".join([f"{col} = excluded.{col}" for col in active_cols if col != "id"])
+            values = [data_map[c_name] for c_name in active_cols]
+
+            c.execute(f"""
+                INSERT INTO questions ({', '.join(active_cols)})
+                VALUES ({placeholders})
+                ON CONFLICT(id) DO UPDATE SET {update_clause}
+            """, values)
             saved_questions += 1
         except Exception as e:
+            err_msg = f"Q {q.get('id')}: {type(e).__name__} - {e}"
             print(f"[SYNC] Error upserting question {q.get('id')}: {e}")
+            if len(errors) < 5:
+                errors.append(err_msg)
 
     conn.commit()
     conn.close()
@@ -147,7 +192,8 @@ def sync_data(payload: SyncPayload, x_sync_token: Optional[str] = Header(None, a
     return {
         "success": True,
         "synced_questions": saved_questions,
-        "synced_diagrams": saved_diagrams
+        "synced_diagrams": saved_diagrams,
+        "errors": errors
     }
 
 
