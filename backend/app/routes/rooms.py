@@ -203,7 +203,7 @@ def get_open_rooms():
 
 
 @router.get("/my/history")
-def get_user_test_history(user: dict = Depends(get_current_user), cursor=None):
+def get_user_test_history(user: dict = Depends(get_current_user), cursor=None, limit: int = 60):
     """Returns past completed mock tests, generated blueprints, and battle rooms with scores and analysis availability."""
     conn = None
     close_conn = False
@@ -224,8 +224,8 @@ def get_user_test_history(user: dict = Depends(get_current_user), cursor=None):
         WHERE p.user_id = ?
           AND (r.status IN ('IN_PROGRESS', 'COMPLETED') OR p.is_finished = 1)
         ORDER BY COALESCE(r.completed_at, p.finished_at, r.created_at) DESC
-        LIMIT 60
-    """, (user["id"],))
+        LIMIT ?
+    """, (user["id"], limit))
     rows = [dict(r) for r in c.fetchall()]
     if close_conn and conn:
         conn.close()

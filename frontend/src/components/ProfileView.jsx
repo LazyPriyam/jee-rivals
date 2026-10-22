@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
-import { api } from '../utils/api';
+import { api, getCachedProfile, setCachedProfile } from '../utils/api';
 import { sound } from '../utils/sound';
 import SphereGridSkillTree from './SphereGridSkillTree';
 import GrowthTriadRadar from './GrowthTriadRadar';
@@ -414,8 +414,40 @@ export default function ProfileView({
   onViewProfile,
   isActive
 }) {
-  const [data, setData] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const targetUsername = username || currentUser?.username;
+  const isOwnProfile = !username || (currentUser && username.toLowerCase() === currentUser.username.toLowerCase());
+
+  // Instant prefill from client memory cache or currentUser for 0ms initial load
+  const [data, setData] = useState(() => {
+    if (!targetUsername) return null;
+    const key = targetUsername.toLowerCase();
+    const cached = getCachedProfile(key);
+    if (cached) return cached;
+
+    if (isOwnProfile && currentUser) {
+      return {
+        profile: {
+          ...currentUser,
+          bio: currentUser.bio || 'Aiming for Top 500 AIR. PvP Aspirant.',
+          target_college: currentUser.target_college || 'IIT Bombay (Computer Science)',
+          target_exam_date: currentUser.target_exam_date || 'JEE Main Jan 2026',
+          banner_theme: currentUser.banner_theme || 'orange_cyber',
+          avatar_id: currentUser.avatar_id || 'flame',
+          title: currentUser.title || 'JEE Aspirant',
+        },
+        rank_history: [],
+        skill_tree: {},
+        achievements: [],
+        match_history: [],
+        test_history: [],
+        recent_activity: [],
+        chapter_breakdown: []
+      };
+    }
+    return null;
+  });
+  const [loading, setLoading] = useState(() => !data);
+  const [error, setError] = useState(null);
   const [activeSubTab, setActiveSubTab] = useState('overview'); // 'overview', 'skills', 'trophies', 'tests', 'matches'
   const [rankTrack, setRankTrack] = useState('main'); // 'main' | 'advanced'
   const [selectedSubject, setSelectedSubject] = useState('All');
@@ -447,9 +479,6 @@ export default function ProfileView({
     panY: 0,
   });
   const [cropPreview, setCropPreview] = useState(null);
-
-  const targetUsername = username || currentUser?.username;
-  const isOwnProfile = !username || (currentUser && username.toLowerCase() === currentUser.username.toLowerCase());
 
   // Real-time crop preview calculation
   useEffect(() => {
@@ -515,14 +544,16 @@ export default function ProfileView({
     });
   };
 
-  const fetchProfile = () => {
+  const fetchProfile = (force = false) => {
     if (targetUsername) {
       if (!data?.profile || data.profile.username?.toLowerCase() !== targetUsername.toLowerCase()) {
         setLoading(true);
       }
-      api.leaderboards.getProfile(targetUsername)
+      setError(null);
+      api.leaderboards.getProfile(targetUsername, force)
         .then((res) => {
           setData(res);
+          setCachedProfile(targetUsername, res);
           setLoading(false);
           if (res?.profile) {
             setEditForm({
@@ -539,6 +570,7 @@ export default function ProfileView({
         })
         .catch((err) => {
           console.error('Failed to load profile:', err);
+          setError(err?.message || 'Failed to load aspirant profile');
           setLoading(false);
         });
     }
@@ -553,7 +585,7 @@ export default function ProfileView({
   useEffect(() => {
     const handleUserUpdated = () => {
       if (isActive !== false) {
-        fetchProfile();
+        fetchProfile(true);
       }
     };
     window.addEventListener('jee_user_updated', handleUserUpdated);
@@ -574,7 +606,26 @@ export default function ProfileView({
     };
   }, [data?.profile?.banner_image_url]);
 
-  if (loading || !data) {
+  if (error && !data) {
+    return (
+      <div className="max-w-md mx-auto px-4 py-24 text-center space-y-4">
+        <div className="w-14 h-14 rounded-2xl bg-rose-500/10 border border-rose-500/30 flex items-center justify-center text-rose-400 mx-auto">
+          <AlertTriangle className="w-7 h-7" />
+        </div>
+        <h3 className="text-lg font-black text-white">Failed to Load Aspirant Dossier</h3>
+        <p className="text-xs text-slate-400 max-w-sm mx-auto leading-relaxed">{error}</p>
+        <button
+          onClick={() => fetchProfile(true)}
+          className="px-5 py-2.5 rounded-xl bg-orange-500 hover:bg-orange-600 text-white font-bold text-xs transition cursor-pointer inline-flex items-center gap-2 shadow-lg shadow-orange-950/40"
+        >
+          <RefreshCw className="w-3.5 h-3.5" />
+          <span>Retry Connection</span>
+        </button>
+      </div>
+    );
+  }
+
+  if (loading && !data) {
     return (
       <div className="max-w-6xl mx-auto px-4 py-24 text-center">
         <RefreshCw className="w-10 h-10 animate-spin text-orange-400 mx-auto mb-4" />

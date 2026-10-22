@@ -257,6 +257,35 @@ async function request(path, options = {}) {
   return res.json();
 }
 
+const _CLIENT_PROFILE_CACHE = new Map();
+
+export function getCachedProfile(username) {
+  if (!username) return null;
+  const key = String(username).trim().toLowerCase();
+  const entry = _CLIENT_PROFILE_CACHE.get(key);
+  if (!entry) return null;
+  // Cache for 30 seconds
+  if (Date.now() - entry.time > 30000) {
+    _CLIENT_PROFILE_CACHE.delete(key);
+    return null;
+  }
+  return entry.data;
+}
+
+export function setCachedProfile(username, data) {
+  if (!username || !data) return;
+  const key = String(username).trim().toLowerCase();
+  _CLIENT_PROFILE_CACHE.set(key, { time: Date.now(), data });
+}
+
+export function invalidateCachedProfile(username) {
+  if (username) {
+    _CLIENT_PROFILE_CACHE.delete(String(username).trim().toLowerCase());
+  } else {
+    _CLIENT_PROFILE_CACHE.clear();
+  }
+}
+
 export const api = {
   auth: {
     login: (username, pin) =>
@@ -274,6 +303,9 @@ export const api = {
       request("/api/auth/profile", {
         method: "POST",
         body: JSON.stringify(data),
+      }).then((res) => {
+        invalidateCachedProfile();
+        return res;
       }),
     updateLearntChapters: (chapters) =>
       request("/api/auth/learnt-chapters", {
@@ -468,12 +500,26 @@ export const api = {
     getElo: (subject = "overall", limit = 50) =>
       request(`/api/leaderboards/elo?subject=${subject}&limit=${limit}`),
     getDivisionDetails: () => request("/api/leaderboards/division/me"),
-    getProfile: (username) =>
-      request(`/api/leaderboards/profile/${encodeURIComponent(username)}`),
+    getProfile: (username, force = false) => {
+      const key = (username || "").toLowerCase();
+      if (!force) {
+        const cached = getCachedProfile(key);
+        if (cached) {
+          return Promise.resolve(cached);
+        }
+      }
+      return request(`/api/leaderboards/profile/${encodeURIComponent(username)}`).then((res) => {
+        setCachedProfile(key, res);
+        return res;
+      });
+    },
     updateProfile: (data) =>
       request("/api/leaderboards/profile/me", {
         method: "PUT",
         body: JSON.stringify(data),
+      }).then((res) => {
+        invalidateCachedProfile();
+        return res;
       }),
   },
   friends: {

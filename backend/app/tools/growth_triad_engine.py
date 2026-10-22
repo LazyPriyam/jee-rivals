@@ -198,6 +198,16 @@ def calculate_growth_triad(
             pass
 
     logged_chaps = {c["chapter"] for c in chapter_breakdown}
+    raw_stats = user.get("chapter_stats")
+    ch_stats = {}
+    if isinstance(raw_stats, str):
+        try:
+            ch_stats = json.loads(raw_stats)
+        except Exception:
+            ch_stats = {}
+    elif isinstance(raw_stats, dict):
+        ch_stats = raw_stats
+
     for ch_name, stat in ch_stats.items():
         if ch_name not in logged_chaps and isinstance(stat, dict) and stat.get("attempts", 0) > 0:
             c_att = stat.get("attempts", 0)

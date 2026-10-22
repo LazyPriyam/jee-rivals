@@ -18,6 +18,36 @@ router = APIRouter(prefix="/api/leaderboards", tags=["Leaderboards & Ranks"])
 _WEEKLY_LB_CACHE: dict = {}
 _ELO_LB_CACHE: dict = {}
 _PUBLIC_PROFILE_CACHE: dict = {}
+_CHAPTER_Q_COUNTS_CACHE: Optional[Tuple[float, Dict[str, int]]] = None
+
+
+def get_cached_chapter_question_counts(cursor=None) -> Dict[str, int]:
+    """Caches chapter question counts in memory for 10 minutes to avoid scanning 16,000 questions on every profile load."""
+    global _CHAPTER_Q_COUNTS_CACHE
+    now = time.time()
+    if _CHAPTER_Q_COUNTS_CACHE and (now - _CHAPTER_Q_COUNTS_CACHE[0] < 600.0):
+        return _CHAPTER_Q_COUNTS_CACHE[1]
+
+    counts: Dict[str, int] = {}
+    if cursor:
+        try:
+            cursor.execute("SELECT chapter, COUNT(*) as cnt FROM questions WHERE chapter IS NOT NULL GROUP BY chapter")
+            for r in cursor.fetchall():
+                ch = r["chapter"]
+                if ch:
+                    counts[ch] = int(r["cnt"])
+        except Exception:
+            pass
+
+    if not counts:
+        from backend.app.tools.question_cache import get_all_questions_cached
+        for q in get_all_questions_cached(cursor=cursor):
+            ch = q.get("chapter")
+            if ch:
+                counts[ch] = counts.get(ch, 0) + 1
+
+    _CHAPTER_Q_COUNTS_CACHE = (now, counts)
+    return counts
 
 def invalidate_leaderboard_caches(username: Optional[str] = None):
     global _WEEKLY_LB_CACHE, _ELO_LB_CACHE, _PUBLIC_PROFILE_CACHE
@@ -381,16 +411,12 @@ def get_public_profile(username: str):
         FROM activity_log
         WHERE user_id = ?
         ORDER BY id DESC
+        LIMIT 1000
     """, (user["id"],))
     activity_rows = [dict(r) for r in c.fetchall()]
 
-    # Compute chapter question counts from in-memory hot cache (0ms instead of remote SQL scan)
-    from backend.app.tools.question_cache import get_all_questions_cached
-    q_counts: Dict[str, int] = {}
-    for q in get_all_questions_cached(cursor=c):
-        ch = q.get("chapter")
-        if ch:
-            q_counts[ch] = q_counts.get(ch, 0) + 1
+    # Fast in-memory cached chapter question counts (0ms instead of scanning 16,000 questions)
+    q_counts = get_cached_chapter_question_counts(cursor=c)
     from backend.app.tools.jee_syllabus import get_unified_chapter_metrics
     unified_ch_metrics = get_unified_chapter_metrics(cursor=c, user_id=user["id"], user_dict=user)
     skill_tree_data = build_user_skill_tree(activity_rows, q_counts, unified_metrics=unified_ch_metrics)
@@ -510,10 +536,10 @@ def get_public_profile(username: str):
             "avg_time": round((sum_time / tot) if tot > 0 else 0, 1)
         })
 
-    # 7. Completed Mock Tests & Practice Examination Papers (reusing cursor c)
+    # 7. Completed Mock Tests & Practice Examination Papers (reusing cursor c, fast limit of 20 for profile)
     from backend.app.routes.rooms import get_user_test_history
     try:
-        test_history = get_user_test_history(user=user, cursor=c)
+        test_history = get_user_test_history(user=user, cursor=c, limit=20)
     except Exception:
         test_history = []
 
