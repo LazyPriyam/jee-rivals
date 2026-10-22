@@ -60,7 +60,7 @@ export default function TestAnalysisView({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
-  // 8-Page Dossier Navigation: 1 through 8
+  // 9-Page Dossier Navigation: 1 through 9
   const [currentPage, setCurrentPage] = useState(1);
 
   // Filters for Question-by-Question Audits (Pages 6, 7, 8)
@@ -76,6 +76,13 @@ export default function TestAnalysisView({
   // Filters for Chapter Matrix (Page 5)
   const [chapterSubjFilter, setChapterSubjFilter] = useState('ALL');
   const [chapterSortBy, setChapterSortBy] = useState('MARKS_LOST');
+
+  // Filters for Elo Dynamics (Page 9)
+  const [eloSubjFilter, setEloSubjFilter] = useState('ALL');
+  const [eloHardnessFilter, setEloHardnessFilter] = useState('ALL');
+  const [eloOutcomeFilter, setEloOutcomeFilter] = useState('ALL');
+  const [eloSearchQuery, setEloSearchQuery] = useState('');
+  const [chapterEloSortBy, setChapterEloSortBy] = useState('QUESTIONS_DESC');
 
   const fetchRoomReports = () => {
     if (!roomCode) return;
@@ -267,7 +274,7 @@ export default function TestAnalysisView({
   useEffect(() => {
     const handleKeyDown = (e) => {
       if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
-      if (e.key === 'ArrowRight' && currentPage < 8) {
+      if (e.key === 'ArrowRight' && currentPage < 9) {
         sound.click();
         setCurrentPage((p) => p + 1);
         window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -342,7 +349,7 @@ export default function TestAnalysisView({
         <div className="inline-block animate-spin text-orange-500 mb-4">
           <RefreshCw className="w-10 h-10" />
         </div>
-        <h2 className="text-xl font-bold text-white">Synthesizing 8-Page Examination Dossier...</h2>
+        <h2 className="text-xl font-bold text-white">Synthesizing 9-Page Examination Dossier...</h2>
         <p className="text-xs text-slate-400 mt-1">
           Computing time economics, timeline pacing blocks, cognitive archetypes, and chapter impact...
         </p>
@@ -690,6 +697,187 @@ export default function TestAnalysisView({
   const secondHalfAcc = secondHalfAtt > 0 ? Math.round((secondHalfCorr / secondHalfAtt) * 100) : 0;
   const fatigueDrop = firstHalfAcc - secondHalfAcc;
 
+  // Elo Dynamics Analysis Computation
+  const eloAnalytics = useMemo(() => {
+    if (data?.elo_analytics?.overall) {
+      return data.elo_analytics;
+    }
+
+    // Client-side synthesis if backend elo_analytics is absent
+    const uOverall = Number(myParticipant.overall_elo || user?.overall_elo || 1200.0);
+    const uPhysics = Number(user?.physics_elo || uOverall);
+    const uChemistry = Number(user?.chemistry_elo || uOverall);
+    const uMath = Number(user?.math_elo || uOverall);
+
+    const allQElos = processedQuestions.map((pq) => Number(pq.q?.elo_rating || 1500));
+    const avgPaperElo = allQElos.length > 0 ? allQElos.reduce((a, b) => a + b, 0) / allQElos.length : 1500.0;
+    const diff = (avgPaperElo - uOverall) / 400.0;
+    const clampedDiff = Math.max(-5.0, Math.min(5.0, diff));
+    const expectedAccRatio = 1.0 / (1.0 + Math.pow(10, clampedDiff));
+    const actualAccRatio = totalQuestions > 0 ? (correctCount / totalQuestions) : 0.0;
+    const calib = Number(data?.calibration_factor || 1.0);
+
+    const k = 24.0;
+    const rawDelta = k * (actualAccRatio - expectedAccRatio);
+    const overallDelta = Math.round(rawDelta * calib * 10) / 10;
+
+    // Subject deltas
+    const subDeltas = {};
+    ['Physics', 'Chemistry', 'Mathematics'].forEach((sName) => {
+      const sStat = subjectStats[sName];
+      const sBase = sName === 'Physics' ? uPhysics : (sName === 'Chemistry' ? uChemistry : uMath);
+      if (sStat && sStat.total > 0) {
+        const sActual = sStat.correct / sStat.total;
+        const sDiff = Math.max(-5.0, Math.min(5.0, (avgPaperElo - sBase) / 400.0));
+        const sExp = 1.0 / (1.0 + Math.pow(10, sDiff));
+        subDeltas[sName] = Math.round(k * (sActual - sExp) * 10) / 10;
+      } else {
+        subDeltas[sName] = 0.0;
+      }
+    });
+
+    // Chapter deltas
+    const chList = Object.values(chapterMap).map((cObj) => {
+      const cTot = cObj.total;
+      const cCor = cObj.correct;
+      const cAcc = cTot > 0 ? Math.round((cCor / cTot) * 1000) / 10 : 0.0;
+      const chQuestions = processedQuestions.filter((pq) => pq.q?.chapter === cObj.chapter);
+      const chElos = chQuestions.map((pq) => Number(pq.q?.elo_rating || 1500));
+      const chAvgQ = chElos.length > 0 ? chElos.reduce((a, b) => a + b, 0) / chElos.length : 1500.0;
+
+      const cBaseElo = 1200.0;
+      const cDiff = Math.max(-5.0, Math.min(5.0, (chAvgQ - cBaseElo) / 400.0));
+      const cExp = 1.0 / (1.0 + Math.pow(10, cDiff));
+      const cAct = cTot > 0 ? (cCor / cTot) : 0.0;
+      const cDelta = Math.round(k * (cAct - cExp) * 10) / 10;
+
+      return {
+        chapter: cObj.chapter,
+        subject: cObj.subject,
+        questions_count: cTot,
+        correct_count: cCor,
+        accuracy: cAcc,
+        starting_elo: Math.round((cBaseElo - cDelta) * 10) / 10,
+        delta: cDelta,
+        ending_elo: cBaseElo,
+        avg_question_elo: Math.round(chAvgQ * 10) / 10
+      };
+    });
+
+    return {
+      overall: {
+        starting_elo: Math.round((uOverall - overallDelta) * 10) / 10,
+        delta: overallDelta,
+        ending_elo: Math.round(uOverall * 10) / 10,
+        calibration_factor: calib,
+        calibration_reason: data?.calibration_reason || 'Calibrated based on full syllabus evaluation',
+        avg_question_elo: Math.round(avgPaperElo * 10) / 10,
+        expected_accuracy: Math.round(expectedAccRatio * 1000) / 10,
+        actual_accuracy: Math.round(actualAccRatio * 1000) / 10
+      },
+      subjects: {
+        Physics: {
+          starting_elo: Math.round((uPhysics - (subDeltas.Physics || 0.0)) * 10) / 10,
+          delta: subDeltas.Physics || 0.0,
+          ending_elo: uPhysics
+        },
+        Chemistry: {
+          starting_elo: Math.round((uChemistry - (subDeltas.Chemistry || 0.0)) * 10) / 10,
+          delta: subDeltas.Chemistry || 0.0,
+          ending_elo: uChemistry
+        },
+        Mathematics: {
+          starting_elo: Math.round((uMath - (subDeltas.Mathematics || 0.0)) * 10) / 10,
+          delta: subDeltas.Mathematics || 0.0,
+          ending_elo: uMath
+        }
+      },
+      chapters: chList
+    };
+  }, [data, myParticipant, user, processedQuestions, subjectStats, chapterMap, correctCount, totalQuestions]);
+
+  const getHardnessInfo = (elo) => {
+    const val = Number(elo || 1500);
+    if (val < 1350) {
+      return { tier: 'EASY', label: 'Foundational', color: 'text-emerald-400', bg: 'bg-emerald-500/10', border: 'border-emerald-500/30' };
+    }
+    if (val < 1650) {
+      return { tier: 'MEDIUM', label: 'Standard Main', color: 'text-sky-400', bg: 'bg-sky-500/10', border: 'border-sky-500/30' };
+    }
+    if (val < 1900) {
+      return { tier: 'HARD', label: 'Deep Conceptual', color: 'text-amber-400', bg: 'bg-amber-500/10', border: 'border-amber-500/30' };
+    }
+    if (val < 2150) {
+      return { tier: 'ADVANCED', label: 'Elite Frontier', color: 'text-purple-400', bg: 'bg-purple-500/10', border: 'border-purple-500/30' };
+    }
+    return { tier: 'APEX', label: 'Grandmaster Apex', color: 'text-rose-400', bg: 'bg-rose-500/10', border: 'border-rose-500/30' };
+  };
+
+  const getQuestionEloImpact = (qElo, isCorrect, isAttempted, uElo) => {
+    if (!isAttempted) return { delta: '0.0', deltaVal: 0, text: 'Tactical Triage (Skipped)', impactType: 'NEUTRAL' };
+    const qRating = Number(qElo || 1500);
+    const userRating = Number(uElo || 1200);
+    const diff = Math.max(-5.0, Math.min(5.0, (qRating - userRating) / 400.0));
+    const pExpected = 1.0 / (1.0 + Math.pow(10, diff));
+    const kFactor = 24.0;
+    if (isCorrect) {
+      const delta = Math.round(kFactor * (1.0 - pExpected) * 10) / 10;
+      return {
+        delta: `+${delta.toFixed(1)}`,
+        deltaVal: delta,
+        text: delta >= 14 ? 'Clutch Victory / High Value' : 'Expected Execution',
+        impactType: 'POSITIVE'
+      };
+    } else {
+      const delta = Math.round(kFactor * (0.0 - pExpected) * 10) / 10;
+      return {
+        delta: `${delta.toFixed(1)}`,
+        deltaVal: delta,
+        text: Math.abs(delta) >= 14 ? 'Severe Rating Leak (Unforced)' : 'Tough Challenge Miss',
+        impactType: 'NEGATIVE'
+      };
+    }
+  };
+
+  const displayedChapterElos = useMemo(() => {
+    let list = [...(eloAnalytics.chapters || [])];
+    if (chapterEloSortBy === 'QUESTIONS_DESC') {
+      list.sort((a, b) => b.questions_count - a.questions_count);
+    } else if (chapterEloSortBy === 'DELTA_DESC') {
+      list.sort((a, b) => b.delta - a.delta);
+    } else if (chapterEloSortBy === 'DELTA_ASC') {
+      list.sort((a, b) => a.delta - b.delta);
+    } else if (chapterEloSortBy === 'ACCURACY_ASC') {
+      list.sort((a, b) => a.accuracy - b.accuracy);
+    } else if (chapterEloSortBy === 'ACCURACY_DESC') {
+      list.sort((a, b) => b.accuracy - a.accuracy);
+    }
+    return list;
+  }, [eloAnalytics, chapterEloSortBy]);
+
+  const filteredEloQuestions = useMemo(() => {
+    return processedQuestions.filter((pq) => {
+      if (eloSubjFilter !== 'ALL' && pq.subj !== eloSubjFilter) return false;
+
+      const qElo = Number(pq.q?.elo_rating || 1500);
+      const hInfo = getHardnessInfo(qElo);
+      if (eloHardnessFilter !== 'ALL' && hInfo.tier !== eloHardnessFilter) return false;
+
+      if (eloOutcomeFilter === 'CORRECT' && !pq.isCorrect) return false;
+      if (eloOutcomeFilter === 'INCORRECT' && (!pq.isAttempted || pq.isCorrect)) return false;
+      if (eloOutcomeFilter === 'UNATTEMPTED' && pq.isAttempted) return false;
+
+      if (eloSearchQuery.trim()) {
+        const query = eloSearchQuery.toLowerCase();
+        const ch = (pq.q?.chapter || '').toLowerCase();
+        const text = (pq.q?.text || '').toLowerCase();
+        if (!ch.includes(query) && !text.includes(query)) return false;
+      }
+
+      return true;
+    });
+  }, [processedQuestions, eloSubjFilter, eloHardnessFilter, eloOutcomeFilter, eloSearchQuery]);
+
   // Pages Definition
   const PAGES = [
     { num: 1, title: 'Performance Overview', subtitle: 'The Big Picture' },
@@ -699,11 +887,12 @@ export default function TestAnalysisView({
     { num: 5, title: 'Chapter Performance', subtitle: 'Strengths & High-Yield Fixes' },
     { num: 6, title: 'Physics Q-by-Q', subtitle: 'Question-by-Question Audit' },
     { num: 7, title: 'Chemistry Q-by-Q', subtitle: 'Question-by-Question Audit' },
-    { num: 8, title: 'Maths Q-by-Q', subtitle: 'Question-by-Question Audit' }
+    { num: 8, title: 'Maths Q-by-Q', subtitle: 'Question-by-Question Audit' },
+    { num: 9, title: 'Elo & Rating Dynamics', subtitle: 'Overall, Chapter & Question Elo Trajectory' }
   ];
 
   const handleNextPage = () => {
-    if (currentPage < 8) {
+    if (currentPage < 9) {
       sound.click();
       setCurrentPage((p) => p + 1);
       window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -737,7 +926,7 @@ export default function TestAnalysisView({
             className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs border border-white/10 shadow transition cursor-pointer flex items-center gap-2"
           >
             <Printer className="w-3.5 h-3.5 text-orange-400" />
-            <span>Export 8-Page Dossier (PDF)</span>
+            <span>Export 9-Page Dossier (PDF)</span>
           </button>
           <span className="px-3 py-1 rounded-xl bg-orange-500/20 text-orange-400 font-mono text-xs font-bold border border-orange-500/30">
             {data.mode}
@@ -745,7 +934,7 @@ export default function TestAnalysisView({
         </div>
       </div>
 
-      {/* 8-PAGE NAVIGATION TABS BAR */}
+      {/* 9-PAGE NAVIGATION TABS BAR */}
       <div className="bg-[#121622] border border-white/10 rounded-3xl p-3 shadow-xl print:hidden">
         <div className="flex items-center justify-between gap-2 overflow-x-auto pb-1 scrollbar-none">
           {PAGES.map((page) => {
@@ -789,7 +978,7 @@ export default function TestAnalysisView({
               <div>
                 <div className="flex items-center gap-2 mb-2">
                   <span className="text-[10px] px-3 py-1 rounded-full bg-orange-950 border border-orange-500/40 text-orange-400 font-mono font-bold uppercase tracking-wider print:border-black print:text-black">
-                    Page 1 of 8 • Performance Overview
+                    Page 1 of 9 • Performance Overview
                   </span>
                 </div>
                 <h1 className="text-2xl sm:text-3xl font-black text-white tracking-tight print:text-black">
@@ -1012,7 +1201,7 @@ export default function TestAnalysisView({
             <div className="flex items-center justify-between pb-3 border-b border-white/5">
               <div>
                 <span className="text-[10px] px-2.5 py-0.5 rounded-full bg-cyan-950 border border-cyan-500/40 text-cyan-400 font-mono font-bold uppercase tracking-wider">
-                  Page 2 of 8 • Time Economics
+                  Page 2 of 9 • Time Economics
                 </span>
                 <h2 className="text-xl font-black text-white mt-1">Where the Examination Hours Went</h2>
               </div>
@@ -1152,7 +1341,7 @@ export default function TestAnalysisView({
             <div className="flex items-center justify-between pb-3 border-b border-white/5">
               <div>
                 <span className="text-[10px] px-2.5 py-0.5 rounded-full bg-purple-950 border border-purple-500/40 text-purple-300 font-mono font-bold uppercase tracking-wider">
-                  Page 3 of 8 • Strategy & Fatigue
+                  Page 3 of 9 • Strategy & Fatigue
                 </span>
                 <h2 className="text-xl font-black text-white mt-1">Timeline Progression & Fatigue Audit</h2>
               </div>
@@ -1247,7 +1436,7 @@ export default function TestAnalysisView({
             <div className="flex items-center justify-between pb-3 border-b border-white/5">
               <div>
                 <span className="text-[10px] px-2.5 py-0.5 rounded-full bg-amber-950 border border-amber-500/40 text-amber-400 font-mono font-bold uppercase tracking-wider">
-                  Page 4 of 8 • Triage Quality
+                  Page 4 of 9 • Triage Quality
                 </span>
                 <h2 className="text-xl font-black text-white mt-1">Were the Right Questions Attempted?</h2>
               </div>
@@ -1337,7 +1526,7 @@ export default function TestAnalysisView({
             <div className="flex items-center justify-between pb-3 border-b border-white/5">
               <div>
                 <span className="text-[10px] px-2.5 py-0.5 rounded-full bg-emerald-950 border border-emerald-500/40 text-emerald-400 font-mono font-bold uppercase tracking-wider">
-                  Page 5 of 8 • Chapter Audit
+                  Page 5 of 9 • Chapter Audit
                 </span>
                 <h2 className="text-xl font-black text-white mt-1">Which Chapters are Strong and Weak?</h2>
               </div>
@@ -1619,7 +1808,7 @@ export default function TestAnalysisView({
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-white/5">
                 <div>
                   <span className="text-[10px] px-2.5 py-0.5 rounded-full bg-orange-950 border border-orange-500/40 text-orange-400 font-mono font-bold uppercase tracking-wider">
-                    Page {currentPage} of 8 • {targetSubject} Audit
+                    Page {currentPage} of 9 • {targetSubject} Audit
                   </span>
                   <h2 className="text-2xl font-black text-white mt-1">
                     {targetSubject} Question-by-Question Diagnosis
@@ -2112,6 +2301,384 @@ export default function TestAnalysisView({
         );
       })()}
 
+      {/* ========================================================================= */}
+      {/* PAGE 9: ELO & RATING DYNAMICS */}
+      {/* ========================================================================= */}
+      {currentPage === 9 && (
+        <div className="space-y-6 animate-fadeIn">
+          {/* Executive Header Banner */}
+          <div className="bg-gradient-to-br from-[#1b2234] via-[#151a26] to-[#0e121c] border border-amber-500/30 rounded-3xl p-6 sm:p-8 shadow-2xl glow-orange-subtle print:border-black print:bg-white print:text-black">
+            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6 pb-6 border-b border-white/10 print:border-black">
+              <div>
+                <div className="flex items-center gap-2 mb-2">
+                  <span className="text-[10px] px-3 py-1 rounded-full bg-amber-950 border border-amber-500/40 text-amber-400 font-mono font-bold uppercase tracking-wider print:border-black print:text-black">
+                    Page 9 of 9 • Elo &amp; Rating Dynamics
+                  </span>
+                </div>
+                <h1 className="text-2xl sm:text-3xl font-black text-white tracking-tight print:text-black">
+                  Elo &amp; Rating Dynamics Dossier
+                </h1>
+                <p className="text-slate-400 text-xs mt-1 font-mono print:text-slate-600">
+                  Comprehensive audit of overall rating changes, chapter-level Elo shifts, and question hardness calibration.
+                </p>
+              </div>
+
+              {/* Overall Elo Hero Stats */}
+              <div className="flex items-center gap-4 bg-[#0f1420] border border-white/10 rounded-2xl p-4 sm:p-5 shadow-inner print:border-black print:bg-white">
+                <div className="text-center sm:text-left">
+                  <span className="text-[10px] text-slate-400 uppercase font-mono font-bold block mb-1">
+                    Overall Elo Shift
+                  </span>
+                  <div className="flex items-baseline gap-2">
+                    <span className="text-lg font-bold text-slate-500 font-mono line-through">
+                      {eloAnalytics.overall.starting_elo}
+                    </span>
+                    <span className="text-2xl sm:text-3xl font-black text-white font-mono">
+                      {eloAnalytics.overall.ending_elo}
+                    </span>
+                  </div>
+                </div>
+
+                <div className={`px-3.5 py-2 rounded-xl font-mono font-black text-sm border flex items-center gap-1.5 ${
+                  eloAnalytics.overall.delta >= 0
+                    ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
+                    : 'bg-red-500/10 border-red-500/30 text-red-400'
+                }`}>
+                  {eloAnalytics.overall.delta >= 0 ? (
+                    <TrendingUp className="w-4 h-4 text-emerald-400" />
+                  ) : (
+                    <TrendingDown className="w-4 h-4 text-red-400" />
+                  )}
+                  <span>{eloAnalytics.overall.delta >= 0 ? `+${eloAnalytics.overall.delta}` : eloAnalytics.overall.delta}</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Subject Elo Triad Cards */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-6">
+              {[
+                { subj: 'Physics', icon: '⚛️', color: 'border-cyan-500/30 text-cyan-400 bg-cyan-500/5' },
+                { subj: 'Chemistry', icon: '🧪', color: 'border-emerald-500/30 text-emerald-400 bg-emerald-500/5' },
+                { subj: 'Mathematics', icon: '📐', color: 'border-orange-500/30 text-orange-400 bg-orange-500/5' }
+              ].map(({ subj, icon, color }) => {
+                const sData = eloAnalytics.subjects[subj] || { starting_elo: 1200, delta: 0, ending_elo: 1200 };
+                return (
+                  <div key={subj} className={`rounded-2xl p-4 border ${color} flex items-center justify-between`}>
+                    <div>
+                      <div className="text-xs font-bold text-white flex items-center gap-1.5 mb-1">
+                        <span>{icon}</span>
+                        <span>{subj}</span>
+                      </div>
+                      <div className="text-xs text-slate-400 font-mono">
+                        {sData.starting_elo} → <strong className="text-white">{sData.ending_elo}</strong>
+                      </div>
+                    </div>
+                    <span className={`text-xs font-mono font-black px-2.5 py-1 rounded-lg border ${
+                      sData.delta >= 0
+                        ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
+                        : 'bg-red-500/10 border-red-500/30 text-red-400'
+                    }`}>
+                      {sData.delta >= 0 ? `+${sData.delta}` : sData.delta}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Benchmark Diagnostics Row */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-4">
+              <div className="bg-[#10141f] border border-white/5 rounded-2xl p-3">
+                <span className="text-[10px] text-slate-500 uppercase font-mono block">Average Paper Elo</span>
+                <span className="text-base font-black text-white font-mono">{eloAnalytics.overall.avg_question_elo}</span>
+                <span className="text-[10px] text-slate-400 block mt-0.5">Question Pool Mean</span>
+              </div>
+              <div className="bg-[#10141f] border border-white/5 rounded-2xl p-3">
+                <span className="text-[10px] text-slate-500 uppercase font-mono block">Expected Accuracy</span>
+                <span className="text-base font-black text-slate-300 font-mono">{eloAnalytics.overall.expected_accuracy}%</span>
+                <span className="text-[10px] text-slate-400 block mt-0.5">Based on Rating Deficit</span>
+              </div>
+              <div className="bg-[#10141f] border border-white/5 rounded-2xl p-3">
+                <span className="text-[10px] text-slate-500 uppercase font-mono block">Actual Accuracy</span>
+                <span className={`text-base font-black font-mono ${
+                  eloAnalytics.overall.actual_accuracy >= eloAnalytics.overall.expected_accuracy
+                    ? 'text-emerald-400'
+                    : 'text-amber-400'
+                }`}>
+                  {eloAnalytics.overall.actual_accuracy}%
+                </span>
+                <span className="text-[10px] text-slate-400 block mt-0.5">
+                  {eloAnalytics.overall.actual_accuracy >= eloAnalytics.overall.expected_accuracy
+                    ? `+${(eloAnalytics.overall.actual_accuracy - eloAnalytics.overall.expected_accuracy).toFixed(1)}% vs Expected`
+                    : `${(eloAnalytics.overall.actual_accuracy - eloAnalytics.overall.expected_accuracy).toFixed(1)}% vs Expected`}
+                </span>
+              </div>
+              <div className="bg-[#10141f] border border-white/5 rounded-2xl p-3">
+                <span className="text-[10px] text-slate-500 uppercase font-mono block">Calibration Weight</span>
+                <span className="text-base font-black text-amber-400 font-mono">
+                  {Math.round(eloAnalytics.overall.calibration_factor * 100)}%
+                </span>
+                <span className="text-[10px] text-slate-400 block mt-0.5 truncate" title={eloAnalytics.overall.calibration_reason}>
+                  {eloAnalytics.overall.calibration_reason}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {/* Section 2: Chapter-by-Chapter Elo Dynamics */}
+          <div className="bg-[#121622] border border-white/10 rounded-3xl p-6 sm:p-7 shadow-xl space-y-5 print:border-black print:bg-white">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-white/5 print:border-black">
+              <div>
+                <h2 className="text-base font-black text-white uppercase tracking-wider flex items-center gap-2 print:text-black">
+                  <BookOpen className="w-4 h-4 text-orange-400" />
+                  All Chapter Elo Changes in This Examination ({displayedChapterElos.length} Chapters)
+                </h2>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  Pre-test vs post-test chapter ratings, attempt accuracy, and immediate remedial drills.
+                </p>
+              </div>
+
+              {/* Sort & Chapter Filters */}
+              <div className="flex items-center gap-2">
+                <select
+                  value={chapterEloSortBy}
+                  onChange={(e) => setChapterEloSortBy(e.target.value)}
+                  className="px-3 py-1.5 bg-[#0a0d14] border border-white/15 rounded-xl text-white text-xs font-semibold focus:outline-none transition cursor-pointer"
+                >
+                  <option value="QUESTIONS_DESC">Sort: Most Questions Tested</option>
+                  <option value="DELTA_DESC">Sort: Highest Elo Gain</option>
+                  <option value="DELTA_ASC">Sort: Biggest Elo Drop</option>
+                  <option value="ACCURACY_ASC">Sort: Lowest Accuracy (Fix First)</option>
+                  <option value="ACCURACY_DESC">Sort: Highest Accuracy</option>
+                </select>
+              </div>
+            </div>
+
+            {/* Chapters Grid / Cards */}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3.5">
+              {displayedChapterElos.map((ch) => (
+                <div
+                  key={ch.chapter}
+                  className="bg-[#101524] border border-white/10 hover:border-orange-500/30 rounded-2xl p-4 shadow transition flex flex-col justify-between"
+                >
+                  <div>
+                    <div className="flex items-center justify-between gap-2 mb-1.5">
+                      <span className="text-[10px] font-mono text-slate-400 uppercase">
+                        {ch.subject}
+                      </span>
+                      <span className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded-full border ${
+                        ch.delta >= 0
+                          ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
+                          : 'bg-red-500/10 border-red-500/30 text-red-400'
+                      }`}>
+                        {ch.delta >= 0 ? `+${ch.delta}` : ch.delta} Elo
+                      </span>
+                    </div>
+
+                    <h4 className="text-xs font-bold text-white line-clamp-1 mb-2">
+                      {ch.chapter}
+                    </h4>
+
+                    {/* Elo Shift Bar */}
+                    <div className="p-2.5 rounded-xl bg-black/30 border border-white/5 space-y-1.5">
+                      <div className="flex items-center justify-between text-[11px] font-mono">
+                        <span className="text-slate-400">Chapter Elo:</span>
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-slate-500 line-through">{ch.starting_elo}</span>
+                          <span className="text-white font-bold">{ch.ending_elo}</span>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center justify-between text-[11px] font-mono">
+                        <span className="text-slate-400">Tested:</span>
+                        <span className="text-slate-200">
+                          {ch.correct_count} / {ch.questions_count} ({ch.accuracy}%)
+                        </span>
+                      </div>
+
+                      <div className="flex items-center justify-between text-[11px] font-mono">
+                        <span className="text-slate-400">Avg Question Elo:</span>
+                        <span className="text-amber-400 font-bold">{ch.avg_question_elo}</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {ch.accuracy < 60 && (
+                    <button
+                      type="button"
+                      onClick={() => handleLaunchRemedial(ch.subject, ch.chapter)}
+                      disabled={launchingDrill}
+                      className="mt-3 w-full py-1.5 px-3 rounded-xl bg-orange-500/10 hover:bg-orange-500/20 text-orange-400 border border-orange-500/30 text-[11px] font-bold transition flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
+                    >
+                      <Zap className="w-3 h-3 text-orange-400" />
+                      <span>{launchingDrill ? 'Launching Drill...' : 'Rescue Drill (5 Qs)'}</span>
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Section 3: Question-Level Elo & Hardness Level Matrix */}
+          <div className="bg-[#121622] border border-white/10 rounded-3xl p-6 sm:p-7 shadow-xl space-y-5 print:border-black print:bg-white">
+            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-4 border-b border-white/5 print:border-black">
+              <div>
+                <h2 className="text-base font-black text-white uppercase tracking-wider flex items-center gap-2 print:text-black">
+                  <Target className="w-4 h-4 text-orange-400" />
+                  Question Elos &amp; Hardness Level Matrix ({filteredEloQuestions.length} Questions)
+                </h2>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  Calibration details for every question in this paper: Elo difficulty, hardness classification, student result, and delta impact.
+                </p>
+              </div>
+
+              {/* Hardness Tier Legend Bar */}
+              <div className="flex flex-wrap items-center gap-1.5">
+                {[
+                  { tier: 'EASY', label: 'Easy (<1350)', color: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30' },
+                  { tier: 'MEDIUM', label: 'Medium (1350-1649)', color: 'bg-sky-500/10 text-sky-400 border-sky-500/30' },
+                  { tier: 'HARD', label: 'Hard (1650-1899)', color: 'bg-amber-500/10 text-amber-400 border-amber-500/30' },
+                  { tier: 'ADVANCED', label: 'Advanced (1900-2149)', color: 'bg-purple-500/10 text-purple-400 border-purple-500/30' },
+                  { tier: 'APEX', label: 'Apex (2150+)', color: 'bg-rose-500/10 text-rose-400 border-rose-500/30' }
+                ].map((h) => (
+                  <span key={h.tier} className={`text-[10px] font-mono px-2 py-0.5 rounded-lg border ${h.color}`}>
+                    {h.label}
+                  </span>
+                ))}
+              </div>
+            </div>
+
+            {/* Filter and Search Bar for Questions */}
+            <div className="flex flex-wrap items-center justify-between gap-3 bg-[#0d1019] p-3 rounded-2xl border border-white/5">
+              <div className="flex flex-wrap items-center gap-2">
+                {/* Subject Filter */}
+                <select
+                  value={eloSubjFilter}
+                  onChange={(e) => setEloSubjFilter(e.target.value)}
+                  className="px-2.5 py-1 bg-[#141a29] border border-white/10 rounded-xl text-white text-xs font-semibold focus:outline-none cursor-pointer"
+                >
+                  <option value="ALL">All Subjects</option>
+                  <option value="Physics">Physics ⚛️</option>
+                  <option value="Chemistry">Chemistry 🧪</option>
+                  <option value="Mathematics">Mathematics 📐</option>
+                </select>
+
+                {/* Hardness Filter */}
+                <select
+                  value={eloHardnessFilter}
+                  onChange={(e) => setEloHardnessFilter(e.target.value)}
+                  className="px-2.5 py-1 bg-[#141a29] border border-white/10 rounded-xl text-white text-xs font-semibold focus:outline-none cursor-pointer"
+                >
+                  <option value="ALL">All Hardness Levels</option>
+                  <option value="EASY">Easy / Foundational (&lt;1350)</option>
+                  <option value="MEDIUM">Medium / Standard (1350-1649)</option>
+                  <option value="HARD">Hard / Deep Conceptual (1650-1899)</option>
+                  <option value="ADVANCED">Advanced / Frontier (1900-2149)</option>
+                  <option value="APEX">Apex / Olympiad (2150+)</option>
+                </select>
+
+                {/* Outcome Filter */}
+                <select
+                  value={eloOutcomeFilter}
+                  onChange={(e) => setEloOutcomeFilter(e.target.value)}
+                  className="px-2.5 py-1 bg-[#141a29] border border-white/10 rounded-xl text-white text-xs font-semibold focus:outline-none cursor-pointer"
+                >
+                  <option value="ALL">All Outcomes</option>
+                  <option value="CORRECT">Correct (+4)</option>
+                  <option value="INCORRECT">Incorrect (-1)</option>
+                  <option value="UNATTEMPTED">Skipped / Unattempted</option>
+                </select>
+              </div>
+
+              {/* Text Search */}
+              <input
+                type="text"
+                placeholder="Search chapter or question..."
+                value={eloSearchQuery}
+                onChange={(e) => setEloSearchQuery(e.target.value)}
+                className="px-3 py-1 bg-[#141a29] border border-white/10 rounded-xl text-white text-xs placeholder-slate-500 focus:outline-none sm:w-60"
+              />
+            </div>
+
+            {/* Questions Table */}
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs font-mono">
+                <thead>
+                  <tr className="border-b border-white/10 text-slate-400 text-[10px] uppercase">
+                    <th className="py-2.5 px-3">Q#</th>
+                    <th className="py-2.5 px-3">Subject &amp; Chapter</th>
+                    <th className="py-2.5 px-3">Question Elo</th>
+                    <th className="py-2.5 px-3">Hardness Level</th>
+                    <th className="py-2.5 px-3">Type</th>
+                    <th className="py-2.5 px-3">Result &amp; Time</th>
+                    <th className="py-2.5 px-3">Rating Impact</th>
+                    <th className="py-2.5 px-3">Diagnosis</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-white/5">
+                  {filteredEloQuestions.map((pq) => {
+                    const qElo = pq.q?.elo_rating || 1500;
+                    const hInfo = getHardnessInfo(qElo);
+                    const qImpact = getQuestionEloImpact(qElo, pq.isCorrect, pq.isAttempted, user?.overall_elo);
+
+                    return (
+                      <tr key={pq.index} className="hover:bg-white/[0.02] transition">
+                        <td className="py-3 px-3 font-bold text-white">Q{pq.index}</td>
+                        <td className="py-3 px-3">
+                          <span className="text-[10px] text-slate-500 block uppercase">{pq.subj}</span>
+                          <span className="text-slate-200 font-sans font-medium text-xs line-clamp-1">{pq.q?.chapter}</span>
+                        </td>
+                        <td className="py-3 px-3 font-bold text-amber-300 font-mono text-sm">{qElo}</td>
+                        <td className="py-3 px-3">
+                          <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${hInfo.border} ${hInfo.bg} ${hInfo.color}`}>
+                            {hInfo.label}
+                          </span>
+                        </td>
+                        <td className="py-3 px-3 text-slate-400 text-[11px] font-mono">
+                          {pq.q?.question_type === 'SINGLE_CHOICE' ? 'SCQ' : (pq.q?.question_type === 'NUMERICAL' ? 'NVQ' : pq.q?.question_type || 'MCQ')}
+                        </td>
+                        <td className="py-3 px-3">
+                          <div className="flex items-center gap-1.5">
+                            {pq.isCorrect ? (
+                              <span className="text-emerald-400 font-bold flex items-center gap-1">
+                                <Check className="w-3.5 h-3.5" /> +4.0
+                              </span>
+                            ) : pq.isAttempted ? (
+                              <span className="text-red-400 font-bold flex items-center gap-1">
+                                <X className="w-3.5 h-3.5" /> -1.0
+                              </span>
+                            ) : (
+                              <span className="text-slate-500 font-bold">0.0 (Skip)</span>
+                            )}
+                            <span className="text-[10px] text-slate-500">({pq.timeSpent}s)</span>
+                          </div>
+                        </td>
+                        <td className="py-3 px-3 font-mono font-bold">
+                          <span className={
+                            qImpact.impactType === 'POSITIVE'
+                              ? 'text-emerald-400'
+                              : (qImpact.impactType === 'NEGATIVE' ? 'text-red-400' : 'text-slate-500')
+                          }>
+                            {qImpact.delta}
+                          </span>
+                        </td>
+                        <td className="py-3 px-3 text-[11px] font-sans text-slate-300">
+                          {qImpact.text}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+              {filteredEloQuestions.length === 0 && (
+                <div className="py-12 text-center text-slate-500 font-sans text-xs">
+                  No questions match your current filters.
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* BOTTOM PAGINATION CONTROLS */}
       <div className="flex items-center justify-between pt-6 border-t border-white/10 print:hidden">
         <button
@@ -2124,12 +2691,12 @@ export default function TestAnalysisView({
         </button>
 
         <span className="text-xs font-mono text-slate-400">
-          Page <strong className="text-white">{currentPage}</strong> of 8 • {PAGES[currentPage - 1]?.title}
+          Page <strong className="text-white">{currentPage}</strong> of 9 • {PAGES[currentPage - 1]?.title}
         </span>
 
         <button
           onClick={handleNextPage}
-          disabled={currentPage >= 8}
+          disabled={currentPage >= 9}
           className="px-5 py-3 rounded-2xl bg-orange-500 hover:bg-orange-600 disabled:opacity-30 disabled:pointer-events-none text-white font-bold text-xs transition cursor-pointer flex items-center gap-2 shadow-lg"
         >
           <span>Next Page</span>

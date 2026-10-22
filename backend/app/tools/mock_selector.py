@@ -352,9 +352,12 @@ def _pick_from_chapters_weighted(
             deficit = (tier_targets.get(tier, 0) - tier_counts.get(tier, 0)) if (tier_targets and tier_counts) else 0
 
             exam_rank = 0
-            if prefer_advanced:
+            if prefer_advanced or is_adv:
                 e_tag = (x.get("target_exam") or "").upper()
                 exam_rank = 0 if "ADV" in e_tag else (1 if "MIX" in e_tag else 2)
+            else:
+                e_tag = (x.get("target_exam") or "").upper()
+                exam_rank = 0 if ("MAIN" in e_tag or not e_tag) else (1 if "MIX" in e_tag else 2)
 
             return (
                 seen,

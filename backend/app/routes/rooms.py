@@ -2015,6 +2015,134 @@ def get_room_results(code: str, user: Optional[dict] = Depends(get_optional_user
             except Exception as p_err:
                 logger.warning(f"[ROOM_RESULTS] Error formatting participant {p.get('user_id')}: {p_err}")
 
+        # Compute Elo & Rating Dynamics for the examination
+        elo_analytics = None
+        try:
+            target_uid = str((user.get("id") if user else (part_rows[0]["user_id"] if part_rows else None)) or "")
+            if target_uid:
+                c.execute("SELECT overall_elo, physics_elo, chemistry_elo, math_elo FROM users WHERE id = ?", (target_uid,))
+                u_row = c.fetchone()
+                if u_row:
+                    u_overall = float(u_row["overall_elo"] or 1200.0)
+                    u_p = float(u_row["physics_elo"] or 1200.0)
+                    u_c = float(u_row["chemistry_elo"] or 1200.0)
+                    u_m = float(u_row["math_elo"] or 1200.0)
+                else:
+                    u_overall, u_p, u_c, u_m = 1200.0, 1200.0, 1200.0, 1200.0
+
+                u_ans = {}
+                for p in participants_summary:
+                    if str(p.get("user_id")) == target_uid:
+                        u_ans = p.get("answers") or {}
+                        break
+
+                from backend.app.tools.elo_engine import calculate_solo_match_elo_delta, calculate_mock_subject_and_overall_deltas
+                from backend.app.tools.jee_syllabus import normalize_chapter_name
+
+                ch_map = {}
+                subj_stats = {
+                    "Physics": {"correct": 0, "total": 0, "elos": []},
+                    "Chemistry": {"correct": 0, "total": 0, "elos": []},
+                    "Mathematics": {"correct": 0, "total": 0, "elos": []}
+                }
+                all_q_elos = []
+                correct_total = 0
+
+                for it in questions_data:
+                    q = it.get("question", {})
+                    qid = str(q.get("id", ""))
+                    q_ch = normalize_chapter_name(q.get("chapter", "General"))
+                    q_sub = q.get("subject", "Physics")
+                    norm_sub = "Physics" if "phys" in q_sub.lower() else ("Chemistry" if "chem" in q_sub.lower() else ("Mathematics" if "math" in q_sub.lower() else q_sub))
+                    q_elo = float(q.get("elo_rating") or 1500.0)
+                    all_q_elos.append(q_elo)
+
+                    if norm_sub in subj_stats:
+                        subj_stats[norm_sub]["total"] += 1
+                        subj_stats[norm_sub]["elos"].append(q_elo)
+
+                    if q_ch not in ch_map:
+                        ch_map[q_ch] = {"subject": norm_sub, "total": 0, "correct": 0, "elos": []}
+                    ch_map[q_ch]["total"] += 1
+                    ch_map[q_ch]["elos"].append(q_elo)
+
+                    u_sub = u_ans.get(qid)
+                    if isinstance(u_sub, dict) and u_sub.get("correct"):
+                        correct_total += 1
+                        if norm_sub in subj_stats:
+                            subj_stats[norm_sub]["correct"] += 1
+                        ch_map[q_ch]["correct"] += 1
+
+                overall_raw_delta = calculate_solo_match_elo_delta(u_overall, all_q_elos, correct_total, len(all_q_elos))
+                overall_delta = round(overall_raw_delta * calib_factor, 1)
+
+                mock_part = {"user_id": target_uid, "overall_elo": u_overall, "physics_elo": u_p, "chemistry_elo": u_c, "math_elo": u_m}
+                subj_deltas, _ = calculate_mock_subject_and_overall_deltas(mock_part, subj_stats, r_chaps_all)
+
+                c.execute("SELECT chapter, elo FROM user_chapter_elo WHERE user_id = ?", (target_uid,))
+                ch_rows = {normalize_chapter_name(r["chapter"]): float(r["elo"] or 1200.0) for r in c.fetchall()}
+
+                chapters_analytics = []
+                for ch, c_info in ch_map.items():
+                    ch_current = ch_rows.get(ch, 1200.0)
+                    c_tot = c_info["total"]
+                    c_cor = c_info["correct"]
+                    c_acc = round((c_cor / c_tot) * 100, 1) if c_tot > 0 else 0.0
+                    c_avg_q = sum(c_info["elos"]) / c_tot if c_tot > 0 else 1500.0
+
+                    c_delta = calculate_solo_match_elo_delta(ch_current, c_info["elos"], c_cor, c_tot)
+                    chapters_analytics.append({
+                        "chapter": ch,
+                        "subject": c_info["subject"],
+                        "questions_count": c_tot,
+                        "correct_count": c_cor,
+                        "accuracy": c_acc,
+                        "starting_elo": round(ch_current - c_delta, 1),
+                        "delta": round(c_delta, 1),
+                        "ending_elo": round(ch_current, 1),
+                        "avg_question_elo": round(c_avg_q, 1)
+                    })
+
+                chapters_analytics.sort(key=lambda x: (x["questions_count"], abs(x["delta"])), reverse=True)
+
+                avg_paper_elo = sum(all_q_elos) / len(all_q_elos) if all_q_elos else 1500.0
+                exp_diff = (avg_paper_elo - u_overall) / 400.0
+                exp_acc = round((1.0 / (1.0 + (10.0 ** max(-5.0, min(5.0, exp_diff))))) * 100, 1)
+                act_acc = round((correct_total / len(all_q_elos)) * 100, 1) if all_q_elos else 0.0
+
+                elo_analytics = {
+                    "overall": {
+                        "starting_elo": round(u_overall - overall_delta, 1),
+                        "delta": overall_delta,
+                        "ending_elo": round(u_overall, 1),
+                        "calibration_factor": calib_factor,
+                        "calibration_reason": calib_reason,
+                        "avg_question_elo": round(avg_paper_elo, 1),
+                        "expected_accuracy": exp_acc,
+                        "actual_accuracy": act_acc
+                    },
+                    "subjects": {
+                        "Physics": {
+                            "starting_elo": round(u_p - subj_deltas.get("physics_elo", 0.0), 1),
+                            "delta": round(subj_deltas.get("physics_elo", 0.0), 1),
+                            "ending_elo": round(u_p, 1)
+                        },
+                        "Chemistry": {
+                            "starting_elo": round(u_c - subj_deltas.get("chemistry_elo", 0.0), 1),
+                            "delta": round(subj_deltas.get("chemistry_elo", 0.0), 1),
+                            "ending_elo": round(u_c, 1)
+                        },
+                        "Mathematics": {
+                            "starting_elo": round(u_m - subj_deltas.get("math_elo", 0.0), 1),
+                            "delta": round(subj_deltas.get("math_elo", 0.0), 1),
+                            "ending_elo": round(u_m, 1)
+                        }
+                    },
+                    "chapters": chapters_analytics
+                }
+        except Exception as elo_err:
+            logger.warning(f"[ROOM_RESULTS] Elo analytics computation note: {elo_err}")
+
         return {
             "room_code": code,
             "code": code,
@@ -2031,7 +2159,8 @@ def get_room_results(code: str, user: Optional[dict] = Depends(get_optional_user
             "subjects": r_subjs_all,
             "chapters": r_chaps_all,
             "participants": participants_summary,
-            "questions": questions_data
+            "questions": questions_data,
+            "elo_analytics": elo_analytics
         }
     except HTTPException:
         raise
