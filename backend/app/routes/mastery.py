@@ -73,14 +73,17 @@ def get_chapter_weightage(chapter_name: str) -> str:
     return "LOW"
 
 
-def get_mastery_tier(elo: float) -> str:
-    if elo >= 1800.0:
+def get_mastery_tier(elo: float, attempts: int = 0, acc: float = 0.0) -> str:
+    """Authoritative tier mapping adhering to question volume and accuracy."""
+    if attempts == 0:
+        return "UNTESTED"
+    elif (attempts >= 8 and acc >= 70.0 and elo >= 1550.0) or (attempts >= 12 and acc >= 70.0):
         return "MASTERED"
-    elif elo >= 1500.0:
+    elif (attempts >= 5 and acc >= 60.0) or (attempts >= 8 and acc >= 50.0) or (attempts >= 5 and acc >= 50.0 and elo >= 1450.0):
         return "PROFICIENT"
-    elif elo >= 1300.0:
-        return "EMERGING"
-    return "CRITICAL"
+    elif (attempts >= 3 and acc < 40.0) or (attempts >= 5 and acc < 45.0) or (attempts >= 3 and acc < 50.0 and elo < 1300.0):
+        return "CRITICAL"
+    return "PRACTICING"
 
 
 class BookmarkRequest(BaseModel):

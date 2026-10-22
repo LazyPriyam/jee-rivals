@@ -418,7 +418,7 @@ def expand_allowed_chapters(chapters: List[str]) -> List[str]:
 
 
 def calculate_mastery_tier(total_attempts: int, correct: int, avg_time: float = 0.0) -> Dict[str, Any]:
-    """5-Tier RPG Mastery."""
+    """5-Tier RPG Mastery calibrated to genuine question attempts and accuracy."""
     acc = round((correct / total_attempts) * 100, 1) if total_attempts > 0 else 0.0
 
     if total_attempts == 0:
@@ -426,33 +426,41 @@ def calculate_mastery_tier(total_attempts: int, correct: int, avg_time: float = 
         tier_name = "Locked"
         tier_label = "Unattempted"
         badge_color = "slate"
-    elif correct >= 50 and acc >= 85.0:
+        tier = "UNTESTED"
+    elif total_attempts >= 25 and acc >= 85.0:
         tier_level = 4
         tier_name = "Apex"
         tier_label = "Grandmaster Apex"
         badge_color = "orange"
-    elif correct >= 30 and acc >= 80.0:
+        tier = "MASTERED"
+    elif total_attempts >= 8 and acc >= 70.0:
         tier_level = 3
         tier_name = "Mastered"
         tier_label = "Mastered"
         badge_color = "amber"
-    elif correct >= 15 and acc >= 65.0:
+        tier = "MASTERED"
+    elif (total_attempts >= 5 and acc >= 50.0) or (total_attempts >= 8 and acc >= 50.0):
         tier_level = 2
         tier_name = "Proficient"
         tier_label = "Proficient"
         badge_color = "emerald"
-    elif correct >= 5 and acc >= 40.0:
+        tier = "PROFICIENT"
+    elif (total_attempts >= 3 and acc < 40.0) or (total_attempts >= 5 and acc < 45.0):
         tier_level = 1
-        tier_name = "Novice"
-        tier_label = "Novice"
-        badge_color = "blue"
+        tier_name = "Critical"
+        tier_label = "Critical Trap"
+        badge_color = "rose"
+        tier = "CRITICAL"
     else:
         tier_level = 1
-        tier_name = "Initiate"
-        tier_label = "Initiate"
-        badge_color = "slate"
+        tier_name = "Practicing"
+        tier_label = "Practicing"
+        badge_color = "blue"
+        tier = "PRACTICING"
 
     return {
+        "tier": tier,
+        "mastery_tier": tier,
         "tier_level": tier_level,
         "tier_name": tier_name,
         "tier_label": tier_label,
@@ -498,6 +506,7 @@ def build_user_skill_tree(
 
     result_tree = {}
     total_mastered = 0
+    total_proficient = 0
     total_chapters = 0
 
     for subject, units in JEE_SYLLABUS.items():
@@ -516,17 +525,60 @@ def build_user_skill_tree(
                     attempts = u_item["attempts"]
                     correct = u_item["correct"]
                     avg_time = u_item.get("avg_time_seconds") or 0.0
-                    mastery = calculate_mastery_tier(attempts, correct, avg_time)
-                    mastery["elo"] = u_item["elo"]
-                    mastery["mastery_tier"] = u_item["mastery_tier"]
+                    mastery_tier = u_item.get("mastery_tier") or "UNTESTED"
+                    elo = u_item.get("elo") or 1200.0
+                    acc = round((correct / attempts * 100), 1) if attempts > 0 else 0.0
+
+                    if mastery_tier == "MASTERED":
+                        tier_level = 4 if (attempts >= 25 and acc >= 85.0) else 3
+                        tier_name = "Apex" if tier_level == 4 else "Mastered"
+                        tier_label = "Grandmaster Apex" if tier_level == 4 else "Mastered"
+                        badge_color = "orange" if tier_level == 4 else "amber"
+                    elif mastery_tier == "PROFICIENT":
+                        tier_level = 2
+                        tier_name = "Proficient"
+                        tier_label = "Proficient"
+                        badge_color = "emerald"
+                    elif mastery_tier == "CRITICAL":
+                        tier_level = 1
+                        tier_name = "Critical"
+                        tier_label = "Critical Trap"
+                        badge_color = "rose"
+                    elif mastery_tier == "PRACTICING":
+                        tier_level = 1
+                        tier_name = "Practicing"
+                        tier_label = "Practicing"
+                        badge_color = "blue"
+                    else:
+                        tier_level = 0
+                        tier_name = "Locked"
+                        tier_label = "Unattempted"
+                        badge_color = "slate"
+
+                    mastery = {
+                        "tier": mastery_tier,
+                        "mastery_tier": mastery_tier,
+                        "tier_level": tier_level,
+                        "tier_name": tier_name,
+                        "tier_label": tier_label,
+                        "badge_color": badge_color,
+                        "attempts": attempts,
+                        "correct": correct,
+                        "accuracy": acc,
+                        "avg_time": round(avg_time, 1),
+                        "elo": elo
+                    }
                 else:
                     key = f"{subject}::{chap_name}"
                     stat = stats_map.get(key, {"attempts": 0, "correct": 0, "total_time": 0.0})
                     avg_time = (stat["total_time"] / stat["attempts"]) if stat["attempts"] > 0 else 0.0
                     mastery = calculate_mastery_tier(stat["attempts"], stat["correct"], avg_time)
+                    mastery["elo"] = 1200.0
 
-                if mastery.get("tier_level", 0) >= 2 or mastery.get("mastery_tier") in ("MASTERED", "PROFICIENT"):
+                if mastery.get("tier_level", 0) >= 3 or mastery.get("mastery_tier") == "MASTERED":
                     total_mastered += 1
+                elif mastery.get("tier_level", 0) == 2 or mastery.get("mastery_tier") == "PROFICIENT":
+                    total_proficient += 1
 
                 q_count = (chapter_question_counts or {}).get(chap_name, 0)
 
@@ -542,8 +594,9 @@ def build_user_skill_tree(
 
     if unified_metrics:
         total_chapters = unified_metrics.get("total_chapters", total_chapters)
-        total_mastered = unified_metrics.get("mastered_count", 0) + unified_metrics.get("proficient_count", 0)
-        mastery_percentage = unified_metrics.get("coverage_percent", 0.0)
+        total_mastered = unified_metrics.get("mastered_count", 0)
+        total_proficient = unified_metrics.get("proficient_count", 0)
+        mastery_percentage = round((total_mastered / total_chapters) * 100, 1) if total_chapters > 0 else 0.0
     else:
         mastery_percentage = round((total_mastered / total_chapters) * 100, 1) if total_chapters > 0 else 0.0
 
@@ -551,6 +604,8 @@ def build_user_skill_tree(
         "tree": result_tree,
         "total_chapters": total_chapters,
         "total_mastered": total_mastered,
+        "total_proficient": total_proficient,
+        "total_proficient_or_mastered": total_mastered + total_proficient,
         "mastery_percentage": mastery_percentage
     }
 
@@ -799,10 +854,10 @@ def get_unified_chapter_metrics(
     Eliminates discrepancies between profile, mastery, growth triad, and practice modules.
 
     Evaluates chapters strictly from questions solved, accuracy, and Elo:
-      - MASTERED: >= 10 solved and >= 70% accuracy, or Elo >= 1800
-      - PROFICIENT: >= 5 solved and >= 50% accuracy, or Elo >= 1500
-      - PRACTICING: 1 to 4 solved (or >= 5 with emerging accuracy)
-      - CRITICAL: >= 5 solved and < 40% accuracy and Elo < 1300
+      - MASTERED: >= 8 solved, >= 70% accuracy and Elo >= 1550 (or >= 12 solved and >= 70% accuracy)
+      - PROFICIENT: >= 5 solved and >= 60% accuracy (or >= 8 solved and >= 50% accuracy)
+      - PRACTICING: Active practice (1 to 4 solved, or developing accuracy)
+      - CRITICAL: >= 3 solved with < 40% accuracy
       - UNTESTED: 0 solved
     """
     import json
@@ -828,7 +883,7 @@ def get_unified_chapter_metrics(
             "coverage_percent": 0.0,
             "active_chapters": [],
             "proficient_or_mastered_chapters": [],
-            "tier_summary": {"MASTERED": 0, "PROFICIENT": 0, "PRACTICING": 0, "CRITICAL": 0, "UNTESTED": total_canonical},
+            "tier_summary": {"MASTERED": 0, "PROFICIENT": 0, "PRACTICING": 0, "EMERGING": 0, "CRITICAL": 0, "UNTESTED": total_canonical},
             "by_subject": by_subj_default,
             "chapters": []
         }
@@ -924,6 +979,7 @@ def get_unified_chapter_metrics(
         "MASTERED": 0,
         "PROFICIENT": 0,
         "PRACTICING": 0,
+        "EMERGING": 0,
         "CRITICAL": 0,
         "UNTESTED": 0
     }
@@ -972,18 +1028,21 @@ def get_unified_chapter_metrics(
                 last_upd = (rec_elo.get("last_updated") if rec_elo else None)
 
                 # Determine Proficiency Tier strictly from questions solved & performance
+                # Genuine mastery requires proven volume, high accuracy, and calibrated Elo
                 if attempts == 0:
                     tier = "UNTESTED"
-                elif (attempts >= 10 and acc >= 70.0) or elo_val >= 1800.0:
+                elif (attempts >= 8 and acc >= 70.0 and elo_val >= 1550.0) or (attempts >= 12 and acc >= 70.0):
                     tier = "MASTERED"
-                elif (attempts >= 5 and acc >= 50.0) or elo_val >= 1500.0:
+                elif (attempts >= 5 and acc >= 60.0) or (attempts >= 8 and acc >= 50.0) or (attempts >= 5 and acc >= 50.0 and elo_val >= 1450.0):
                     tier = "PROFICIENT"
-                elif attempts >= 5 and acc < 40.0 and elo_val < 1300.0:
+                elif (attempts >= 3 and acc < 40.0) or (attempts >= 5 and acc < 45.0) or (attempts >= 3 and acc < 50.0 and elo_val < 1300.0):
                     tier = "CRITICAL"
                 else:
                     tier = "PRACTICING"
 
                 tier_summary[tier] += 1
+                if tier == "PRACTICING":
+                    tier_summary["EMERGING"] += 1
 
                 # Subject-wise tracking
                 subj_group = by_subject.get(subject)

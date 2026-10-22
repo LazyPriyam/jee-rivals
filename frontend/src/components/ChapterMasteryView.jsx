@@ -393,7 +393,7 @@ export default function ChapterMasteryView({
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
             <div className="bg-[#121622] border border-emerald-500/30 rounded-2xl p-4 shadow-lg flex items-center justify-between">
               <div>
-                <div className="text-[10px] font-bold text-emerald-400 uppercase tracking-wider">Mastered (1800+)</div>
+                <div className="text-[10px] font-bold text-emerald-400 uppercase tracking-wider">Mastered (8+ Qs, 70%+ Acc)</div>
                 <div className="text-2xl font-black text-white mt-1">
                   {chaptersData.tier_summary?.MASTERED || 0}
                   <span className="text-xs text-slate-500 font-normal"> / {totalChaptersCount}</span>
@@ -406,7 +406,7 @@ export default function ChapterMasteryView({
 
             <div className="bg-[#121622] border border-blue-500/30 rounded-2xl p-4 shadow-lg flex items-center justify-between">
               <div>
-                <div className="text-[10px] font-bold text-blue-400 uppercase tracking-wider">Proficient (1500-1799)</div>
+                <div className="text-[10px] font-bold text-blue-400 uppercase tracking-wider">Proficient (5+ Qs, 50%+ Acc)</div>
                 <div className="text-2xl font-black text-white mt-1">
                   {chaptersData.tier_summary?.PROFICIENT || 0}
                   <span className="text-xs text-slate-500 font-normal"> / {totalChaptersCount}</span>
@@ -419,9 +419,9 @@ export default function ChapterMasteryView({
 
             <div className="bg-[#121622] border border-amber-500/30 rounded-2xl p-4 shadow-lg flex items-center justify-between">
               <div>
-                <div className="text-[10px] font-bold text-amber-400 uppercase tracking-wider">Emerging (1300-1499)</div>
+                <div className="text-[10px] font-bold text-amber-400 uppercase tracking-wider">Practicing (Active)</div>
                 <div className="text-2xl font-black text-white mt-1">
-                  {chaptersData.tier_summary?.EMERGING || 0}
+                  {(chaptersData.tier_summary?.PRACTICING ?? chaptersData.tier_summary?.EMERGING) || 0}
                   <span className="text-xs text-slate-500 font-normal"> / {totalChaptersCount}</span>
                 </div>
               </div>
@@ -432,7 +432,7 @@ export default function ChapterMasteryView({
 
             <div className="bg-[#121622] border border-red-500/30 rounded-2xl p-4 shadow-lg flex items-center justify-between">
               <div>
-                <div className="text-[10px] font-bold text-red-400 uppercase tracking-wider">Critical (&lt;1300)</div>
+                <div className="text-[10px] font-bold text-red-400 uppercase tracking-wider">Critical Trap (&lt;40% Acc)</div>
                 <div className="text-2xl font-black text-white mt-1">
                   {chaptersData.tier_summary?.CRITICAL || 0}
                   <span className="text-xs text-slate-500 font-normal"> / {totalChaptersCount}</span>

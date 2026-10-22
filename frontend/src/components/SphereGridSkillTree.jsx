@@ -183,18 +183,40 @@ const DEFAULT_SYLLABUS = {
 };
 
 const TIER_COLORS = {
-  Locked: '#64748b',
-  Novice: '#b45309',
-  Proficient: '#0284c7',
+  MASTERED: '#f59e0b',
+  PROFICIENT: '#0284c7',
+  PRACTICING: '#3b82f6',
+  CRITICAL: '#ef4444',
+  UNTESTED: '#64748b',
+  EMERGING: '#3b82f6',
+  Mastered: '#f59e0b',
   Master: '#f59e0b',
+  Proficient: '#0284c7',
+  Practicing: '#3b82f6',
+  Emerging: '#3b82f6',
+  Initiate: '#64748b',
+  Novice: '#b45309',
+  Critical: '#ef4444',
+  Locked: '#64748b',
   Apex: '#c084fc',
 };
 
 const TIER_NAMES = {
-  Locked: 'Unattempted',
-  Novice: 'Initiate',
-  Proficient: 'Proficient',
+  MASTERED: 'Mastered',
+  PROFICIENT: 'Proficient',
+  PRACTICING: 'Practicing',
+  CRITICAL: 'Critical Trap',
+  UNTESTED: 'Unattempted',
+  EMERGING: 'Practicing',
+  Mastered: 'Mastered',
   Master: 'Mastered',
+  Proficient: 'Proficient',
+  Practicing: 'Practicing',
+  Emerging: 'Practicing',
+  Initiate: 'Initiate',
+  Novice: 'Initiate',
+  Critical: 'Critical Trap',
+  Locked: 'Unattempted',
   Apex: 'Apex Tier',
 };
 
@@ -362,14 +384,16 @@ export default function SphereGridSkillTree({
               return String(str).toLowerCase() === String(chapName).toLowerCase();
             });
           }
+          const rawTier = cData?.mastery_tier || cData?.tier || cData?.tier_name || 'UNTESTED';
           return {
             name: chapName,
             subject: subj,
             unit: dUnit.unit,
             question_count: cData?.question_count || liveQCount || 0,
-            tier: cData?.tier || 'Locked',
-            tier_level: cData?.tier_level || 0,
-            badge: cData?.badge || 'Unattempted',
+            tier: rawTier,
+            mastery_tier: cData?.mastery_tier || rawTier,
+            tier_level: cData?.tier_level ?? (rawTier === 'MASTERED' ? 3 : (rawTier === 'PROFICIENT' ? 2 : 1)),
+            badge: cData?.badge || cData?.tier_label || 'Unattempted',
             attempts: cData?.attempts || 0,
             correct: cData?.correct || 0,
             accuracy: cData?.accuracy || 0,
@@ -518,19 +542,19 @@ export default function SphereGridSkillTree({
           {/* Tier Legend */}
           <div className="flex flex-wrap items-center gap-3 text-[10px] text-slate-400 font-mono">
             <span className="flex items-center gap-1">
-              <span className="w-2.5 h-2.5 rounded-full bg-slate-600" /> Locked (0%)
+              <span className="w-2.5 h-2.5 rounded-full bg-slate-600" /> Untested (0 Qs)
             </span>
             <span className="flex items-center gap-1">
-              <span className="w-2.5 h-2.5 rounded-full bg-amber-700" /> Initiate
+              <span className="w-2.5 h-2.5 rounded-full bg-red-500" /> Critical Trap (&lt;40%)
             </span>
             <span className="flex items-center gap-1">
-              <span className="w-2.5 h-2.5 rounded-full bg-blue-500" /> Proficient
+              <span className="w-2.5 h-2.5 rounded-full bg-blue-500" /> Practicing
             </span>
             <span className="flex items-center gap-1">
-              <span className="w-2.5 h-2.5 rounded-full bg-amber-400" /> Mastered (80%+)
+              <span className="w-2.5 h-2.5 rounded-full bg-sky-500" /> Proficient (50%+)
             </span>
             <span className="flex items-center gap-1">
-              <span className="w-2.5 h-2.5 rounded-full bg-purple-400" /> Apex (90%+)
+              <span className="w-2.5 h-2.5 rounded-full bg-amber-400" /> Mastered (70%+)
             </span>
           </div>
         </div>
