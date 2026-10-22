@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { Play, Swords, BookOpen, Clock, AlertTriangle, X, ShieldAlert, Users, Trophy, Flame, ArrowRight } from 'lucide-react';
 import { sound } from '../utils/sound';
+import { ConfirmDialog } from './Dialog';
 
 export default function OngoingMatchCard({
   match,
@@ -270,53 +271,31 @@ export default function OngoingMatchCard({
         </div>
       </div>
 
-      {/* Forfeit Confirmation Modal */}
-      {forfeitModalOpen && typeof document !== 'undefined' && createPortal(
-        <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-150">
-          <div className="bg-[#1b2232] border border-rose-500/40 rounded-3xl max-w-md w-full p-6 text-slate-100 shadow-2xl space-y-4">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2.5 text-rose-400 font-black text-base">
-                <ShieldAlert className="w-5 h-5 text-rose-500" />
-                <span>Forfeit Active Match?</span>
-              </div>
-              <button
-                onClick={() => setForfeitModalOpen(false)}
-                className="text-slate-400 hover:text-white p-1 cursor-pointer"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <p className="text-slate-300 text-xs sm:text-sm leading-relaxed">
+      {/* Unified Forfeit Confirmation Dialog */}
+      <ConfirmDialog
+        isOpen={forfeitModalOpen}
+        onClose={() => !forfeiting && setForfeitModalOpen(false)}
+        onConfirm={handleConfirmForfeit}
+        title="Forfeit Active Match?"
+        subtitle={`Room #${match.code}`}
+        description={
+          <div className="space-y-3">
+            <p className="text-slate-300 text-xs leading-relaxed">
               Are you sure you want to surrender room <strong className="text-white font-mono">#{match.code}</strong>?
               Your progress will be marked as resigned, and remaining questions will be scored as unattempted.
             </p>
-
-            <div className="bg-rose-950/40 border border-rose-500/30 rounded-2xl p-3 text-xs text-rose-300">
+            <div className="bg-rose-950/40 border border-rose-500/30 rounded-xl p-2.5 text-xs text-rose-300">
               <strong>Notice:</strong> This action cannot be reversed once confirmed.
             </div>
-
-            <div className="flex items-center justify-end gap-3 pt-2">
-              <button
-                type="button"
-                onClick={() => setForfeitModalOpen(false)}
-                className="px-4 py-2.5 bg-[#293247] hover:bg-[#343e57] text-slate-200 font-bold text-xs rounded-xl transition cursor-pointer"
-              >
-                Nevermind, Stay in Match
-              </button>
-              <button
-                type="button"
-                disabled={forfeiting}
-                onClick={handleConfirmForfeit}
-                className="px-5 py-2.5 bg-rose-600 hover:bg-rose-500 text-white font-black text-xs rounded-xl shadow-lg transition cursor-pointer disabled:opacity-50"
-              >
-                {forfeiting ? 'Forfeiting...' : 'Yes, Forfeit Match'}
-              </button>
-            </div>
           </div>
-        </div>,
-        document.body
-      )}
+        }
+        confirmText="Yes, Forfeit Match"
+        cancelText="Stay in Match"
+        variant="danger"
+        icon={ShieldAlert}
+        isLoading={forfeiting}
+        loadingText="Forfeiting..."
+      />
     </>
   );
 }

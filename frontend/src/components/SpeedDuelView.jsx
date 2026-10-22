@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { api, getToken } from '../utils/api';
 import MathRenderer from './MathRenderer';
 import { sound } from '../utils/sound';
+import { ConfirmDialog } from './Dialog';
 import { Timer, Zap, Trophy, CheckCircle2, XCircle, ArrowRight, Image as ImageIcon, Flame, Flag, BookOpen } from 'lucide-react';
 
 const LANE_THEMES = [
@@ -721,40 +722,24 @@ export default function SpeedDuelView({
         </div>
       </div>
 
-      {/* Forfeit Confirmation Modal */}
-      {forfeitConfirmOpen && typeof document !== 'undefined' && createPortal(
-        <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-150">
-          <div className="bg-[#1b2232] border border-rose-500/40 rounded-3xl max-w-md w-full p-6 text-slate-100 shadow-2xl space-y-4">
-            <h3 className="text-base font-black text-rose-400">Forfeit Speed Duel?</h3>
-            <p className="text-xs sm:text-sm text-slate-300 leading-relaxed">
-              Are you sure you want to forfeit? Your match will conclude immediately and you will receive zero points for remaining questions.
-            </p>
-            <div className="flex items-center justify-end gap-3 pt-2">
-              <button
-                type="button"
-                onClick={() => setForfeitConfirmOpen(false)}
-                className="px-4 py-2 bg-[#293247] hover:bg-[#343e57] text-slate-200 font-bold text-xs rounded-xl transition cursor-pointer"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={async () => {
-                  sound.click();
-                  setForfeitConfirmOpen(false);
-                  if (onForfeit) {
-                    await onForfeit(room.code);
-                  }
-                }}
-                className="px-5 py-2 bg-rose-600 hover:bg-rose-500 text-white font-black text-xs rounded-xl shadow-lg transition cursor-pointer"
-              >
-                Confirm Forfeit
-              </button>
-            </div>
-          </div>
-        </div>,
-        document.body
-      )}
+      {/* Unified Forfeit Confirmation Dialog */}
+      <ConfirmDialog
+        isOpen={forfeitConfirmOpen}
+        onClose={() => setForfeitConfirmOpen(false)}
+        onConfirm={async () => {
+          sound.click();
+          setForfeitConfirmOpen(false);
+          if (onForfeit) {
+            await onForfeit(room.code);
+          }
+        }}
+        title="Forfeit Speed Duel?"
+        subtitle={room?.code ? `Room #${room.code}` : ''}
+        description="Are you sure you want to forfeit? Your match will conclude immediately and you will receive zero points for remaining questions."
+        confirmText="Confirm Forfeit"
+        cancelText="Cancel"
+        variant="danger"
+      />
     </div>
   );
 }

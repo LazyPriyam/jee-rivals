@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { api } from '../utils/api';
 import { sound } from '../utils/sound';
 import { formatIST } from '../utils/dateUtils';
+import { ConfirmDialog } from './Dialog';
 import {
   Clock,
   BookOpen,
@@ -867,56 +868,28 @@ export default function TestHistoryView({ user, inspectUsername, onSelectTest, o
         </div>
       )}
 
-      {/* Test Deletion Confirmation Modal */}
-      {deleteConfirmModal && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 animate-fadeIn">
-          <div className="bg-[#161a24] border border-rose-500/40 rounded-3xl p-6 sm:p-8 max-w-md w-full shadow-2xl space-y-5 animate-scaleUp">
-            <div className="flex items-center gap-3 text-rose-400">
-              <div className="p-3 bg-rose-500/15 rounded-2xl border border-rose-500/30">
-                <Trash2 className="w-6 h-6" />
-              </div>
-              <div>
-                <h3 className="text-lg font-black text-white">Delete Test Paper?</h3>
-                <span className="text-xs text-slate-400 font-mono">Room #{deleteConfirmModal.code}</span>
-              </div>
-            </div>
-
-            <p className="text-xs text-slate-300 leading-relaxed">
-              Are you sure you want to permanently delete <strong className="text-white">"{deleteConfirmModal.preset_name}"</strong>?
+      {/* Unified Test Deletion Confirmation Dialog */}
+      <ConfirmDialog
+        isOpen={Boolean(deleteConfirmModal)}
+        onClose={() => !deletingCode && setDeleteConfirmModal(null)}
+        onConfirm={() => handleDeleteTest(deleteConfirmModal)}
+        title="Delete Test Paper?"
+        subtitle={deleteConfirmModal ? `Room #${deleteConfirmModal.code}` : ''}
+        description={
+          deleteConfirmModal ? (
+            <>
+              Are you sure you want to permanently delete{' '}
+              <strong className="text-white">"{deleteConfirmModal.preset_name}"</strong>?
               This will remove all score records, attempted answers, and calibration data from your profile. This action cannot be undone.
-            </p>
-
-            <div className="flex items-center justify-end gap-3 pt-2">
-              <button
-                type="button"
-                disabled={Boolean(deletingCode)}
-                onClick={() => setDeleteConfirmModal(null)}
-                className="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs transition cursor-pointer"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                disabled={Boolean(deletingCode)}
-                onClick={() => handleDeleteTest(deleteConfirmModal)}
-                className="px-5 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs transition shadow-lg shadow-rose-950/50 cursor-pointer flex items-center gap-2"
-              >
-                {deletingCode ? (
-                  <>
-                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                    <span>Deleting...</span>
-                  </>
-                ) : (
-                  <>
-                    <Trash2 className="w-3.5 h-3.5" />
-                    <span>Permanently Delete</span>
-                  </>
-                )}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+            </>
+          ) : null
+        }
+        confirmText="Permanently Delete"
+        cancelText="Cancel"
+        variant="danger"
+        isLoading={Boolean(deletingCode)}
+        loadingText="Deleting..."
+      />
     </div>
   );
 }

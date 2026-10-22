@@ -4,6 +4,7 @@ import { api } from '../utils/api';
 import { sound } from '../utils/sound';
 import MathRenderer from './MathRenderer';
 import OnDemandDerivationBox from './OnDemandDerivationBox';
+import Dialog from './Dialog';
 import {
   Brain,
   Zap,
@@ -1680,64 +1681,56 @@ export default function AdaptivePracticeView({ user, onOpenAuth, onNavigateTab, 
         </div>
       )}
 
-      {/* Exit Confirmation Modal */}
-      {exitModalOpen && typeof document !== 'undefined' && createPortal(
-        <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fadeIn">
-          <div className="bg-[#1b202e] rounded-2xl shadow-2xl max-w-md w-full border border-white/10 overflow-hidden text-slate-200">
-            <div className="bg-[#161a26] text-white p-4 border-b border-white/10 flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <AlertTriangle className="w-5 h-5 text-amber-400" />
-                <h3 className="font-bold text-sm">Adaptive Sprint In Progress</h3>
-              </div>
-              <button
-                onClick={() => setExitModalOpen(false)}
-                className="text-slate-400 hover:text-white p-1 cursor-pointer"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
+      {/* Unified Exit Confirmation Dialog */}
+      <Dialog
+        isOpen={exitModalOpen}
+        onClose={() => setExitModalOpen(false)}
+        title="Adaptive Sprint In Progress"
+        icon={AlertTriangle}
+        variant="warning"
+        maxWidth="md"
+      >
+        <div className="space-y-4">
+          <p className="text-slate-300 text-xs leading-relaxed">
+            You pressed the browser back button. Leaving now will interrupt your active adaptive sprint.
+            Your current streak and solved metrics are preserved.
+          </p>
 
-            <div className="p-5 text-xs space-y-4">
-              <p className="text-slate-300 leading-relaxed">
-                You pressed the browser back button. Leaving now will interrupt your active adaptive sprint.
-                Your current streak and solved metrics are preserved.
-              </p>
-
-              <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-3 text-amber-300 text-xs">
-                <strong>Notice:</strong> You can stay in the sprint to continue climbing your chapter Elo, or conclude now to generate your diagnostic performance report.
-              </div>
-
-              <div className="flex items-center justify-end gap-2 sm:gap-3 pt-2 flex-wrap">
-                <button
-                  onClick={() => setExitModalOpen(false)}
-                  className="px-3 sm:px-4 py-2 sm:py-2.5 rounded-xl bg-orange-500 hover:bg-orange-600 text-white font-bold text-xs shadow cursor-pointer transition"
-                >
-                  Stay in Circuit
-                </button>
-                <button
-                  onClick={() => {
-                    setExitModalOpen(false);
-                    handleFinishSession();
-                  }}
-                  className="px-3 sm:px-4 py-2 sm:py-2.5 rounded-xl bg-white/10 hover:bg-amber-600 hover:text-white text-slate-300 font-bold text-xs cursor-pointer transition"
-                >
-                  Conclude & Report
-                </button>
-                <button
-                  onClick={() => {
-                    setExitModalOpen(false);
-                    handleCancelSession();
-                  }}
-                  className="px-3 sm:px-4 py-2 sm:py-2.5 rounded-xl bg-red-500/20 hover:bg-red-500 hover:text-white text-red-300 font-bold text-xs cursor-pointer transition border border-red-500/30"
-                >
-                  Abandon Circuit
-                </button>
-              </div>
-            </div>
+          <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-3 text-amber-300 text-xs">
+            <strong>Notice:</strong> You can stay in the sprint to continue climbing your chapter Elo, or conclude now to generate your diagnostic performance report.
           </div>
-        </div>,
-        document.body
-      )}
+
+          <div className="flex items-center justify-end gap-2 sm:gap-3 pt-3 border-t border-white/5 flex-wrap">
+            <button
+              type="button"
+              onClick={() => setExitModalOpen(false)}
+              className="px-3 sm:px-4 py-2 sm:py-2.5 rounded-xl bg-orange-500 hover:bg-orange-600 text-white font-bold text-xs shadow cursor-pointer transition"
+            >
+              Stay in Circuit
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setExitModalOpen(false);
+                handleFinishSession();
+              }}
+              className="px-3 sm:px-4 py-2 sm:py-2.5 rounded-xl bg-white/10 hover:bg-amber-600 hover:text-white text-slate-300 font-bold text-xs cursor-pointer transition"
+            >
+              Conclude & Report
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setExitModalOpen(false);
+                handleCancelSession();
+              }}
+              className="px-3 sm:px-4 py-2 sm:py-2.5 rounded-xl bg-red-500/20 hover:bg-red-500 hover:text-white text-red-300 font-bold text-xs cursor-pointer transition border border-red-500/30"
+            >
+              Abandon Circuit
+            </button>
+          </div>
+        </div>
+      </Dialog>
 
       {/* Report Question Modal */}
       <ReportQuestionModal

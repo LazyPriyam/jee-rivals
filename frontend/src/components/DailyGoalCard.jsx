@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { ChevronRight, Target, CheckCircle2, X, Sliders, Sparkles, Award } from 'lucide-react';
 import { api, setCachedUser } from '../utils/api';
 import { sound } from '../utils/sound';
+import Dialog from './Dialog';
 
 // Custom sleek silhouette SVGs matching the runner progression theme
 const CrouchRunnerIcon = ({ className = 'w-4 h-4' }) => (
@@ -237,146 +238,116 @@ export default function DailyGoalCard({ user, onUpdateUser, onNavigateTab }) {
         </div>
       </div>
 
-      {/* Goal Adjustment Modal */}
-      {modalOpen && typeof document !== 'undefined' && createPortal(
-        <div className="fixed inset-0 w-screen h-screen z-[9999] flex items-center justify-center p-4">
-          {/* Viewport Backdrop */}
-          <div
-            className="fixed inset-0 bg-black/80 backdrop-blur-sm"
-            onClick={() => {
-              sound.click();
-              setModalOpen(false);
-            }}
-          />
-
-          {/* Centered Modal Card */}
-          <div
-            className="relative z-10 bg-[#161c28] border border-orange-500/40 rounded-3xl p-6 sm:p-7 max-w-md w-full shadow-2xl max-h-[90vh] overflow-y-auto animate-in fade-in zoom-in-95 duration-200"
-            onClick={(e) => e.stopPropagation()}
-          >
-            {/* Close Button */}
-            <button
-              onClick={() => {
-                sound.click();
-                setModalOpen(false);
-              }}
-              className="absolute top-5 right-5 text-slate-400 hover:text-white p-1 rounded-xl bg-slate-800/60 hover:bg-slate-800 transition cursor-pointer"
-            >
-              <X className="w-5 h-5" />
-            </button>
-
-            <div className="flex items-center gap-3 mb-4">
-              <div className="p-3 rounded-2xl bg-orange-500/20 text-orange-400 border border-orange-500/40">
-                <Target className="w-6 h-6" />
-              </div>
-              <div>
-                <h3 className="text-lg font-black text-white">Daily Question Goal</h3>
-                <p className="text-xs text-slate-400">Configure your daily problem-solving benchmark</p>
-              </div>
-            </div>
-
-            {/* Presets Grid */}
-            <div className="space-y-2 mb-5">
-              <label className="text-xs font-bold text-slate-300 uppercase tracking-wider">
-                Quick Grind Presets
-              </label>
-              <div className="grid grid-cols-3 sm:grid-cols-5 gap-2">
-                {PRESET_GOALS.map((preset) => (
-                  <button
-                    key={preset.count}
-                    type="button"
-                    onClick={() => {
-                      sound.click();
-                      setTargetGoal(preset.count);
-                    }}
-                    className={`p-2.5 rounded-xl border text-center transition cursor-pointer flex flex-col items-center gap-0.5 ${
-                      targetGoal === preset.count
-                        ? 'bg-orange-500/25 border-orange-500 text-orange-300 shadow-lg shadow-orange-950/40 font-bold'
-                        : 'bg-[#10141e] border-white/10 text-slate-400 hover:text-white hover:border-white/20'
-                    }`}
-                  >
-                    <span className="text-xs font-black font-mono text-white">{preset.count}</span>
-                    <span className="text-[10px] text-orange-400/90 font-medium">{preset.label}</span>
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Range Slider & Manual Number Input */}
-            <div className="bg-[#10141e] border border-white/10 rounded-2xl p-4 mb-6 space-y-3">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-bold text-slate-300">Target Problems</span>
-                <div className="flex items-center gap-1.5 font-mono">
-                  <input
-                    type="number"
-                    min={5}
-                    max={300}
-                    value={targetGoal}
-                    onChange={(e) => {
-                      const val = Math.max(5, Math.min(300, Number(e.target.value) || 5));
-                      setTargetGoal(val);
-                    }}
-                    className="w-16 px-2 py-1 bg-[#161c28] border border-orange-500/40 rounded-lg text-white font-bold text-sm text-center focus:outline-none focus:border-orange-500"
-                  />
-                  <span className="text-xs text-slate-400">Qs / day</span>
-                </div>
-              </div>
-
-              <input
-                type="range"
-                min={10}
-                max={150}
-                step={5}
-                value={targetGoal}
-                onChange={(e) => setTargetGoal(Number(e.target.value))}
-                className="w-full accent-orange-500 cursor-pointer h-2 bg-slate-800 rounded-lg"
-              />
-
-              <div className="flex justify-between text-[10px] font-mono text-slate-500">
-                <span>10 Qs (Warmup)</span>
-                <span>60 Qs (Standard)</span>
-                <span>150 Qs (Titan)</span>
-              </div>
-            </div>
-
-            {/* Action Buttons */}
-            <div className="flex items-center gap-3">
-              <button
-                type="button"
-                onClick={handleSaveGoal}
-                disabled={saving}
-                className="flex-1 py-3 px-4 bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-400 hover:to-amber-400 text-white font-black text-xs rounded-xl shadow-lg transition flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
-              >
-                <Sparkles className="w-4 h-4 fill-current" />
-                <span>{saving ? 'Saving...' : 'Apply Daily Goal'}</span>
-              </button>
-
-              {onNavigateTab && (
+      {/* Unified Goal Adjustment Dialog */}
+      <Dialog
+        isOpen={modalOpen}
+        onClose={() => setModalOpen(false)}
+        title="Daily Question Goal"
+        subtitle="Configure your daily problem-solving benchmark"
+        icon={Target}
+        maxWidth="md"
+      >
+        <div className="space-y-5">
+          {/* Presets Grid */}
+          <div className="space-y-2">
+            <label className="text-xs font-bold text-slate-300 uppercase tracking-wider">
+              Quick Grind Presets
+            </label>
+            <div className="grid grid-cols-3 sm:grid-cols-5 gap-2">
+              {PRESET_GOALS.map((preset) => (
                 <button
+                  key={preset.count}
                   type="button"
                   onClick={() => {
                     sound.click();
-                    setModalOpen(false);
-                    onNavigateTab('settings');
+                    setTargetGoal(preset.count);
                   }}
-                  className="py-3 px-4 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white font-bold text-xs rounded-xl border border-white/10 transition flex items-center gap-1.5 cursor-pointer"
+                  className={`p-2.5 rounded-xl border text-center transition cursor-pointer flex flex-col items-center gap-0.5 ${
+                    targetGoal === preset.count
+                      ? 'bg-orange-500/25 border-orange-500 text-orange-300 shadow-lg shadow-orange-950/40 font-bold'
+                      : 'bg-[#10141e] border-white/10 text-slate-400 hover:text-white hover:border-white/20'
+                  }`}
                 >
-                  <Sliders className="w-3.5 h-3.5" />
-                  <span>Settings</span>
+                  <span className="text-xs font-black font-mono text-white">{preset.count}</span>
+                  <span className="text-[10px] text-orange-400/90 font-medium">{preset.label}</span>
                 </button>
-              )}
+              ))}
+            </div>
+          </div>
+
+          {/* Range Slider & Manual Number Input */}
+          <div className="bg-[#10141e] border border-white/10 rounded-2xl p-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold text-slate-300">Target Problems</span>
+              <div className="flex items-center gap-1.5 font-mono">
+                <input
+                  type="number"
+                  min={5}
+                  max={300}
+                  value={targetGoal}
+                  onChange={(e) => {
+                    const val = Math.max(5, Math.min(300, Number(e.target.value) || 5));
+                    setTargetGoal(val);
+                  }}
+                  className="w-16 px-2 py-1 bg-[#161c28] border border-orange-500/40 rounded-lg text-white font-bold text-sm text-center focus:outline-none focus:border-orange-500"
+                />
+                <span className="text-xs text-slate-400">Qs / day</span>
+              </div>
             </div>
 
-            {feedback && (
-              <p className="text-center text-xs mt-3 text-emerald-400 font-bold flex items-center justify-center gap-1">
-                <CheckCircle2 className="w-3.5 h-3.5" />
-                <span>{feedback}</span>
-              </p>
+            <input
+              type="range"
+              min={10}
+              max={150}
+              step={5}
+              value={targetGoal}
+              onChange={(e) => setTargetGoal(Number(e.target.value))}
+              className="w-full accent-orange-500 cursor-pointer h-2 bg-slate-800 rounded-lg"
+            />
+
+            <div className="flex justify-between text-[10px] font-mono text-slate-500">
+              <span>10 Qs (Warmup)</span>
+              <span>60 Qs (Standard)</span>
+              <span>150 Qs (Titan)</span>
+            </div>
+          </div>
+
+          {/* Action Buttons */}
+          <div className="flex items-center gap-3 pt-2 border-t border-white/5">
+            <button
+              type="button"
+              onClick={handleSaveGoal}
+              disabled={saving}
+              className="flex-1 py-3 px-4 bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-400 hover:to-amber-400 text-white font-black text-xs rounded-xl shadow-lg transition flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+            >
+              <Sparkles className="w-4 h-4 fill-current" />
+              <span>{saving ? 'Saving...' : 'Apply Daily Goal'}</span>
+            </button>
+
+            {onNavigateTab && (
+              <button
+                type="button"
+                onClick={() => {
+                  sound.click();
+                  setModalOpen(false);
+                  onNavigateTab('settings');
+                }}
+                className="py-3 px-4 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white font-bold text-xs rounded-xl border border-white/10 transition flex items-center gap-1.5 cursor-pointer"
+              >
+                <Sliders className="w-3.5 h-3.5" />
+                <span>Settings</span>
+              </button>
             )}
           </div>
-        </div>,
-        document.body
-      )}
+
+          {feedback && (
+            <p className="text-center text-xs mt-3 text-emerald-400 font-bold flex items-center justify-center gap-1">
+              <CheckCircle2 className="w-3.5 h-3.5" />
+              <span>{feedback}</span>
+            </p>
+          )}
+        </div>
+      </Dialog>
     </>
   );
 }

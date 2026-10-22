@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
+import Dialog, { ConfirmDialog } from './Dialog';
 import {
   User,
   Lock,
@@ -1535,130 +1536,98 @@ export default function SettingsView({
       )}
 
       {/* Danger Zone Reset Confirmation Modal */}
-      {resetModalOpen && typeof document !== 'undefined' && createPortal(
-        <div className="fixed inset-0 z-[9999] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-[#121622] border border-red-500/50 rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4 animate-scaleUp">
-            <div className="w-12 h-12 rounded-2xl bg-red-500/10 border border-red-500/30 flex items-center justify-center text-red-400">
-              <AlertTriangle className="w-6 h-6" />
+      <ConfirmDialog
+        isOpen={resetModalOpen}
+        onClose={() => !resettingData && setResetModalOpen(false)}
+        onConfirm={handleConfirmResetData}
+        title="Reset Drill Statistics?"
+        description={
+          <>
+            This will delete your activity logs, adaptive sprint history, and reset your total questions solved to 0.
+            Your account, PIN, and friends list will <strong className="text-white">NOT</strong> be deleted.
+          </>
+        }
+        confirmText="Confirm Reset"
+        cancelText="Cancel"
+        variant="danger"
+        isLoading={resettingData}
+        loadingText="Resetting..."
+      />
+
+      {/* Danger Zone Delete Account Modal */}
+      <Dialog
+        isOpen={deleteModalOpen}
+        onClose={() => !deletingAccount && setDeleteModalOpen(false)}
+        title="Permanently Delete Account?"
+        icon={Trash2}
+        variant="danger"
+        maxWidth="md"
+      >
+        <div className="space-y-4">
+          <p className="text-xs text-slate-300 leading-relaxed">
+            This will irreversibly purge your callsign <strong className="text-white font-mono">{user.username}</strong>, all Elo ratings, study streaks, question bookmarks, friendships, and tournament records.
+          </p>
+
+          <div className="bg-rose-950/40 border border-rose-500/30 rounded-xl p-3 text-[11px] text-rose-300">
+            <strong>Warning:</strong> This action cannot be undone. Once deleted, your callsign will be released and your rank history cannot be recovered.
+          </div>
+
+          {deleteError && (
+            <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-400 text-xs flex items-center gap-2">
+              <AlertTriangle className="w-4 h-4 shrink-0" />
+              <span>{deleteError}</span>
+            </div>
+          )}
+
+          <form onSubmit={handleConfirmDeleteAccount} className="space-y-3 pt-1">
+            <div>
+              <label className="block text-[11px] font-bold text-slate-300 mb-1">
+                Enter Your Security PIN
+              </label>
+              <input
+                type="password"
+                required
+                value={deletePin}
+                onChange={(e) => setDeletePin(e.target.value)}
+                placeholder="Security PIN"
+                className="w-full px-3.5 py-2.5 bg-black/40 border border-white/10 rounded-xl text-white placeholder-slate-500 text-xs focus:outline-none focus:border-rose-500 transition font-mono"
+              />
             </div>
 
             <div>
-              <h3 className="text-lg font-black text-white">Reset Drill Statistics?</h3>
-              <p className="text-xs text-slate-400 mt-1 leading-relaxed">
-                This will delete your activity logs, adaptive sprint history, and reset your total questions solved to 0.
-                Your account, PIN, and friends list will NOT be deleted.
-              </p>
+              <label className="block text-[11px] font-bold text-slate-300 mb-1">
+                Type <span className="text-rose-400 font-mono font-black">DELETE</span> to confirm
+              </label>
+              <input
+                type="text"
+                required
+                value={deleteConfirmation}
+                onChange={(e) => setDeleteConfirmation(e.target.value)}
+                placeholder="DELETE"
+                className="w-full px-3.5 py-2.5 bg-black/40 border border-white/10 rounded-xl text-white placeholder-slate-500 text-xs focus:outline-none focus:border-rose-500 transition font-mono"
+              />
             </div>
 
-            <div className="flex items-center justify-end gap-3 pt-2">
+            <div className="flex items-center justify-end gap-3 pt-3 border-t border-white/5">
               <button
                 type="button"
-                onClick={() => setResetModalOpen(false)}
-                className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold rounded-xl transition cursor-pointer"
+                onClick={() => setDeleteModalOpen(false)}
+                className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold rounded-xl transition cursor-pointer"
               >
                 Cancel
               </button>
               <button
-                type="button"
-                onClick={handleConfirmResetData}
-                disabled={resettingData}
-                className="px-5 py-2 bg-red-600 hover:bg-red-500 text-white text-xs font-bold rounded-xl transition flex items-center gap-2 cursor-pointer shadow-lg shadow-red-950/50"
+                type="submit"
+                disabled={deletingAccount || deleteConfirmation.trim().toUpperCase() !== 'DELETE'}
+                className="px-5 py-2.5 bg-rose-600 hover:bg-rose-500 text-white text-xs font-black rounded-xl transition flex items-center gap-2 cursor-pointer shadow-lg shadow-rose-950/60 disabled:opacity-40 disabled:cursor-not-allowed"
               >
-                {resettingData ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <AlertTriangle className="w-3.5 h-3.5" />}
-                <span>Confirm Reset</span>
+                {deletingAccount ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
+                <span>Confirm Account Purge</span>
               </button>
             </div>
-          </div>
-        </div>,
-        document.body
-      )}
-
-      {/* Danger Zone Delete Account Modal */}
-      {deleteModalOpen && typeof document !== 'undefined' && createPortal(
-        <div className="fixed inset-0 z-[9999] bg-black/85 backdrop-blur-sm flex items-center justify-center p-4 animate-fadeIn">
-          <div className="bg-[#141824] border border-red-500/60 rounded-3xl max-w-md w-full p-6 shadow-2xl space-y-4 animate-scaleUp">
-            <div className="flex items-center justify-between">
-              <div className="w-12 h-12 rounded-2xl bg-red-500/10 border border-red-500/30 flex items-center justify-center text-red-400">
-                <Trash2 className="w-6 h-6" />
-              </div>
-              <button
-                type="button"
-                onClick={() => setDeleteModalOpen(false)}
-                className="p-1 text-slate-400 hover:text-white rounded-lg cursor-pointer"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <div>
-              <h3 className="text-lg font-black text-white">Permanently Delete Account?</h3>
-              <p className="text-xs text-slate-300 mt-1 leading-relaxed">
-                This will irreversibly purge your callsign <strong className="text-white font-mono">{user.username}</strong>, all Elo ratings, study streaks, question bookmarks, friendships, and tournament records.
-              </p>
-            </div>
-
-            <div className="bg-red-950/40 border border-red-500/30 rounded-xl p-3 text-[11px] text-red-300">
-              <strong>Warning:</strong> This action cannot be undone. Once deleted, your callsign will be released and your rank history cannot be recovered.
-            </div>
-
-            {deleteError && (
-              <div className="p-3 rounded-xl bg-red-500/10 border border-red-500/30 text-red-400 text-xs flex items-center gap-2">
-                <AlertTriangle className="w-4 h-4 shrink-0" />
-                <span>{deleteError}</span>
-              </div>
-            )}
-
-            <form onSubmit={handleConfirmDeleteAccount} className="space-y-3 pt-1">
-              <div>
-                <label className="block text-[11px] font-bold text-slate-300 mb-1">
-                  Enter Your Security PIN
-                </label>
-                <input
-                  type="password"
-                  required
-                  value={deletePin}
-                  onChange={(e) => setDeletePin(e.target.value)}
-                  placeholder="Security PIN"
-                  className="w-full px-3.5 py-2.5 bg-black/40 border border-white/10 rounded-xl text-white placeholder-slate-500 text-xs focus:outline-none focus:border-red-500 transition font-mono"
-                />
-              </div>
-
-              <div>
-                <label className="block text-[11px] font-bold text-slate-300 mb-1">
-                  Type <span className="text-red-400 font-mono font-black">DELETE</span> to confirm
-                </label>
-                <input
-                  type="text"
-                  required
-                  value={deleteConfirmation}
-                  onChange={(e) => setDeleteConfirmation(e.target.value)}
-                  placeholder="DELETE"
-                  className="w-full px-3.5 py-2.5 bg-black/40 border border-white/10 rounded-xl text-white placeholder-slate-500 text-xs focus:outline-none focus:border-red-500 transition font-mono"
-                />
-              </div>
-
-              <div className="flex items-center justify-end gap-3 pt-3">
-                <button
-                  type="button"
-                  onClick={() => setDeleteModalOpen(false)}
-                  className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold rounded-xl transition cursor-pointer"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={deletingAccount || deleteConfirmation.trim().toUpperCase() !== 'DELETE'}
-                  className="px-5 py-2.5 bg-red-600 hover:bg-red-500 text-white text-xs font-black rounded-xl transition flex items-center gap-2 cursor-pointer shadow-lg shadow-red-950/60 disabled:opacity-40 disabled:cursor-not-allowed"
-                >
-                  {deletingAccount ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
-                  <span>Confirm Account Purge</span>
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>,
-        document.body
-      )}
+          </form>
+        </div>
+      </Dialog>
     </div>
   );
 }
