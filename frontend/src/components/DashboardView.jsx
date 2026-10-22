@@ -542,7 +542,7 @@ export default function DashboardView({
           <div
             onClick={() => {
               sound.click();
-              onStartPreset('Physics', 'Kinematics 1D & 2D');
+              onStartPreset('Physics', 'Kinematics');
             }}
             className="group bg-[#262c3c] border border-white/10 hover:border-orange-500/50 rounded-2xl p-5 transition cursor-pointer hover:shadow-xl hover:shadow-orange-950/40 relative overflow-hidden"
           >

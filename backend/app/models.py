@@ -50,7 +50,7 @@ class UserProfile(BaseModel):
     pinned_badges: Optional[List[str]] = ["elo_bronze", "first_blood"]
     syllabus_coverage_percent: Optional[float] = 0.0
     active_chapters_count: Optional[int] = 0
-    total_syllabus_chapters: Optional[int] = 92
+    total_syllabus_chapters: Optional[int] = 89
     chapter_summary: Optional[Dict[str, Any]] = None
     air_gate_reason: Optional[str] = None
     learnt_chapters: Optional[List[str]] = []

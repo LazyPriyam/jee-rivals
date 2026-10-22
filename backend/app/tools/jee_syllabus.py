@@ -7,7 +7,7 @@ Provides helper functions to calculate 5-tier RPG chapter masteries and skill tr
 from typing import Dict, List, Any, Optional, Tuple, Set
 import re
 
-# Authoritative 2026 Canonical JEE Syllabus (92 Chapters organized across Units & Subjects)
+# Authoritative 2026 Canonical JEE Syllabus (89 Chapters organized across Units & Subjects)
 JEE_SYLLABUS = {
     "Physics": [
         {
@@ -15,10 +15,7 @@ JEE_SYLLABUS = {
             "chapters": [
                 "Mathematical Tools",
                 "Units and Dimensions",
-                "Kinematics 1D & 2D",
-                "Rectilinear Motion",
-                "Projectile Motion",
-                "Relative Motion",
+                "Kinematics",
                 "Newton's Laws of Motion & Friction",
                 "Work, Energy and Power",
                 "Circular Motion",
@@ -174,7 +171,7 @@ JEE_SYLLABUS = {
     ]
 }
 
-# Flat list of all 92 canonical chapters
+# Flat list of all 89 canonical chapters
 ALL_CANONICAL_CHAPTERS = [
     ch
     for subj in JEE_SYLLABUS.values()
@@ -185,12 +182,18 @@ ALL_CANONICAL_CHAPTERS = [
 # Mapping from abbreviations/legacy names to true Canonical Question Bank chapters
 CHAPTER_NORMALIZER = {
     # Physics
-    "kinematics": "Kinematics 1D & 2D",
-    "kinematics 1d & 2d": "Kinematics 1D & 2D",
-    "kinematics 1d": "Kinematics 1D & 2D",
-    "kinematics 2d": "Kinematics 1D & 2D",
-    "motion in a straight line": "Rectilinear Motion",
-    "motion in a plane": "Projectile Motion",
+    "kinematics": "Kinematics",
+    "kinematics 1d & 2d": "Kinematics",
+    "kinematics 1d": "Kinematics",
+    "kinematics 2d": "Kinematics",
+    "rectilinear motion": "Kinematics",
+    "rectilinear": "Kinematics",
+    "motion in a straight line": "Kinematics",
+    "projectile motion": "Kinematics",
+    "projectile": "Kinematics",
+    "motion in a plane": "Kinematics",
+    "relative motion": "Kinematics",
+    "relative": "Kinematics",
     "laws of motion": "Newton's Laws of Motion & Friction",
     "newtons laws of motion": "Newton's Laws of Motion & Friction",
     "newton's laws of motion & friction": "Newton's Laws of Motion & Friction",
@@ -337,7 +340,11 @@ CHAPTER_NORMALIZER = {
 
 # Umbrella terms expansion: expands an umbrella category into all matching canonical chapters
 UMBRELLA_CHAPTER_EXPANSION = {
-    "kinematics": ["Kinematics 1D & 2D", "Rectilinear Motion", "Projectile Motion", "Relative Motion"],
+    "kinematics": ["Kinematics"],
+    "kinematics 1d & 2d": ["Kinematics"],
+    "rectilinear motion": ["Kinematics"],
+    "projectile motion": ["Kinematics"],
+    "relative motion": ["Kinematics"],
     "laws of motion": ["Newton's Laws of Motion & Friction", "Circular Motion"],
     "rotational motion": ["Rotational Dynamics", "Center of Mass and Collisions"],
     "units and measurements": ["Units and Dimensions", "Mathematical Tools"],
@@ -610,15 +617,16 @@ def build_user_skill_tree(
     }
 
 
-# Authoritative JEE (Main & Advanced) Chapter Weightage Map (92 Canonical Chapters)
+# Authoritative JEE (Main & Advanced) Chapter Weightage Map (89 Canonical Chapters)
 DEFAULT_CHAPTER_WEIGHTAGE: Dict[str, float] = {
-    # --- Physics (34 Chapters) ---
+    # --- Physics (31 Chapters) ---
     "Mathematical Tools": 1.0,
     "Units and Dimensions": 2.0,
-    "Kinematics 1D & 2D": 3.0,
-    "Rectilinear Motion": 2.0,
-    "Projectile Motion": 2.0,
-    "Relative Motion": 2.0,
+    "Kinematics": 4.0,
+    "Kinematics 1D & 2D": 4.0,
+    "Rectilinear Motion": 4.0,
+    "Projectile Motion": 4.0,
+    "Relative Motion": 4.0,
     "Newton's Laws of Motion & Friction": 4.0,
     "Work, Energy and Power": 3.0,
     "Circular Motion": 2.0,
@@ -817,7 +825,7 @@ HIGH_YIELD_CHAPTERS_SET = {
 
 MEDIUM_YIELD_CHAPTERS_SET = {
     # Physics
-    "Kinematics 1D & 2D", "Fluid Mechanics", "Center of Mass and Collisions",
+    "Kinematics", "Kinematics 1D & 2D", "Fluid Mechanics", "Center of Mass and Collisions",
     "Alternating Current", "Semiconductor Electronics", "Heat Transfer",
     "Units and Dimensions", "Elasticity and Viscosity", "Electromagnetic Waves",
     # Chemistry
@@ -850,7 +858,7 @@ def get_unified_chapter_metrics(
     user_dict: Optional[dict] = None
 ) -> Dict[str, Any]:
     """
-    Authoritative single-point-of-truth calculation for chapter metrics across all 92 canonical chapters.
+    Authoritative single-point-of-truth calculation for chapter metrics across all 89 canonical chapters.
     Eliminates discrepancies between profile, mastery, growth triad, and practice modules.
 
     Evaluates chapters strictly from questions solved, accuracy, and Elo:
@@ -867,7 +875,7 @@ def get_unified_chapter_metrics(
     if not user_id:
         total_canonical = len(ALL_CANONICAL_CHAPTERS)
         by_subj_default = {
-            "Physics": {"total": 34, "tested": 0, "mastered": 0, "proficient": 0, "practicing": 0, "critical": 0, "untested": 34, "coverage_percent": 0.0},
+            "Physics": {"total": 31, "tested": 0, "mastered": 0, "proficient": 0, "practicing": 0, "critical": 0, "untested": 31, "coverage_percent": 0.0},
             "Chemistry": {"total": 33, "tested": 0, "mastered": 0, "proficient": 0, "practicing": 0, "critical": 0, "untested": 33, "coverage_percent": 0.0},
             "Mathematics": {"total": 25, "tested": 0, "mastered": 0, "proficient": 0, "practicing": 0, "critical": 0, "untested": 25, "coverage_percent": 0.0}
         }

@@ -89,7 +89,7 @@ export default function RoomModal({ isOpen, onClose, onRoomCreated }) {
       setMode('SPEED_DUEL');
       setPresetName('Physics Mechanics Sprint');
       setSelectedSubjects(['Physics']);
-      setSelectedChapters(['Kinematics 1D & 2D', 'Mathematical Tools']);
+      setSelectedChapters(['Kinematics', 'Mathematical Tools']);
       setDifficulty('MIXED');
       setQuestionCount(10);
       setTimePerQuestion(60);

@@ -15,7 +15,7 @@ import {
 import { api } from '../utils/api';
 import { sound } from '../utils/sound';
 
-// ── Authoritative Canonical JEE Master Syllabus (92 Chapters from CLI Engine) ──
+// ── Authoritative Canonical JEE Master Syllabus (89 Chapters from CLI Engine) ──
 const DEFAULT_SYLLABUS = {
   Physics: [
     {
@@ -23,10 +23,7 @@ const DEFAULT_SYLLABUS = {
       chapters: [
         'Mathematical Tools',
         'Units and Dimensions',
-        'Kinematics 1D & 2D',
-        'Rectilinear Motion',
-        'Projectile Motion',
-        'Relative Motion',
+        'Kinematics',
         "Newton's Laws of Motion & Friction",
         'Work, Energy and Power',
         'Circular Motion',

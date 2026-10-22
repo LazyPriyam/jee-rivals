@@ -47,7 +47,7 @@ HIGH_YIELD_CHAPTERS = {
 
 MEDIUM_YIELD_CHAPTERS = {
     # Physics
-    "Kinematics 1D & 2D", "Fluid Mechanics", "Center of Mass and Collisions",
+    "Kinematics", "Kinematics 1D & 2D", "Fluid Mechanics", "Center of Mass and Collisions",
     "Alternating Current", "Semiconductor Electronics", "Heat Transfer",
     "Units and Dimensions", "Elasticity and Viscosity", "Electromagnetic Waves",
 
