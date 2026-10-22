@@ -117,12 +117,23 @@ def restore_user_from_token_payload(payload: dict) -> Optional[dict]:
 _USER_CACHE: dict = {}        # user_id -> (timestamp, user_dict)
 _TOMBSTONES_CACHE: tuple = (0.0, set()) # (timestamp, set of (id, username_lower))
 
-def invalidate_user_cache(user_id: Optional[str] = None):
+def invalidate_user_cache(user_id: Optional[str] = None, username: Optional[str] = None):
     """Invalidates the in-memory user cache so subsequent requests load fresh database state."""
     global _USER_CACHE
     if user_id:
         u_entry = _USER_CACHE.pop(str(user_id), None)
-        uname = u_entry[1].get("username") if u_entry and isinstance(u_entry[1], dict) else None
+        uname = username or (u_entry[1].get("username") if u_entry and isinstance(u_entry[1], dict) else None)
+        if not uname:
+            try:
+                conn = get_connection()
+                c = conn.cursor()
+                c.execute("SELECT username FROM users WHERE id = ?", (str(user_id),))
+                row = c.fetchone()
+                if row:
+                    uname = row[0]
+                conn.close()
+            except Exception:
+                pass
         try:
             from backend.app.tools.growth_triad_engine import invalidate_user_triad_cache
             invalidate_user_triad_cache(str(user_id))

@@ -453,8 +453,13 @@ def update_profile(data: dict, user: dict = Depends(get_current_user)):
         pass
     conn.close()
 
-    invalidate_user_cache(user["id"])
+    invalidate_user_cache(user["id"], user.get("username"))
     invalidate_coverage_cache(user["id"])
+    try:
+        from backend.app.routes.leaderboards import invalidate_leaderboard_caches
+        invalidate_leaderboard_caches(user.get("username"))
+    except Exception:
+        pass
     updated = get_user_by_id(user["id"])
     return format_user_profile(updated)
 
@@ -473,10 +478,21 @@ def update_learnt_chapters(data: dict, user: dict = Depends(get_current_user)):
     c = conn.cursor()
     c.execute("UPDATE users SET learnt_chapters = ? WHERE id = ?", (json.dumps(chapters), user["id"]))
     conn.commit()
+    # Immediate dual-layer vault backup to guarantee zero reset across server restarts
+    try:
+        from backend.app.database import backup_all_users
+        backup_all_users(conn)
+    except Exception:
+        pass
     conn.close()
 
-    invalidate_user_cache(user["id"])
+    invalidate_user_cache(user["id"], user.get("username"))
     invalidate_coverage_cache(user["id"])
+    try:
+        from backend.app.routes.leaderboards import invalidate_leaderboard_caches
+        invalidate_leaderboard_caches(user.get("username"))
+    except Exception:
+        pass
     updated = get_user_by_id(user["id"])
     return format_user_profile(updated)
 
@@ -498,8 +514,13 @@ def update_daily_goal(data: dict, user: dict = Depends(get_current_user)):
     conn.commit()
     conn.close()
 
-    invalidate_user_cache(user["id"])
+    invalidate_user_cache(user["id"], user.get("username"))
     invalidate_coverage_cache(user["id"])
+    try:
+        from backend.app.routes.leaderboards import invalidate_leaderboard_caches
+        invalidate_leaderboard_caches(user.get("username"))
+    except Exception:
+        pass
     updated = get_user_by_id(user["id"])
     return format_user_profile(updated)
 
@@ -532,8 +553,13 @@ def change_username(req: ChangeUsernameRequest, user: dict = Depends(get_current
     conn.commit()
     conn.close()
 
-    invalidate_user_cache(user["id"])
+    invalidate_user_cache(user["id"], user.get("username"))
     invalidate_coverage_cache(user["id"])
+    try:
+        from backend.app.routes.leaderboards import invalidate_leaderboard_caches
+        invalidate_leaderboard_caches(user.get("username"))
+    except Exception:
+        pass
     updated = get_user_by_id(user["id"])
     new_token = create_access_token(user["id"], new_username, user.get("pin_hash"))
     return {

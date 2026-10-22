@@ -86,7 +86,7 @@ export default function AdaptivePracticeView({ user, onOpenAuth, onNavigateTab, 
 
   const [learntChapters, setLearntChapters] = useState(() => {
     try {
-      if (user?.learnt_chapters && Array.isArray(user.learnt_chapters) && user.learnt_chapters.length > 0) {
+      if (user?.learnt_chapters && Array.isArray(user.learnt_chapters)) {
         return user.learnt_chapters;
       }
       if (storageLearntKey) {

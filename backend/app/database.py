@@ -402,18 +402,17 @@ def restore_users_from_backup(conn: Optional[sqlite3.Connection] = None) -> int:
                 curr_longest_streak = max(int(curr.get("longest_streak") or 0), int(u.get("longest_streak") or 0))
                 curr_streak_freezes = 0
 
-                # Union merge of learnt chapters
-                curr_learnt = set()
-                try:
-                    curr_learnt = set(json.loads(curr.get("learnt_chapters") or "[]"))
-                except Exception:
-                    pass
-                bak_learnt = set()
-                try:
-                    bak_learnt = set(json.loads(u.get("learnt_chapters") or "[]"))
-                except Exception:
-                    pass
-                merged_learnt = list(curr_learnt | bak_learnt)
+                # Learnt chapters reconciliation:
+                # If the live database already has a learnt_chapters configuration for the user,
+                # respect their explicit configuration (including unmarking/deletions).
+                # Only populate from backup if the database field is None / not set.
+                learnt_needs_update = False
+                if curr.get("learnt_chapters") is not None:
+                    final_learnt_str = curr.get("learnt_chapters")
+                else:
+                    final_learnt_str = u.get("learnt_chapters") or "[]"
+                    if u.get("learnt_chapters"):
+                        learnt_needs_update = True
 
                 # Profile media & customization reconciliation (zero reset safeguard)
                 curr_avatar_img = curr.get("avatar_image_url") or u.get("avatar_image_url")
@@ -425,7 +424,7 @@ def restore_users_from_backup(conn: Optional[sqlite3.Connection] = None) -> int:
                     media_or_profile_updated = True
 
                 if (high_elo > curr_elo or curr_solved > int(curr.get("total_solved") or 0) or
-                    curr_rp > int(curr.get("weekly_rp") or 0) or len(merged_learnt) > len(curr_learnt) or
+                    curr_rp > int(curr.get("weekly_rp") or 0) or learnt_needs_update or
                     media_or_profile_updated):
                     c.execute("""
                         UPDATE users SET
@@ -446,7 +445,7 @@ def restore_users_from_backup(conn: Optional[sqlite3.Connection] = None) -> int:
                         high_elo, curr_p_elo, curr_c_elo, curr_m_elo,
                         curr_rp, curr_solved, curr_correct,
                         curr_longest_streak, curr_streak_freezes,
-                        json.dumps(merged_learnt),
+                        final_learnt_str,
                         curr_avatar_img,
                         curr_banner_img,
                         u_id

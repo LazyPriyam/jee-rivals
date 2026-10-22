@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   Layers,
   CheckCircle2,
@@ -279,9 +279,11 @@ export default function SphereGridSkillTree({
   // Learnt / Active Chapters state
   const effectiveUser = isOwnProfile ? currentUser : (profileUser || currentUser);
   const storageLearntKey = isOwnProfile && currentUser?.id ? `jee_user_learnt_chapters_${currentUser.id}` : null;
+  const isSavingRef = useRef(false);
+
   const [learntChapters, setLearntChapters] = useState(() => {
     try {
-      if (effectiveUser?.learnt_chapters && Array.isArray(effectiveUser.learnt_chapters) && effectiveUser.learnt_chapters.length > 0) {
+      if (effectiveUser?.learnt_chapters && Array.isArray(effectiveUser.learnt_chapters)) {
         return new Set(effectiveUser.learnt_chapters);
       }
       if (storageLearntKey) {
@@ -297,6 +299,7 @@ export default function SphereGridSkillTree({
 
   // Sync with effectiveUser when loaded
   useEffect(() => {
+    if (isSavingRef.current) return;
     if (effectiveUser?.learnt_chapters && Array.isArray(effectiveUser.learnt_chapters)) {
       setLearntChapters(new Set(effectiveUser.learnt_chapters));
       if (storageLearntKey) {
@@ -320,14 +323,23 @@ export default function SphereGridSkillTree({
     }
 
     if (currentUser) {
+      isSavingRef.current = true;
       setSavingLearnt(true);
       try {
-        await api.auth.updateLearntChapters(arr);
+        const updated = await api.auth.updateLearntChapters(arr);
+        const resolvedUser = updated || { ...currentUser, learnt_chapters: arr };
+        if (storageLearntKey) {
+          try {
+            localStorage.setItem(storageLearntKey, JSON.stringify(arr));
+          } catch (_) {}
+        }
         window.dispatchEvent(new CustomEvent('jee_user_updated', {
-          detail: { ...currentUser, learnt_chapters: arr }
+          detail: resolvedUser
         }));
-      } catch (_) {}
-      finally {
+      } catch (err) {
+        console.error('Failed to update learnt chapters:', err);
+      } finally {
+        isSavingRef.current = false;
         setSavingLearnt(false);
       }
     }
@@ -335,31 +347,27 @@ export default function SphereGridSkillTree({
 
   const toggleLearnt = (chapName) => {
     sound.click();
-    setLearntChapters((prev) => {
-      const next = new Set(prev);
-      if (next.has(chapName)) {
-        next.delete(chapName);
-      } else {
-        next.add(chapName);
-      }
-      saveLearntChapters(next);
-      return next;
-    });
+    const next = new Set(learntChapters);
+    if (next.has(chapName)) {
+      next.delete(chapName);
+    } else {
+      next.add(chapName);
+    }
+    setLearntChapters(next);
+    saveLearntChapters(next);
   };
 
   // Select all chapters in a unit
   const toggleUnitAll = (chapters, shouldSelect) => {
     sound.click();
-    setLearntChapters((prev) => {
-      const next = new Set(prev);
-      chapters.forEach((c) => {
-        const cName = typeof c === 'string' ? c : c.name;
-        if (shouldSelect) next.add(cName);
-        else next.delete(cName);
-      });
-      saveLearntChapters(next);
-      return next;
+    const next = new Set(learntChapters);
+    chapters.forEach((c) => {
+      const cName = typeof c === 'string' ? c : c.name;
+      if (shouldSelect) next.add(cName);
+      else next.delete(cName);
     });
+    setLearntChapters(next);
+    saveLearntChapters(next);
   };
 
   // Select all chapters

@@ -311,6 +311,9 @@ export const api = {
       request("/api/auth/learnt-chapters", {
         method: "PUT",
         body: JSON.stringify({ chapters }),
+      }).then((res) => {
+        invalidateCachedProfile();
+        return res;
       }),
     updateDailyGoal: (goal) =>
       request("/api/auth/daily-goal", {
@@ -508,7 +511,9 @@ export const api = {
           return Promise.resolve(cached);
         }
       }
-      return request(`/api/leaderboards/profile/${encodeURIComponent(username)}`).then((res) => {
+      return request(
+        `/api/leaderboards/profile/${encodeURIComponent(username)}${force ? "?force=true" : ""}`
+      ).then((res) => {
         setCachedProfile(key, res);
         return res;
       });

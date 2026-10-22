@@ -353,14 +353,15 @@ def update_current_user_profile(
 
 
 @router.get("/profile/{username}")
-def get_public_profile(username: str):
+def get_public_profile(username: str, force: bool = False):
     uname_clean = username.strip()
     uname_key = uname_clean.lower()
     now = time.time()
 
-    cached_pub = _PUBLIC_PROFILE_CACHE.get(uname_key)
-    if cached_pub and (now - cached_pub[0] < 20.0):
-        return cached_pub[1]
+    if not force:
+        cached_pub = _PUBLIC_PROFILE_CACHE.get(uname_key)
+        if cached_pub and (now - cached_pub[0] < 20.0):
+            return cached_pub[1]
 
     user = get_user_by_username(uname_clean)
     if not user:

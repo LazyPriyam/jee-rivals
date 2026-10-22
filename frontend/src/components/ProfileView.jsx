@@ -583,7 +583,18 @@ export default function ProfileView({
   }, [targetUsername, isActive, currentUser?.overall_elo, currentUser?.total_solved]);
 
   useEffect(() => {
-    const handleUserUpdated = () => {
+    const handleUserUpdated = (e) => {
+      if (e?.detail) {
+        setData((prev) => {
+          if (!prev) return prev;
+          const updatedProfile = {
+            ...prev.profile,
+            ...e.detail,
+            learnt_chapters: Array.isArray(e.detail.learnt_chapters) ? e.detail.learnt_chapters : prev.profile?.learnt_chapters,
+          };
+          return { ...prev, profile: updatedProfile };
+        });
+      }
       if (isActive !== false) {
         fetchProfile(true);
       }
