@@ -4,7 +4,7 @@ Contains exact canonical chapters matching jee/models/syllabus.py and the questi
 Provides helper functions to calculate 5-tier RPG chapter masteries and skill tree progression.
 """
 
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any, Optional, Tuple, Set
 import re
 
 # Authoritative 2026 Canonical JEE Syllabus (92 Chapters organized across Units & Subjects)
