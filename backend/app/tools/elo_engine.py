@@ -3,7 +3,7 @@ import hashlib
 import sqlite3
 import datetime
 import time
-from typing import List, Dict, Optional, Tuple, Set
+from typing import List, Dict, Optional, Tuple, Set, Any
 
 # Minimum engagement times (in seconds) required for an attempt to be deemed genuine
 # Submissions faster than these thresholds on wrong answers are treated as rapid guesses,
