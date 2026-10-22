@@ -17,7 +17,10 @@ def _parse_iso(ts_str: Optional[str]) -> Optional[datetime.datetime]:
     try:
         # Handle trailing Z or offsets
         clean = ts_str.replace("Z", "+00:00")
-        return datetime.datetime.fromisoformat(clean)
+        dt = datetime.datetime.fromisoformat(clean)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=datetime.timezone.utc)
+        return dt
     except Exception:
         return None
 
