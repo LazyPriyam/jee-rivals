@@ -698,7 +698,7 @@ export default function TestAnalysisView({
   const fatigueDrop = firstHalfAcc - secondHalfAcc;
 
   // Elo Dynamics Analysis Computation
-  const eloAnalytics = useMemo(() => {
+  const eloAnalytics = (() => {
     if (data?.elo_analytics?.overall) {
       return data.elo_analytics;
     }
@@ -794,7 +794,7 @@ export default function TestAnalysisView({
       },
       chapters: chList
     };
-  }, [data, myParticipant, user, processedQuestions, subjectStats, chapterMap, correctCount, totalQuestions]);
+  })();
 
   const getHardnessInfo = (elo) => {
     const val = Number(elo || 1500);
@@ -839,44 +839,39 @@ export default function TestAnalysisView({
     }
   };
 
-  const displayedChapterElos = useMemo(() => {
-    let list = [...(eloAnalytics.chapters || [])];
-    if (chapterEloSortBy === 'QUESTIONS_DESC') {
-      list.sort((a, b) => b.questions_count - a.questions_count);
-    } else if (chapterEloSortBy === 'DELTA_DESC') {
-      list.sort((a, b) => b.delta - a.delta);
-    } else if (chapterEloSortBy === 'DELTA_ASC') {
-      list.sort((a, b) => a.delta - b.delta);
-    } else if (chapterEloSortBy === 'ACCURACY_ASC') {
-      list.sort((a, b) => a.accuracy - b.accuracy);
-    } else if (chapterEloSortBy === 'ACCURACY_DESC') {
-      list.sort((a, b) => b.accuracy - a.accuracy);
+  let displayedChapterElos = [...(eloAnalytics.chapters || [])];
+  if (chapterEloSortBy === 'QUESTIONS_DESC') {
+    displayedChapterElos.sort((a, b) => b.questions_count - a.questions_count);
+  } else if (chapterEloSortBy === 'DELTA_DESC') {
+    displayedChapterElos.sort((a, b) => b.delta - a.delta);
+  } else if (chapterEloSortBy === 'DELTA_ASC') {
+    displayedChapterElos.sort((a, b) => a.delta - b.delta);
+  } else if (chapterEloSortBy === 'ACCURACY_ASC') {
+    displayedChapterElos.sort((a, b) => a.accuracy - b.accuracy);
+  } else if (chapterEloSortBy === 'ACCURACY_DESC') {
+    displayedChapterElos.sort((a, b) => b.accuracy - a.accuracy);
+  }
+
+  const filteredEloQuestions = processedQuestions.filter((pq) => {
+    if (eloSubjFilter !== 'ALL' && pq.subj !== eloSubjFilter) return false;
+
+    const qElo = Number(pq.q?.elo_rating || 1500);
+    const hInfo = getHardnessInfo(qElo);
+    if (eloHardnessFilter !== 'ALL' && hInfo.tier !== eloHardnessFilter) return false;
+
+    if (eloOutcomeFilter === 'CORRECT' && !pq.isCorrect) return false;
+    if (eloOutcomeFilter === 'INCORRECT' && (!pq.isAttempted || pq.isCorrect)) return false;
+    if (eloOutcomeFilter === 'UNATTEMPTED' && pq.isAttempted) return false;
+
+    if (eloSearchQuery.trim()) {
+      const query = eloSearchQuery.toLowerCase();
+      const ch = (pq.q?.chapter || '').toLowerCase();
+      const text = (pq.q?.text || '').toLowerCase();
+      if (!ch.includes(query) && !text.includes(query)) return false;
     }
-    return list;
-  }, [eloAnalytics, chapterEloSortBy]);
 
-  const filteredEloQuestions = useMemo(() => {
-    return processedQuestions.filter((pq) => {
-      if (eloSubjFilter !== 'ALL' && pq.subj !== eloSubjFilter) return false;
-
-      const qElo = Number(pq.q?.elo_rating || 1500);
-      const hInfo = getHardnessInfo(qElo);
-      if (eloHardnessFilter !== 'ALL' && hInfo.tier !== eloHardnessFilter) return false;
-
-      if (eloOutcomeFilter === 'CORRECT' && !pq.isCorrect) return false;
-      if (eloOutcomeFilter === 'INCORRECT' && (!pq.isAttempted || pq.isCorrect)) return false;
-      if (eloOutcomeFilter === 'UNATTEMPTED' && pq.isAttempted) return false;
-
-      if (eloSearchQuery.trim()) {
-        const query = eloSearchQuery.toLowerCase();
-        const ch = (pq.q?.chapter || '').toLowerCase();
-        const text = (pq.q?.text || '').toLowerCase();
-        if (!ch.includes(query) && !text.includes(query)) return false;
-      }
-
-      return true;
-    });
-  }, [processedQuestions, eloSubjFilter, eloHardnessFilter, eloOutcomeFilter, eloSearchQuery]);
+    return true;
+  });
 
   // Pages Definition
   const PAGES = [
