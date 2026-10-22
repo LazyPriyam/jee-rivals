@@ -28,6 +28,7 @@ def get_cached_chapter_question_counts(cursor=None) -> Dict[str, int]:
     if _CHAPTER_Q_COUNTS_CACHE and (now - _CHAPTER_Q_COUNTS_CACHE[0] < 600.0):
         return _CHAPTER_Q_COUNTS_CACHE[1]
 
+    from backend.app.tools.jee_syllabus import normalize_chapter_name
     counts: Dict[str, int] = {}
     if cursor:
         try:
@@ -35,7 +36,8 @@ def get_cached_chapter_question_counts(cursor=None) -> Dict[str, int]:
             for r in cursor.fetchall():
                 ch = r["chapter"]
                 if ch:
-                    counts[ch] = int(r["cnt"])
+                    norm_ch = normalize_chapter_name(ch)
+                    counts[norm_ch] = counts.get(norm_ch, 0) + int(r["cnt"])
         except Exception:
             pass
 
@@ -44,7 +46,8 @@ def get_cached_chapter_question_counts(cursor=None) -> Dict[str, int]:
         for q in get_all_questions_cached(cursor=cursor):
             ch = q.get("chapter")
             if ch:
-                counts[ch] = counts.get(ch, 0) + 1
+                norm_ch = normalize_chapter_name(ch)
+                counts[norm_ch] = counts.get(norm_ch, 0) + 1
 
     _CHAPTER_Q_COUNTS_CACHE = (now, counts)
     return counts

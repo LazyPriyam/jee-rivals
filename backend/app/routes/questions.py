@@ -137,15 +137,16 @@ def get_master_syllabus():
     """
     Returns the full canonical syllabus tree (Subject -> Units -> Chapters)
     augmented with live question counts from the in-memory question bank cache.
+    All question chapters are canonicalized so merged chapters reflect aggregate counts.
     """
     from backend.app.tools.question_cache import get_all_questions_cached
+    from backend.app.tools.jee_syllabus import normalize_chapter_name, JEE_SYLLABUS
     counts = {}
     for q in get_all_questions_cached():
-        ch = q.get("chapter")
-        if ch:
-            counts[ch] = counts.get(ch, 0) + 1
-
-    from backend.app.tools.jee_syllabus import JEE_SYLLABUS
+        raw_ch = q.get("chapter")
+        if raw_ch:
+            norm_ch = normalize_chapter_name(raw_ch)
+            counts[norm_ch] = counts.get(norm_ch, 0) + 1
 
     result = {}
     for subj, units in JEE_SYLLABUS.items():
@@ -156,7 +157,7 @@ def get_master_syllabus():
                 "chapters": [
                     {
                         "name": ch,
-                        "question_count": counts.get(ch, 0)
+                        "question_count": counts.get(normalize_chapter_name(ch), counts.get(ch, 0))
                     }
                     for ch in u["chapters"]
                 ]

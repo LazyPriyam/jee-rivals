@@ -536,6 +536,17 @@ def build_user_skill_tree(
                     elo = u_item.get("elo") or 1200.0
                     acc = round((correct / attempts * 100), 1) if attempts > 0 else 0.0
 
+                    # Self-heal tier if attempts exist but tier was mistakenly marked UNTESTED
+                    if attempts > 0 and (mastery_tier == "UNTESTED" or not mastery_tier):
+                        if (attempts >= 8 and acc >= 70.0) or (attempts >= 12 and acc >= 65.0):
+                            mastery_tier = "MASTERED"
+                        elif (attempts >= 5 and acc >= 50.0) or (attempts >= 8 and acc >= 45.0):
+                            mastery_tier = "PROFICIENT"
+                        elif attempts >= 3 and acc < 40.0:
+                            mastery_tier = "CRITICAL"
+                        else:
+                            mastery_tier = "PRACTICING"
+
                     if mastery_tier == "MASTERED":
                         tier_level = 4 if (attempts >= 25 and acc >= 85.0) else 3
                         tier_name = "Apex" if tier_level == 4 else "Mastered"
@@ -587,7 +598,7 @@ def build_user_skill_tree(
                 elif mastery.get("tier_level", 0) == 2 or mastery.get("mastery_tier") == "PROFICIENT":
                     total_proficient += 1
 
-                q_count = (chapter_question_counts or {}).get(chap_name, 0)
+                q_count = (chapter_question_counts or {}).get(chap_name, 0) or (chapter_question_counts or {}).get(norm_chap, 0)
 
                 unit_obj["chapters"].append({
                     "name": chap_name,
@@ -952,7 +963,25 @@ def get_unified_chapter_metrics(
             try:
                 parsed_cstats = json.loads(raw_cstats) if isinstance(raw_cstats, str) else raw_cstats
                 if isinstance(parsed_cstats, dict):
-                    legacy_map = parsed_cstats
+                    for k, v in parsed_cstats.items():
+                        norm_k = normalize_chapter_name(k)
+                        if norm_k not in legacy_map:
+                            legacy_map[norm_k] = v
+                        else:
+                            # Aggregate stats if multiple legacy sub-chapters map to the same canonical chapter
+                            cur = legacy_map[norm_k]
+                            c_att = int(cur.get("attempts", 0)) if isinstance(cur, dict) else (int(cur) if isinstance(cur, (int, float)) else 0)
+                            c_corr = int(cur.get("correct", 0)) if isinstance(cur, dict) else 0
+                            n_att = int(v.get("attempts", 0)) if isinstance(v, dict) else (int(v) if isinstance(v, (int, float)) else 0)
+                            n_corr = int(v.get("correct", 0)) if isinstance(v, dict) else 0
+                            c_elo = float(cur.get("elo") or 1200.0) if isinstance(cur, dict) else 1200.0
+                            n_elo = float(v.get("elo") or 1200.0) if isinstance(v, dict) else 1200.0
+                            legacy_map[norm_k] = {
+                                "attempts": c_att + n_att,
+                                "correct": c_corr + n_corr,
+                                "elo": max(c_elo, n_elo),
+                                "subject": v.get("subject") if isinstance(v, dict) else (cur.get("subject") if isinstance(cur, dict) else "Physics")
+                            }
             except Exception:
                 pass
 
@@ -968,13 +997,43 @@ def get_unified_chapter_metrics(
     for r in elo_rows:
         norm = normalize_chapter_name(r.get("chapter") or "")
         if norm:
-            elo_map[norm] = r
+            if norm not in elo_map:
+                elo_map[norm] = dict(r)
+            else:
+                prev = elo_map[norm]
+                p_att = int(prev.get("attempts") or 0)
+                p_cor = int(prev.get("correct") or 0)
+                r_att = int(r.get("attempts") or 0)
+                r_cor = int(r.get("correct") or 0)
+                tot_att = p_att + r_att
+                tot_cor = p_cor + r_cor
+                p_elo = float(prev.get("elo") or 1200.0)
+                r_elo = float(r.get("elo") or 1200.0)
+                avg_elo = (p_elo * max(1, p_att) + r_elo * max(1, r_att)) / max(1, tot_att)
+                elo_map[norm] = {
+                    "chapter": norm,
+                    "subject": r.get("subject") or prev.get("subject"),
+                    "elo": avg_elo,
+                    "attempts": tot_att,
+                    "correct": tot_cor,
+                    "last_updated": max(str(prev.get("last_updated") or ""), str(r.get("last_updated") or ""))
+                }
 
     act_map: Dict[str, dict] = {}
     for r in act_rows:
         norm = normalize_chapter_name(r.get("chapter") or "")
         if norm:
-            act_map[norm] = r
+            if norm not in act_map:
+                act_map[norm] = dict(r)
+            else:
+                prev = act_map[norm]
+                act_map[norm] = {
+                    "chapter": norm,
+                    "subject": r.get("subject") or prev.get("subject"),
+                    "att": int(prev.get("att") or 0) + int(r.get("att") or 0),
+                    "corr": int(prev.get("corr") or 0) + int(r.get("corr") or 0),
+                    "avg_time": (float(prev.get("avg_time") or 0.0) + float(r.get("avg_time") or 0.0)) / 2.0
+                }
 
     IDEAL_PACE_MAP = {
         "Chemistry": 70,

@@ -217,6 +217,39 @@ const TIER_NAMES = {
   Apex: 'Apex Tier',
 };
 
+const CANONICAL_FALLBACK_Q_COUNTS = {
+  kinematics: 312,
+  'kinematics 1d & 2d': 312,
+  'units and dimensions': 60,
+  'mathematical tools': 45,
+  "newton's laws of motion & friction": 220,
+  'work, energy and power': 180,
+  'circular motion': 85,
+  'center of mass and collisions': 95,
+  'rotational dynamics': 210,
+  'gravitation': 110,
+  'fluid mechanics': 120,
+  'elasticity and viscosity': 55,
+  'electrostatics': 250,
+  'current electricity': 240,
+};
+
+const normalizeChapterName = (name) => {
+  if (!name) return '';
+  const s = String(name).trim().toLowerCase();
+  if (
+    s.includes('kinematic') ||
+    s.includes('rectilinear') ||
+    s.includes('projectile') ||
+    s.includes('relative motion') ||
+    s.includes('motion in a straight line') ||
+    s.includes('motion in a plane')
+  ) {
+    return 'kinematics';
+  }
+  return s;
+};
+
 export default function SphereGridSkillTree({
   skillTreeData = {},
   totalMastered = 0,
@@ -376,26 +409,73 @@ export default function SphereGridSkillTree({
           const liveQCount = typeof chapItem === 'object' ? (chapItem.question_count || 0) : 0;
           let cData = null;
           if (uMatch?.chapters) {
+            // First try exact match
             cData = uMatch.chapters.find((c) => {
               const str = typeof c === 'string' ? c : (c?.name || c?.chapter || '');
               return String(str).toLowerCase() === String(chapName).toLowerCase();
             });
+
+            // If not found, try normalized match (handles Kinematics vs Kinematics 1D & 2D / Rectilinear / Projectile / Relative)
+            if (!cData) {
+              const normTarget = normalizeChapterName(chapName);
+              cData = uMatch.chapters.find((c) => {
+                const str = typeof c === 'string' ? c : (c?.name || c?.chapter || '');
+                return normalizeChapterName(str) === normTarget;
+              });
+            }
           }
-          const rawTier = cData?.mastery_tier || cData?.tier || cData?.tier_name || 'UNTESTED';
+
+          const normKey = normalizeChapterName(chapName);
+          const fallbackCount = CANONICAL_FALLBACK_Q_COUNTS[normKey] || CANONICAL_FALLBACK_Q_COUNTS[chapName.toLowerCase()] || 0;
+          const finalQCount = (cData?.question_count && cData.question_count > 0) ? cData.question_count : (liveQCount > 0 ? liveQCount : fallbackCount);
+
+          const att = Number(cData?.attempts || 0);
+          const corr = Number(cData?.correct || 0);
+          const acc = att > 0 ? Math.round((corr / att) * 1000) / 10 : Number(cData?.accuracy || 0);
+          const elo = Number(cData?.elo || 1200);
+
+          let tier = (cData?.mastery_tier || cData?.tier || '').toUpperCase();
+          if (att > 0 && (!tier || tier === 'UNTESTED' || tier === 'LOCKED')) {
+            if ((att >= 8 && acc >= 70.0) || (att >= 12 && acc >= 65.0)) {
+              tier = 'MASTERED';
+            } else if ((att >= 5 && acc >= 50.0) || (att >= 8 && acc >= 45.0)) {
+              tier = 'PROFICIENT';
+            } else if (att >= 3 && acc < 40.0) {
+              tier = 'CRITICAL';
+            } else {
+              tier = 'PRACTICING';
+            }
+          } else if (att === 0) {
+            tier = 'UNTESTED';
+          }
+
+          let tier_level = 0;
+          if (tier === 'MASTERED') {
+            tier_level = (att >= 25 && acc >= 85.0) ? 4 : 3;
+          } else if (tier === 'PROFICIENT') {
+            tier_level = 2;
+          } else if (tier === 'CRITICAL' || tier === 'PRACTICING' || tier === 'EMERGING') {
+            tier_level = 1;
+          } else {
+            tier_level = 0;
+          }
+
+          const tierLabel = TIER_NAMES[tier] || (tier_level >= 3 ? 'Mastered' : (tier_level === 2 ? 'Proficient' : (att > 0 ? 'Practicing' : 'Unattempted')));
+
           return {
             name: chapName,
             subject: subj,
             unit: dUnit.unit,
-            question_count: cData?.question_count || liveQCount || 0,
-            tier: rawTier,
-            mastery_tier: cData?.mastery_tier || rawTier,
-            tier_level: cData?.tier_level ?? (rawTier === 'MASTERED' ? 3 : (rawTier === 'PROFICIENT' ? 2 : 1)),
-            badge: cData?.badge || cData?.tier_label || 'Unattempted',
-            attempts: cData?.attempts || 0,
-            correct: cData?.correct || 0,
-            accuracy: cData?.accuracy || 0,
+            question_count: finalQCount,
+            tier: tier,
+            mastery_tier: tier,
+            tier_level: tier_level,
+            badge: tierLabel,
+            attempts: att,
+            correct: corr,
+            accuracy: acc,
             avg_time: cData?.avg_time || 0,
-            elo: cData?.elo || 1200,
+            elo: elo,
           };
         });
 
