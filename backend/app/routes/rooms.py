@@ -2154,6 +2154,23 @@ def get_room_results(code: str, user: Optional[dict] = Depends(get_optional_user
                                 except Exception as notif_err:
                                     logger.warning(f"[ROOM_RESULTS] Key correction notification note: {notif_err}")
 
+                # Authoritatively compute total marks from the evaluated answers
+                authoritative_marks = 0.0
+                for a_val in answers_dict.values():
+                    if isinstance(a_val, dict):
+                        d_m = a_val.get("delta_marks")
+                        if d_m is not None:
+                            authoritative_marks += float(d_m)
+                        elif a_val.get("correct") or a_val.get("is_dropped"):
+                            authoritative_marks += 4.0
+                        elif a_val.get("selected") not in ("NONE", "SKIPPED", "", None):
+                            authoritative_marks -= 1.0
+
+                participant_marks = authoritative_marks
+                # Maintain score in parity if mock test
+                if room.get("mode") == "MOCK_TEST":
+                    participant_score = float(p.get("score") or 0.0)
+
                 if answers_modified:
                     p_uid = str(p.get("user_id") or "")
                     r_id = str(p.get("room_id") or room_id)
