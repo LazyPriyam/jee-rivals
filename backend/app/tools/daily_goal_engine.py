@@ -309,7 +309,7 @@ def reconcile_all_users_daily_goal(conn=None) -> Dict[str, Any]:
             uid = u["id"]
             curr_solved = int(u.get("daily_goal_solved") or 0) if u.get("daily_goal_date") == today_str else 0
             detected = compute_today_solved_count(uid, c)
-            if detected > curr_solved:
+            if detected != curr_solved:
                 c.execute("""
                     UPDATE users
                     SET daily_goal_solved = ?,
