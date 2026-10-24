@@ -545,9 +545,9 @@ def report_question(question_id: str, report_data: QuestionReportRequest, user: 
                 is_multiplayer = True
 
     # NTA Dropped Question Rule Reconciliation:
-    # If the question is confirmed defective or solo test reported:
+    # Bonus marks are ONLY awarded if the question is confirmed defective or quarantined:
     bonus_marks_awarded = 0.0
-    if (is_already_defective or not is_multiplayer) and room_code and user and user.get("id"):
+    if is_already_defective and room_code and user and user.get("id"):
         uid = user["id"]
         c.execute("""
             SELECT rp.room_id, rp.user_id, rp.answers, rp.marks, rp.score

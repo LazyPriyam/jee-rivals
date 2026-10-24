@@ -537,20 +537,20 @@ export default function TestAnalysisView({
       timeSpent = 0;
     }
 
-    // Check if question is a dropped/defective question under official NTA rules:
+    // Check if question has a report pending or confirmed dropped under official NTA rules:
     const roomReport = roomReports[q.id];
-    const isExplicitlyReported = reportedQuestionIds.has(q.id) ||
+    const isReportPending = reportedQuestionIds.has(q.id) ||
       Boolean(localStorage.getItem(`jee_reported_${q.id}`)) ||
       Boolean(localStorage.getItem(`jee_reported_dispute_${q.id}`)) ||
-      (roomCode ? Boolean(localStorage.getItem(`jee_reported_room_${roomCode.trim().toUpperCase()}_${q.id}`)) : false);
+      (roomCode ? Boolean(localStorage.getItem(`jee_reported_room_${roomCode.trim().toUpperCase()}_${q.id}`)) : false) ||
+      (roomReport && roomReport.status === 'PENDING' && roomReport.consensus_status !== 'CONSENSUS_AGREED');
 
+    // Official NTA Dropped Questions are ONLY those verified and quarantined by moderation or consensus:
     const isDroppedQuestion = (q.validation_status || '').toUpperCase() === 'QUARANTINED' ||
       Boolean(userSubmission?.is_dropped) ||
       roomReport?.status === 'QUARANTINED' ||
       roomReport?.consensus_status === 'CONSENSUS_AGREED' ||
-      q.id === 'eff5b1bc-a730-4423-b9c3-34423a407bbc' ||
-      Boolean(roomReport) ||
-      isExplicitlyReported;
+      q.id === 'eff5b1bc-a730-4423-b9c3-34423a407bbc';
 
     if (isDroppedQuestion) {
       if (!isCorrect) {
@@ -610,6 +610,7 @@ export default function TestAnalysisView({
       isCorrect,
       isAttempted,
       isDropped: isDroppedQuestion,
+      isPending: isReportPending,
       markDelta,
       timeSpent,
       dTier,
@@ -2081,7 +2082,7 @@ export default function TestAnalysisView({
                             <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
                             <span>+4.0 MARKS (DEFECT CONFIRMED • NTA BONUS)</span>
                           </span>
-                        ) : reportedQuestionIds.has(q.id) || roomReport ? (
+                        ) : item.isPending || reportedQuestionIds.has(q.id) || roomReport ? (
                           <span className={`text-xs font-black px-2.5 py-0.5 rounded-full flex items-center gap-1.5 animate-pulse border ${
                             roomReport?.consensus_status === 'CONSENSUS_REJECTED'
                               ? 'bg-slate-800 text-slate-300 border-white/20'
@@ -2093,7 +2094,7 @@ export default function TestAnalysisView({
                                 ? 'DISPUTE REJECTED BY CONTENDERS'
                                 : isMultiplayer
                                 ? 'CONTENDER VOTING IN PROGRESS'
-                                : 'FLAGGED • UNDER REVIEW (+15 ELO RESTORED)'}
+                                : 'REPORT LOGGED • PENDING REVIEW (+15 ELO RESTORED)'}
                             </span>
                           </span>
                         ) : (
@@ -2396,13 +2397,13 @@ export default function TestAnalysisView({
                           <CheckCircle2 className="w-3.5 h-3.5" />
                           <span>Defect Verified • Bonus Credited</span>
                         </div>
-                      ) : roomReport ? (
+                      ) : roomReport || item.isPending || reportedQuestionIds.has(q.id) ? (
                         <div className="text-xs font-mono flex items-center gap-1.5 text-amber-400">
                           <Shield className="w-3.5 h-3.5 text-amber-400" />
                           <span>
-                            {roomReport.consensus_status === 'CONSENSUS_AGREED'
+                            {roomReport?.consensus_status === 'CONSENSUS_AGREED'
                               ? 'Defect Confirmed'
-                              : roomReport.consensus_status === 'CONSENSUS_REJECTED'
+                              : roomReport?.consensus_status === 'CONSENSUS_REJECTED'
                               ? 'Dispute Rejected'
                               : 'Dispute in Review'}
                           </span>
@@ -2411,24 +2412,10 @@ export default function TestAnalysisView({
                         <button
                           type="button"
                           onClick={() => setReportTarget({ id: q.id, text: q.text })}
-                          disabled={reportedQuestionIds.has(q.id)}
-                          className={`text-xs font-mono transition flex items-center gap-1.5 cursor-pointer ${
-                            reportedQuestionIds.has(q.id)
-                              ? 'text-amber-400 opacity-90 cursor-default'
-                              : 'text-slate-500 hover:text-slate-400'
-                          }`}
+                          className="text-xs font-mono transition flex items-center gap-1.5 cursor-pointer text-slate-500 hover:text-slate-400"
                         >
-                          {reportedQuestionIds.has(q.id) ? (
-                            <>
-                              <Shield className="w-3.5 h-3.5 text-amber-400" />
-                              <span>Reported (Protected)</span>
-                            </>
-                          ) : (
-                            <>
-                              <Flag className="w-3 h-3" />
-                              <span>Report Question</span>
-                            </>
-                          )}
+                          <Flag className="w-3 h-3" />
+                          <span>Report Question</span>
                         </button>
                       )}
                     </div>
