@@ -164,6 +164,11 @@ class TursoConnection:
     def _execute_raw(self, sql: str, args: Any):
         try:
             return self._client.execute(sql, args)
+        except KeyError as ke:
+            if str(ke) == "'result'":
+                logger.error(f"[TURSO] Turso query failed (libsql 'result' key missing - query error): SQL: {sql} | args: {args}")
+                raise sqlite3.OperationalError(f"Turso database execution error for statement: {sql}") from ke
+            raise ke
         except Exception as e:
             err_str = str(e).upper()
             if "WEBSOCKET" in err_str or "CONNECTION" in err_str or "CLOSED" in err_str:
@@ -178,6 +183,11 @@ class TursoConnection:
     def _batch_raw(self, batch_items: List[Tuple[str, Any]]):
         try:
             return self._client.batch(batch_items)
+        except KeyError as ke:
+            if str(ke) == "'result'":
+                logger.error(f"[TURSO] Turso batch query failed (libsql 'result' key missing): {batch_items}")
+                raise sqlite3.OperationalError("Turso database batch execution error") from ke
+            raise ke
         except Exception as e:
             err_str = str(e).upper()
             if "WEBSOCKET" in err_str or "CONNECTION" in err_str or "CLOSED" in err_str:

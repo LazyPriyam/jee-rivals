@@ -421,7 +421,7 @@ def report_question(question_id: str, report_data: QuestionReportRequest, user: 
                         SELECT rp.answers, r.id FROM room_participants rp
                         JOIN rooms r ON rp.room_id = r.id
                         WHERE rp.user_id = ? AND r.question_ids LIKE ?
-                        ORDER BY rp.rowid DESC LIMIT 1
+                        ORDER BY r.created_at DESC LIMIT 1
                     """, (uid, f"%{question_id}%"))
                     rp_row = c.fetchone()
                     if rp_row:
@@ -550,11 +550,11 @@ def report_question(question_id: str, report_data: QuestionReportRequest, user: 
     if (is_already_defective or not is_multiplayer) and room_code and user and user.get("id"):
         uid = user["id"]
         c.execute("""
-            SELECT rp.id, rp.room_id, rp.answers, rp.marks, rp.score
+            SELECT rp.room_id, rp.user_id, rp.answers, rp.marks, rp.score
             FROM room_participants rp
             JOIN rooms r ON rp.room_id = r.id
             WHERE rp.user_id = ? AND r.code = ?
-            ORDER BY rp.rowid DESC LIMIT 1
+            LIMIT 1
         """, (uid, room_code))
         rp_found = c.fetchone()
         if rp_found:
@@ -598,8 +598,8 @@ def report_question(question_id: str, report_data: QuestionReportRequest, user: 
                 c.execute("""
                     UPDATE room_participants
                     SET marks = marks + ?, score = score + ?, answers = ?
-                    WHERE id = ?
-                """, (bonus_marks_awarded, int(bonus_marks_awarded), json.dumps(p_answers), rp_dict["id"]))
+                    WHERE room_id = ? AND user_id = ?
+                """, (bonus_marks_awarded, int(bonus_marks_awarded), json.dumps(p_answers), rp_dict["room_id"], uid))
 
     votes = {}
     consensus_status = "CONSENSUS_AGREED" if is_already_defective else "PENDING"

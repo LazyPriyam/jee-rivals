@@ -2090,15 +2090,18 @@ def get_room_results(code: str, user: Optional[dict] = Depends(get_optional_user
                             except Exception as notif_err:
                                 logger.warning(f"[ROOM_RESULTS] Dropped question notification note: {notif_err}")
 
-                if answers_modified and p.get("id"):
-                    try:
-                        c.execute("""
-                            UPDATE room_participants
-                            SET marks = ?, score = ?, answers = ?
-                            WHERE id = ?
-                        """, (participant_marks, int(participant_score), json.dumps(answers_dict), p["id"]))
-                    except Exception as upd_err:
-                        logger.warning(f"[ROOM_RESULTS] Could not persist reconciled participant marks: {upd_err}")
+                if answers_modified:
+                    p_uid = str(p.get("user_id") or "")
+                    r_id = str(p.get("room_id") or room_id)
+                    if p_uid and r_id:
+                        try:
+                            c.execute("""
+                                UPDATE room_participants
+                                SET marks = ?, score = ?, answers = ?
+                                WHERE room_id = ? AND user_id = ?
+                            """, (participant_marks, int(participant_score), json.dumps(answers_dict), r_id, p_uid))
+                        except Exception as upd_err:
+                            logger.warning(f"[ROOM_RESULTS] Could not persist reconciled participant marks: {upd_err}")
 
                 attempted_items = [
                     v for v in answers_dict.values()
