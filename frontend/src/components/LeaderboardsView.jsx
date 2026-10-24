@@ -426,6 +426,10 @@ export default function LeaderboardsView({ user, onViewProfile, onNavigateTab, i
                     const neededElo = div.needed_elo ?? (div.next_tier?.elo_needed ?? 0);
                     const minAcc = div.min_acc ?? (div.next_tier?.target_acc ?? 0);
                     const neededAcc = div.needed_acc ?? (div.next_tier?.acc_needed ?? 0);
+                    const pcmGap = Number(div.next_tier?.pcm_gap_needed || 0);
+                    const laggingSubj = div.next_tier?.lagging_subject;
+                    const minPcm = div.next_tier?.target_min_pcm || 0;
+                    const hasPcmGate = Boolean(minPcm > 0);
 
                     return (
                       <>
@@ -446,8 +450,8 @@ export default function LeaderboardsView({ user, onViewProfile, onNavigateTab, i
                           />
                         </div>
 
-                        {/* Dual Gate Badges */}
-                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-1 text-[11px]">
+                        {/* Dual & Multi Gate Badges */}
+                        <div className={`grid grid-cols-1 ${hasPcmGate ? 'sm:grid-cols-4' : 'sm:grid-cols-3'} gap-2 pt-1 text-[11px]`}>
                           <div className="bg-[#181d2a] p-2 rounded-xl border border-white/5 flex flex-col">
                             <span className="text-slate-400 text-[10px] uppercase font-bold">1. Weekly RP Gate</span>
                             <span className={`font-mono font-bold mt-0.5 ${neededRp <= 0 ? 'text-emerald-400' : 'text-amber-400'}`}>
@@ -468,7 +472,25 @@ export default function LeaderboardsView({ user, onViewProfile, onNavigateTab, i
                               {neededAcc <= 0 ? '✓ Accuracy Met' : `${minAcc}% min required`}
                             </span>
                           </div>
+
+                          {hasPcmGate && (
+                            <div className="bg-[#181d2a] p-2 rounded-xl border border-white/5 flex flex-col">
+                              <span className="text-slate-400 text-[10px] uppercase font-bold">4. PCM Parity Gate</span>
+                              <span className={`font-mono font-bold mt-0.5 ${pcmGap <= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                                {pcmGap <= 0 ? `✓ All PCM ≥ ${minPcm}` : `${laggingSubj} +${pcmGap} Elo`}
+                              </span>
+                            </div>
+                          )}
                         </div>
+
+                        {hasPcmGate && pcmGap > 0 && (
+                          <div className="text-[11px] text-amber-300/90 bg-amber-500/10 border border-amber-500/20 rounded-xl p-2.5 flex items-start gap-2">
+                            <span className="text-sm leading-none">⚖️</span>
+                            <span>
+                              <strong>JEE Parity Gate Active:</strong> Diamond requires at least <strong>{minPcm} Elo</strong> across all three subjects (Physics, Chemistry, Math) to prevent single-subject farming. Your <strong>{laggingSubj}</strong> is currently at <strong>{Math.round(minPcm - pcmGap)}</strong> (+{pcmGap} Elo needed to promote to {nextTargetName}).
+                            </span>
+                          </div>
+                        )}
                       </>
                     );
                   })()}
