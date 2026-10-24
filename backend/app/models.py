@@ -132,6 +132,7 @@ class QuestionOut(BaseModel):
     subquestion_index: Optional[int] = None
     subquestion_total: Optional[int] = None
     is_comprehension: Optional[bool] = False
+    validation_status: Optional[str] = "VALIDATED"
 
 class QuestionSolutionOut(BaseModel):
     id: str

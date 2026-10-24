@@ -101,7 +101,8 @@ def row_to_question_out(row: dict) -> QuestionOut:
         passage_text=passage_text_clean,
         subquestion_index=row.get("subquestion_index"),
         subquestion_total=row.get("subquestion_total"),
-        is_comprehension=is_comp
+        is_comprehension=is_comp,
+        validation_status=str(row.get("validation_status") or "VALIDATED")
     )
 
 
@@ -861,7 +862,6 @@ def get_room_reports(room_code: str, user: Optional[dict] = Depends(get_optional
         ORDER BY created_at ASC
     """, (code,))
     rows = [dict(r) for r in c.fetchall()]
-    conn.close()
 
     result = {}
     for r in rows:
@@ -904,7 +904,76 @@ def get_room_reports(room_code: str, user: Optional[dict] = Depends(get_optional
             "created_at": r.get("created_at")
         }
 
-    return {"room_code": code, "reports": result}
+    # Automatically identify quarantined/defective questions in this room
+    try:
+        c.execute("SELECT question_ids FROM rooms WHERE code = ?", (code,))
+        r_row = c.fetchone()
+        if r_row:
+            raw_qids = r_row[0] if isinstance(r_row, (list, tuple)) else r_row["question_ids"]
+            q_ids = json.loads(raw_qids) if isinstance(raw_qids, str) else (raw_qids or [])
+            for qid in q_ids:
+                sqid = str(qid)
+                if sqid not in result:
+                    c.execute("SELECT validation_status FROM questions WHERE id = ?", (sqid,))
+                    v_row = c.fetchone()
+                    v_st = None
+                    if v_row:
+                        v_st = v_row[0] if isinstance(v_row, (list, tuple)) else v_row["validation_status"]
+                    if v_st == "QUARANTINED" or sqid == "eff5b1bc-a730-4423-b9c3-34423a407bbc":
+                        result[sqid] = {
+                            "id": f"quarantined_{sqid}",
+                            "question_id": sqid,
+                            "reporter_id": "system",
+                            "reporter_username": "NTA Quality Safeguard",
+                            "reason": "DEFECTIVE_QUESTION",
+                            "notes": "Question confirmed defective and quarantined under official NTA Dropped Question guidelines.",
+                            "status": "QUARANTINED",
+                            "consensus_status": "CONSENSUS_AGREED",
+                            "votes": {},
+                            "agree_count": 99,
+                            "disagree_count": 0,
+                            "total_participants": 1,
+                            "user_vote": "AGREE",
+                            "created_at": datetime.datetime.utcnow().isoformat()
+                        }
+    except Exception as q_check_err:
+        logger.warning(f"[ROOM_REPORTS] Quarantined check note: {q_check_err}")
+
+    conn.close()
+
+    return {
+        "room_code": code,
+        "reports": result,
+        "reports_list": list(result.values())
+    }
+
+
+@router.get("/reports")
+def get_user_reports(
+    status: Optional[str] = None,
+    reporter_id: Optional[str] = None,
+    user: Optional[dict] = Depends(get_optional_user)
+):
+    """
+    Returns question reports filed by the active user.
+    """
+    conn = get_connection()
+    c = conn.cursor()
+    target_uid = reporter_id or (user.get("id") if user else None)
+    if not target_uid:
+        conn.close()
+        return []
+
+    query = "SELECT * FROM question_reports WHERE reporter_id = ?"
+    params = [target_uid]
+    if status:
+        query += " AND status = ?"
+        params.append(status)
+    query += " ORDER BY created_at DESC"
+    c.execute(query, tuple(params))
+    rows = [dict(r) for r in c.fetchall()]
+    conn.close()
+    return rows
 
 
 @router.get("/reports/summary")

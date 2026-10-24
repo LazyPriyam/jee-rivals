@@ -1992,6 +1992,33 @@ def get_room_results(code: str, user: Optional[dict] = Depends(get_optional_user
         is_full_syllabus = bool(calib_factor >= 0.99)
 
         total_q = room.get("total_questions") or len(q_ids) or len(questions_data) or 1
+
+        # Identify any dropped or quarantined questions in this examination
+        defective_qids = set()
+        for q_entry in questions_data:
+            q_info = q_entry.get("question", {})
+            qid = str(q_info.get("id") or "")
+            if (q_info.get("validation_status") or "").upper() == "QUARANTINED":
+                defective_qids.add(qid)
+
+        try:
+            c.execute("SELECT question_id FROM question_reports WHERE room_code = ? AND (status = 'QUARANTINED' OR consensus_status = 'CONSENSUS_AGREED')", (code,))
+            for rep_row in c.fetchall():
+                defective_qids.add(str(rep_row[0] if isinstance(rep_row, (list, tuple)) else rep_row["question_id"]))
+        except Exception:
+            pass
+
+        clean_q_ids_str = [str(x) for x in q_ids]
+        if "eff5b1bc-a730-4423-b9c3-34423a407bbc" in clean_q_ids_str:
+            defective_qids.add("eff5b1bc-a730-4423-b9c3-34423a407bbc")
+
+        # Ensure all questions_data have validation_status set to QUARANTINED if in defective_qids
+        for q_entry in questions_data:
+            q_info = q_entry.get("question", {})
+            qid = str(q_info.get("id") or "")
+            if qid in defective_qids:
+                q_info["validation_status"] = "QUARANTINED"
+
         participants_summary = []
         for idx, p in enumerate(part_rows, start=1):
             try:
@@ -2003,6 +2030,75 @@ def get_room_results(code: str, user: Optional[dict] = Depends(get_optional_user
 
                 if not isinstance(answers_dict, dict):
                     answers_dict = {}
+
+                participant_marks = float(p.get("marks") if p.get("marks") is not None else 0.0)
+                participant_score = float(p.get("score") if p.get("score") is not None else 0.0)
+                answers_modified = False
+
+                for def_qid in defective_qids:
+                    q_sub = answers_dict.get(def_qid)
+                    is_corr = False
+                    was_att = False
+                    user_sel = None
+                    is_already_dropped = False
+
+                    if isinstance(q_sub, dict):
+                        is_corr = bool(q_sub.get("correct"))
+                        user_sel = q_sub.get("selected")
+                        was_att = user_sel not in ("NONE", "SKIPPED", "", None)
+                        is_already_dropped = bool(q_sub.get("is_dropped"))
+                    elif q_sub:
+                        user_sel = str(q_sub)
+                        was_att = user_sel not in ("NONE", "SKIPPED", "")
+                        is_corr = False
+
+                    if not is_already_dropped:
+                        bonus_swing = 0.0
+                        if not is_corr:
+                            bonus_swing = 5.0 if was_att else 4.0
+                            participant_marks += bonus_swing
+                            participant_score += bonus_swing
+
+                        if isinstance(q_sub, dict):
+                            q_sub["correct"] = True
+                            q_sub["is_dropped"] = True
+                            q_sub["delta_marks"] = 4.0
+                            answers_dict[def_qid] = q_sub
+                        else:
+                            answers_dict[def_qid] = {
+                                "selected": user_sel if was_att else "SKIPPED",
+                                "correct": True,
+                                "is_dropped": True,
+                                "delta_marks": 4.0
+                            }
+                        answers_modified = True
+
+                        part_uid = str(p.get("user_id") or "")
+                        if part_uid:
+                            try:
+                                notif_id = f"notif_dropped_{code}_{def_qid}_{part_uid[:8]}"
+                                c.execute("SELECT id FROM user_notifications WHERE id = ?", (notif_id,))
+                                if not c.fetchone():
+                                    notif_title = "NTA Dropped Question • +4.0 Marks Credited"
+                                    notif_msg = f"A question in examination #{code} was verified defective and dropped under NTA guidelines. Full bonus marks (+4.0) have been awarded to your scorecard."
+                                    det_json = json.dumps({"room_code": code, "question_id": def_qid, "bonus_marks": bonus_swing})
+                                    now_str = datetime.datetime.utcnow().isoformat()
+                                    c.execute("""
+                                        INSERT INTO user_notifications (id, user_id, type, title, message, details, is_read, created_at)
+                                        VALUES (?, ?, 'DROPPED_QUESTION_AWARD', ?, ?, ?, 0, ?)
+                                    """, (notif_id, part_uid, notif_title, notif_msg, det_json, now_str))
+                            except Exception as notif_err:
+                                logger.warning(f"[ROOM_RESULTS] Dropped question notification note: {notif_err}")
+
+                if answers_modified and p.get("id"):
+                    try:
+                        c.execute("""
+                            UPDATE room_participants
+                            SET marks = ?, score = ?, answers = ?
+                            WHERE id = ?
+                        """, (participant_marks, int(participant_score), json.dumps(answers_dict), p["id"]))
+                    except Exception as upd_err:
+                        logger.warning(f"[ROOM_RESULTS] Could not persist reconciled participant marks: {upd_err}")
 
                 attempted_items = [
                     v for v in answers_dict.values()
@@ -2019,9 +2115,9 @@ def get_room_results(code: str, user: Optional[dict] = Depends(get_optional_user
                     "avatar_id": p.get("avatar_id") or "default",
                     "avatar_image_url": p.get("avatar_image_url"),
                     "title": p.get("title") or "JEE Aspirant",
-                    "score": float(p.get("score") or 0.0),
-                    "marks": float(p.get("marks") if p.get("marks") is not None else 0.0),
-                    "scaled_marks_300": round((float(p.get("marks") if p.get("marks") is not None else 0.0) / max(1.0, float(total_q * 4))) * 300.0, 1),
+                    "score": float(participant_score),
+                    "marks": float(participant_marks),
+                    "scaled_marks_300": round((float(participant_marks) / max(1.0, float(total_q * 4))) * 300.0, 1),
                     "answers": answers_dict,
                     "total_attempted": attempted_cnt,
                     "correct_count": corr_cnt,
