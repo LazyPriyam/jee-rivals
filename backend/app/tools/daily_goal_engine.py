@@ -60,7 +60,9 @@ def compute_today_solved_count(user_id: str, cursor) -> int:
     try:
         cursor.execute("""
             SELECT COUNT(*) FROM activity_log
-            WHERE user_id = ? AND (created_at >= ? OR created_at LIKE ?)
+            WHERE user_id = ?
+              AND (created_at >= ? OR created_at LIKE ?)
+              AND mode NOT IN ('MOCK_TEST_SKIPPED', 'PROVISIONAL_REPORT_REFUND', 'CLAWBACK')
         """, (user_id, start_utc_iso, f"{today_str}%"))
         r = cursor.fetchone()
         if r:
