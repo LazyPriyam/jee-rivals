@@ -19,7 +19,7 @@ export function parseInlineComprehension(q) {
   // Only attempt inline split if marked as COMPREHENSION or text starts with PASSAGE / Read the following
   const isCompType = q.question_type === 'COMPREHENSION';
   const text = q.text.trim();
-  const startsWithPassage = /^(PASSAGE\s+\d+|Paragraph\s+\d+|Read the following)/i.test(text);
+  const startsWithPassage = /^(?:\*\*)?(?:PASSAGE|Paragraph|Read the following)/i.test(text);
 
   if (!isCompType && !startsWithPassage) {
     return [q];
@@ -28,6 +28,59 @@ export function parseInlineComprehension(q) {
   // Regex to detect numbered subquestions: "\n1.", "\n2.", "\n35.", "\n(1)"
   const qSplitRegex = /(?:\n+|^)\s*(?:(?:Question\s*)?(\d{1,2})\.|\((\d{1,2})\))\s+/gi;
   const matches = [...text.matchAll(qSplitRegex)];
+
+  if (matches.length === 1 && (isCompType || startsWithPassage)) {
+    const firstMatch = matches[0];
+    const passageText = text.substring(0, firstMatch.index).trim();
+    if (passageText.length > 20) {
+      let passageTitle = 'Comprehension Passage';
+      const titleMatch = passageText.match(/^(?:\*\*)?(PASSAGE(?:-\d+)?|Paragraph\s+\d+|COMPREHENSION\s+\d+)\*?:?/i);
+      let cleanPassage = passageText;
+      if (titleMatch) {
+        passageTitle = titleMatch[1].replace(/\*\*/g, '').trim().toUpperCase();
+        cleanPassage = passageText.substring(titleMatch[0].length).replace(/^[\*:\s]+/, '').trim();
+      }
+      const qStem = text.substring(firstMatch.index + firstMatch[0].length).trim();
+      const qNum = parseInt(firstMatch[1] || firstMatch[2] || '1', 10);
+      return [{
+        ...q,
+        text: qStem,
+        passage_id: q.passage_id || `${(q.chapter || 'chem').toLowerCase().replace(/[^a-z0-9]+/g, '_')}_${passageTitle.toLowerCase().replace(/[^a-z0-9]+/g, '_')}`,
+        passage_title: passageTitle,
+        passage_text: cleanPassage || passageText,
+        subquestion_index: q.subquestion_index || qNum,
+        subquestion_total: q.subquestion_total || 1,
+        is_comprehension: true
+      }];
+    }
+  }
+
+  if (matches.length === 0 && startsWithPassage && text.includes('\n\n')) {
+    const parts = text.split('\n\n');
+    if (parts.length >= 2) {
+      const passageText = parts.slice(0, -1).join('\n\n').trim();
+      const qStem = parts[parts.length - 1].trim();
+      if (passageText.length > 20) {
+        let passageTitle = 'Comprehension Passage';
+        const titleMatch = passageText.match(/^(?:\*\*)?(PASSAGE(?:-\d+)?|Paragraph\s+\d+|COMPREHENSION\s+\d+)\*?:?/i);
+        let cleanPassage = passageText;
+        if (titleMatch) {
+          passageTitle = titleMatch[1].replace(/\*\*/g, '').trim().toUpperCase();
+          cleanPassage = passageText.substring(titleMatch[0].length).replace(/^[\*:\s]+/, '').trim();
+        }
+        return [{
+          ...q,
+          text: qStem,
+          passage_id: q.passage_id || `${(q.chapter || 'chem').toLowerCase().replace(/[^a-z0-9]+/g, '_')}_${passageTitle.toLowerCase().replace(/[^a-z0-9]+/g, '_')}`,
+          passage_title: passageTitle,
+          passage_text: cleanPassage || passageText,
+          subquestion_index: q.subquestion_index || 1,
+          subquestion_total: q.subquestion_total || 1,
+          is_comprehension: true
+        }];
+      }
+    }
+  }
 
   if (matches.length < 2) {
     // If not multiple subquestions, return as-is with question_type ensured
@@ -41,11 +94,11 @@ export function parseInlineComprehension(q) {
   const passageText = text.substring(0, firstMatch.index).trim();
 
   let passageTitle = 'Comprehension Passage';
-  const titleMatch = passageText.match(/^(PASSAGE\s+\d+|Paragraph\s+\d+|COMPREHENSION\s+\d+)/i);
+  const titleMatch = passageText.match(/^(?:\*\*)?(PASSAGE(?:-\d+)?|Paragraph\s+\d+|COMPREHENSION\s+\d+)\*?:?/i);
   let cleanPassage = passageText;
   if (titleMatch) {
-    passageTitle = titleMatch[1].toUpperCase();
-    cleanPassage = passageText.substring(titleMatch[0].length).trim();
+    passageTitle = titleMatch[1].replace(/\*\*/g, '').trim().toUpperCase();
+    cleanPassage = passageText.substring(titleMatch[0].length).replace(/^[\*:\s]+/, '').trim();
   }
 
   const subquestions = [];

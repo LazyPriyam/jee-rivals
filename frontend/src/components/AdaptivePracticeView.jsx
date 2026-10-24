@@ -1266,259 +1266,408 @@ export default function AdaptivePracticeView({ user, onOpenAuth, onNavigateTab, 
               );
             })()}
 
-            {/* Interactive Options / Answer Input */}
-            {!submitted ? (
-              <div className="pt-4 border-t border-white/10 space-y-4">
-                {/* Single Choice or Multi Choice */}
-                {question.options && question.options.length > 0 ? (
-                  <div>
-                    {(() => {
-                      const isMulti = ['MULTIPLE_CHOICE', 'MULTI_CORRECT', 'MULTIPLE'].includes((question.question_type || '').toUpperCase());
-                      const selectedKeys = selectedAnswer
-                        ? selectedAnswer.split(',').map((s) => s.trim().toUpperCase()).filter(Boolean)
-                        : [];
+            {/* Interactive Options / Answer Input & Post-Submission Reveal */}
+            {(() => {
+              let rawOpts = question?.options;
+              if (typeof rawOpts === 'string') {
+                try {
+                  rawOpts = JSON.parse(rawOpts);
+                } catch (_) {
+                  rawOpts = [];
+                }
+              }
+              if (!Array.isArray(rawOpts)) {
+                rawOpts = [];
+              }
+              const normalizedOptions = rawOpts.map((opt, oIdx) => {
+                if (typeof opt === 'string') {
+                  return { key: String.fromCharCode(65 + oIdx), text: opt };
+                }
+                return {
+                  key: opt?.key != null ? String(opt.key) : String.fromCharCode(65 + oIdx),
+                  text: opt?.text || ''
+                };
+              });
 
-                      const handleOptionClick = (key) => {
-                        sound.click();
-                        if (isMulti) {
-                          const kUpper = key.toUpperCase();
-                          let updated;
-                          if (selectedKeys.includes(kUpper)) {
-                            updated = selectedKeys.filter((k) => k !== kUpper);
-                          } else {
-                            updated = [...selectedKeys, kUpper].sort();
-                          }
-                          setSelectedAnswer(updated.join(', '));
-                        } else {
-                          setSelectedAnswer(key);
-                        }
-                      };
+              const normalizeKey = (k) => {
+                if (k === null || k === undefined) return '';
+                const s = String(k).trim().toUpperCase();
+                if (s === '1') return 'A';
+                if (s === '2') return 'B';
+                if (s === '3') return 'C';
+                if (s === '4') return 'D';
+                return s;
+              };
 
-                      return (
-                        <>
-                          {isMulti && (
-                            <div className="mb-3 px-3.5 py-2 rounded-xl bg-purple-950/50 border border-purple-500/40 text-xs text-purple-200 font-bold flex items-center justify-between">
-                              <span>Multiple Correct Options: Tap each correct option to toggle.</span>
-                              <span className="font-mono text-amber-300">Selected: {selectedAnswer || 'None'}</span>
-                            </div>
-                          )}
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                            {question.options.map((opt) => {
-                              const isSel = isMulti
-                                ? selectedKeys.includes(opt.key.toUpperCase())
-                                : selectedAnswer.toUpperCase() === opt.key.toUpperCase();
-                              return (
-                                <button
-                                  key={opt.key}
-                                  type="button"
-                                  onClick={() => handleOptionClick(opt.key)}
-                                  className={`p-4 rounded-2xl border text-left transition flex items-start gap-3 cursor-pointer ${
-                                    isSel
-                                      ? 'bg-orange-500/20 border-orange-500 text-white shadow-lg glow-orange-subtle'
-                                      : 'bg-[#1e2433] border-white/10 text-slate-300 hover:bg-[#252c3c] hover:text-white'
+              const isKeyMatch = (k1, k2) => {
+                if (!k1 || !k2) return false;
+                const s1 = String(k1).trim().toUpperCase();
+                const s2 = String(k2).trim().toUpperCase();
+                if (s1 === s2) return true;
+                return normalizeKey(s1) === normalizeKey(s2);
+              };
+
+              const isOptionInAnswers = (optKey, answerString) => {
+                if (!optKey || !answerString) return false;
+                const parts = String(answerString).split(/[, ]+/).map((p) => p.trim()).filter(Boolean);
+                return parts.some((p) => isKeyMatch(optKey, p));
+              };
+
+              if (!submitted) {
+                const isMulti = ['MULTIPLE_CHOICE', 'MULTI_CORRECT', 'MULTIPLE'].includes((question.question_type || '').toUpperCase());
+                const selectedKeys = selectedAnswer
+                  ? selectedAnswer.split(',').map((s) => s.trim().toUpperCase()).filter(Boolean)
+                  : [];
+
+                const handleOptionClick = (key) => {
+                  sound.click();
+                  if (isMulti) {
+                    const kUpper = key.toUpperCase();
+                    let updated;
+                    if (selectedKeys.some((k) => isKeyMatch(k, kUpper))) {
+                      updated = selectedKeys.filter((k) => !isKeyMatch(k, kUpper));
+                    } else {
+                      updated = [...selectedKeys, kUpper].sort();
+                    }
+                    setSelectedAnswer(updated.join(', '));
+                  } else {
+                    setSelectedAnswer(key);
+                  }
+                };
+
+                return (
+                  <div className="pt-4 border-t border-white/10 space-y-4">
+                    {/* Single Choice or Multi Choice */}
+                    {normalizedOptions.length > 0 ? (
+                      <div>
+                        {isMulti && (
+                          <div className="mb-3 px-3.5 py-2 rounded-xl bg-purple-950/50 border border-purple-500/40 text-xs text-purple-200 font-bold flex items-center justify-between">
+                            <span>Multiple Correct Options: Tap each correct option to toggle.</span>
+                            <span className="font-mono text-amber-300">Selected: {selectedAnswer || 'None'}</span>
+                          </div>
+                        )}
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                          {normalizedOptions.map((opt) => {
+                            const optKeyUpper = String(opt.key).trim().toUpperCase();
+                            const isSel = isMulti
+                              ? selectedKeys.some((k) => isKeyMatch(k, optKeyUpper))
+                              : isKeyMatch(selectedAnswer, optKeyUpper);
+                            return (
+                              <button
+                                key={opt.key}
+                                type="button"
+                                onClick={() => handleOptionClick(opt.key)}
+                                className={`p-4 rounded-2xl border text-left transition flex items-start gap-3 cursor-pointer ${
+                                  isSel
+                                    ? 'bg-orange-500/20 border-orange-500 text-white shadow-lg glow-orange-subtle'
+                                    : 'bg-[#1e2433] border-white/10 text-slate-300 hover:bg-[#252c3c] hover:text-white'
+                                }`}
+                              >
+                                <div
+                                  className={`w-7 h-7 rounded-xl flex items-center justify-center font-black text-xs shrink-0 ${
+                                    isSel ? 'bg-orange-500 text-white' : 'bg-white/10 text-slate-400'
                                   }`}
                                 >
-                                  <div
-                                    className={`w-7 h-7 rounded-xl flex items-center justify-center font-black text-xs shrink-0 ${
-                                      isSel ? 'bg-orange-500 text-white' : 'bg-white/10 text-slate-400'
-                                    }`}
-                                  >
-                                    {opt.key}
-                                  </div>
-                                  <div className="text-xs sm:text-sm font-medium leading-relaxed pt-0.5">
-                                    <MathRenderer content={opt.text} />
-                                  </div>
-                                </button>
-                              );
-                            })}
-                          </div>
-                        </>
-                      );
-                    })()}
+                                  {opt.key}
+                                </div>
+                                <div className="text-xs sm:text-sm font-medium leading-relaxed pt-0.5">
+                                  <MathRenderer content={opt.text} />
+                                </div>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    ) : (
+                      /* Numerical or Text Answer Input */
+                      <div className="max-w-md space-y-2">
+                        <label className="text-xs font-bold text-slate-300 block font-mono">
+                          {question.question_type === 'MATRIX_MATCH'
+                            ? 'Enter Matrix Match Answer (e.g. A-P, B-Q or option key):'
+                            : ['NUMERICAL', 'INTEGER'].includes((question.question_type || '').toUpperCase())
+                            ? 'Enter Numerical Value (Integer or Decimal):'
+                            : 'Enter Your Answer:'}
+                        </label>
+                        <input
+                          type="text"
+                          placeholder={
+                            question.question_type === 'MATRIX_MATCH'
+                              ? 'e.g. A-p, B-q or option letter'
+                              : ['NUMERICAL', 'INTEGER'].includes((question.question_type || '').toUpperCase())
+                              ? 'e.g. 4.5 or 12'
+                              : 'Enter your answer...'
+                          }
+                          value={selectedAnswer}
+                          onChange={(e) => setSelectedAnswer(e.target.value)}
+                          className="w-full px-4 py-3 bg-[#1e2433] border border-white/20 rounded-xl text-white font-mono text-sm focus:outline-none focus:border-orange-500"
+                        />
+                      </div>
+                    )}
+
+                    {/* Submit CTA */}
+                    <div className="flex items-center justify-end gap-3 pt-4">
+                      <button
+                        type="button"
+                        onClick={handleSubmitAnswer}
+                        disabled={submitting || !selectedAnswer.trim()}
+                        className="px-8 py-3.5 bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-400 hover:to-amber-400 text-white font-black text-sm rounded-2xl shadow-xl transition cursor-pointer glow-orange disabled:opacity-50 flex items-center gap-2"
+                      >
+                        {submitting ? (
+                          <>
+                            <Loader2 className="w-4 h-4 animate-spin text-white" />
+                            <span>Evaluating Answer...</span>
+                          </>
+                        ) : (
+                          <span>SUBMIT ANSWER ➔</span>
+                        )}
+                      </button>
+                    </div>
                   </div>
-                ) : (
-                  /* Numerical or Text Answer Input */
-                  <div className="max-w-md space-y-2">
-                    <label className="text-xs font-bold text-slate-300 block font-mono">
-                      {question.question_type === 'MATRIX_MATCH'
-                        ? 'Enter Matrix Match Answer (e.g. A-P, B-Q or option key):'
-                        : ['NUMERICAL', 'INTEGER'].includes((question.question_type || '').toUpperCase())
-                        ? 'Enter Numerical Value (Integer or Decimal):'
-                        : 'Enter Your Answer:'}
-                    </label>
-                    <input
-                      type="text"
-                      placeholder={
-                        question.question_type === 'MATRIX_MATCH'
-                          ? 'e.g. A-p, B-q or option letter'
-                          : ['NUMERICAL', 'INTEGER'].includes((question.question_type || '').toUpperCase())
-                          ? 'e.g. 4.5 or 12'
-                          : 'Enter your answer...'
-                      }
-                      value={selectedAnswer}
-                      onChange={(e) => setSelectedAnswer(e.target.value)}
-                      className="w-full px-4 py-3 bg-[#1e2433] border border-white/20 rounded-xl text-white font-mono text-sm focus:outline-none focus:border-orange-500"
+                );
+              }
+
+              /* REVEAL MODE: INSTANT INTERACTIVE FEEDBACK & DEEP-DIVE */
+              return (
+                <div className="pt-6 border-t border-white/10 space-y-6">
+                  {/* Correctness Banner */}
+                  <div
+                    className={`p-5 rounded-3xl border flex items-center justify-between gap-4 ${
+                      result?.is_correct
+                        ? 'bg-emerald-950/40 border-emerald-500/50 text-emerald-200'
+                        : 'bg-red-950/40 border-red-500/50 text-red-200'
+                    }`}
+                  >
+                    <div className="flex items-center gap-3">
+                      <div
+                        className={`w-10 h-10 rounded-2xl flex items-center justify-center ${
+                          result?.is_correct ? 'bg-emerald-500/20 text-emerald-300' : 'bg-red-500/20 text-red-300'
+                        }`}
+                      >
+                        {result?.is_correct ? <CheckCircle2 className="w-6 h-6" /> : <XCircle className="w-6 h-6" />}
+                      </div>
+                      <div>
+                        <h3 className="text-base font-black">
+                          {result?.is_correct ? 'Correct Answer! Outstanding Solve.' : 'Incorrect Answer'}
+                        </h3>
+                        <p className="text-xs opacity-90 font-mono">
+                          Correct Option: <strong className="underline">{result?.correct_answer || question?.correct_answer}</strong> (You chose: {selectedAnswer || 'None'})
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="text-right font-mono">
+                      <span className="text-[10px] uppercase block opacity-80">Rating Shift</span>
+                      <span
+                        className={`text-lg font-black ${
+                          result?.provisional_refund > 0
+                            ? 'text-amber-400'
+                            : result?.elo_delta >= 0
+                            ? 'text-emerald-400'
+                            : 'text-red-400'
+                        }`}
+                      >
+                        {result?.provisional_refund > 0
+                          ? `🛡️ +${result.provisional_refund.toFixed(1)} ELO`
+                          : result?.elo_delta >= 0
+                          ? `+${result?.elo_delta} ELO`
+                          : `${result?.elo_delta} ELO`}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Active Provisional Refund Safeguard Banner */}
+                  {result?.provisional_refund > 0 && (
+                    <div className="p-3 bg-amber-500/15 border border-amber-500/40 rounded-2xl flex items-center justify-between text-xs text-amber-200">
+                      <div className="flex items-center gap-2">
+                        <Shield className="w-4 h-4 text-amber-400 shrink-0" />
+                        <span><strong>Provisional Rating Restored:</strong> +{result.provisional_refund.toFixed(1)} Elo credited to your profile pending review.</span>
+                      </div>
+                      <span className="font-mono font-bold text-amber-400 bg-amber-500/20 px-2 py-0.5 rounded text-[10px]">SAFEGUARD ACTIVE</span>
+                    </div>
+                  )}
+
+                  {/* POST-SUBMISSION OPTIONS REVIEW GRID */}
+                  {normalizedOptions.length > 0 ? (
+                    <div className="space-y-3">
+                      <div className="text-[11px] font-mono uppercase tracking-wider text-slate-400 font-bold flex items-center justify-between px-1">
+                        <span className="flex items-center gap-1.5">
+                          <BookOpen className="w-3.5 h-3.5 text-orange-400" />
+                          <span>Question Options & Answers</span>
+                          <span className="text-[10px] text-slate-500 font-normal">({normalizedOptions.length} choices)</span>
+                        </span>
+                        <span className="text-[11px] font-mono">
+                          {result?.is_correct ? (
+                            <span className="text-emerald-400 font-bold flex items-center gap-1">
+                              <CheckCircle2 className="w-3.5 h-3.5" />
+                              <span>Solved Correctly</span>
+                            </span>
+                          ) : (
+                            <span className="text-rose-400 font-bold flex items-center gap-1">
+                              <XCircle className="w-3.5 h-3.5" />
+                              <span>Review Solution Below</span>
+                            </span>
+                          )}
+                        </span>
+                      </div>
+
+                      <div className="grid grid-cols-1 gap-2.5">
+                        {normalizedOptions.map((opt) => {
+                          const optKey = opt.key;
+                          const optKeyUpper = String(optKey).trim().toUpperCase();
+                          const correctAns = result?.correct_answer || question?.correct_answer || '';
+                          const isThisCorrect = isOptionInAnswers(optKeyUpper, correctAns);
+                          const isThisSelected = isOptionInAnswers(optKeyUpper, selectedAnswer);
+
+                          let badgeStyle = "bg-white/10 border border-white/10 text-slate-400";
+                          let cardStyle = "bg-[#181d28]/70 border border-white/5 text-slate-300";
+                          let tag = null;
+
+                          if (isThisCorrect && isThisSelected) {
+                            cardStyle = "bg-emerald-950/40 border-emerald-500/60 text-emerald-100 ring-1 ring-emerald-500/30";
+                            badgeStyle = "bg-emerald-500 text-slate-950 font-black";
+                            tag = (
+                              <span className="text-[10px] font-mono px-2.5 py-1 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 font-bold flex items-center gap-1 shrink-0">
+                                <CheckCircle2 className="w-3 h-3 text-emerald-400" />
+                                <span>Your Choice • Correct</span>
+                              </span>
+                            );
+                          } else if (isThisCorrect) {
+                            cardStyle = "bg-emerald-950/30 border-emerald-500/50 text-emerald-100";
+                            badgeStyle = "bg-emerald-500/30 text-emerald-300 border border-emerald-500/50 font-black";
+                            tag = (
+                              <span className="text-[10px] font-mono px-2.5 py-1 rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 font-bold flex items-center gap-1 shrink-0">
+                                <CheckCircle2 className="w-3 h-3 text-emerald-400" />
+                                <span>Correct Option</span>
+                              </span>
+                            );
+                          } else if (isThisSelected) {
+                            cardStyle = "bg-rose-950/40 border-rose-500/60 text-rose-100 ring-1 ring-rose-500/30";
+                            badgeStyle = "bg-rose-500 text-white font-black";
+                            tag = (
+                              <span className="text-[10px] font-mono px-2.5 py-1 rounded-full bg-rose-500/20 text-rose-300 border border-rose-500/40 font-bold flex items-center gap-1 shrink-0">
+                                <XCircle className="w-3 h-3 text-rose-400" />
+                                <span>Your Selection</span>
+                              </span>
+                            );
+                          }
+
+                          return (
+                            <div
+                              key={optKey}
+                              className={`p-3.5 rounded-2xl transition flex items-start justify-between gap-3 ${cardStyle}`}
+                            >
+                              <div className="flex items-start gap-3 flex-1 min-w-0">
+                                <div
+                                  className={`w-7 h-7 rounded-xl flex items-center justify-center font-black text-xs shrink-0 ${badgeStyle}`}
+                                >
+                                  {optKey}
+                                </div>
+                                <div className="text-xs sm:text-sm font-medium leading-relaxed pt-0.5 break-words">
+                                  <MathRenderer content={opt.text} />
+                                </div>
+                              </div>
+                              {tag}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ) : (
+                    /* Numerical / Integer Answer Comparison */
+                    <div className="p-4 rounded-2xl bg-[#181d28]/70 border border-white/10 flex flex-wrap items-center justify-between gap-4">
+                      <div>
+                        <span className="text-[10px] font-mono text-slate-400 uppercase block">Your Input</span>
+                        <span className="text-base font-bold font-mono text-white">
+                          {selectedAnswer || 'No answer submitted'}
+                        </span>
+                      </div>
+                      <div>
+                        <span className="text-[10px] font-mono text-slate-400 uppercase block">Official Correct Key</span>
+                        <span className="text-base font-bold font-mono text-emerald-400">
+                          {result?.correct_answer || question?.correct_answer || 'N/A'}
+                        </span>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Synchronized Flying Rating Delta Progression Arena */}
+                  {result && (
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between px-1">
+                        <span className="text-[11px] font-mono uppercase tracking-wider text-slate-400 font-bold flex items-center gap-1.5">
+                          <Sparkles className="w-3.5 h-3.5 text-orange-400" />
+                          <span>Authoritative Rating Progression</span>
+                        </span>
+                        <span className="text-[10px] font-mono text-slate-500">
+                          Synchronized Impact & Flight
+                        </span>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        {/* Overall JEE Rating */}
+                        <ImpactRatingCounter
+                          key={`overall-${question.id}-${result.total_attempted || 0}`}
+                          label="Overall JEE Rating"
+                          badgeText="All-India Competitive Ladder"
+                          icon={Trophy}
+                          initialRating={result.overall_elo_before ?? user?.overall_elo ?? 1200}
+                          targetRating={result.overall_elo_after ?? (user?.overall_elo ? user.overall_elo + (result.overall_elo_delta || 0) : 1200)}
+                          delta={result.overall_elo_delta ?? 0}
+                          accent="orange"
+                          delay={0}
+                        />
+
+                        {/* Chapter Mastery Elo */}
+                        <ImpactRatingCounter
+                          key={`chapter-${question.id}-${result.total_attempted || 0}`}
+                          label="Chapter Mastery Elo"
+                          badgeText={`${result.subject_name || question.subject} • ${result.chapter_name || question.chapter}`}
+                          icon={Target}
+                          initialRating={result.chapter_elo_before ?? result.session_elo_before ?? question.chapter_elo ?? session.current_elo ?? 1200}
+                          targetRating={result.chapter_elo_after ?? result.session_elo_after ?? (session.current_elo || 1200)}
+                          delta={result.chapter_elo_delta ?? result.elo_delta ?? 0}
+                          accent="cyan"
+                          delay={120}
+                        />
+                      </div>
+                    </div>
+                  )}
+
+                  {/* On-Demand Verified Derivation & Answer Key */}
+                  <div className="pt-1">
+                    <OnDemandDerivationBox
+                      questionId={question?.id}
+                      officialKey={result?.correct_answer || question?.correct_answer}
+                      initialSolution={result}
+                      onReportClick={() => {
+                        sound.click();
+                        setReportModalOpen(true);
+                      }}
                     />
                   </div>
-                )}
 
-                {/* Submit CTA */}
-                <div className="flex items-center justify-end gap-3 pt-4">
-                  <button
-                    type="button"
-                    onClick={handleSubmitAnswer}
-                    disabled={submitting || !selectedAnswer.trim()}
-                    className="px-8 py-3.5 bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-400 hover:to-amber-400 text-white font-black text-sm rounded-2xl shadow-xl transition cursor-pointer glow-orange disabled:opacity-50 flex items-center gap-2"
-                  >
-                    {submitting ? (
-                      <>
-                        <Loader2 className="w-4 h-4 animate-spin text-white" />
-                        <span>Evaluating Answer...</span>
-                      </>
-                    ) : (
-                      <span>SUBMIT ANSWER ➔</span>
-                    )}
-                  </button>
-
-                </div>
-              </div>
-            ) : (
-              /* REVEAL MODE: INSTANT INTERACTIVE FEEDBACK & DEEP-DIVE */
-              <div className="pt-6 border-t border-white/10 space-y-6">
-                {/* Correctness Banner */}
-                <div
-                  className={`p-5 rounded-3xl border flex items-center justify-between gap-4 ${
-                    result?.is_correct
-                      ? 'bg-emerald-950/40 border-emerald-500/50 text-emerald-200'
-                      : 'bg-red-950/40 border-red-500/50 text-red-200'
-                  }`}
-                >
-                  <div className="flex items-center gap-3">
-                    <div
-                      className={`w-10 h-10 rounded-2xl flex items-center justify-center ${
-                        result?.is_correct ? 'bg-emerald-500/20 text-emerald-300' : 'bg-red-500/20 text-red-300'
-                      }`}
+                  {/* Next Question CTA */}
+                  <div className="flex items-center justify-between pt-2">
+                    <button
+                      type="button"
+                      onClick={handleFinishSession}
+                      className="px-4 py-2.5 rounded-xl border border-white/10 hover:bg-white/5 text-slate-400 hover:text-white text-xs font-mono transition"
                     >
-                      {result?.is_correct ? <CheckCircle2 className="w-6 h-6" /> : <XCircle className="w-6 h-6" />}
-                    </div>
-                    <div>
-                      <h3 className="text-base font-black">
-                        {result?.is_correct ? 'Correct Answer! Outstanding Solve.' : 'Incorrect Answer'}
-                      </h3>
-                      <p className="text-xs opacity-90 font-mono">
-                        Correct Option: <strong className="underline">{result?.correct_answer}</strong> (You chose: {selectedAnswer})
-                      </p>
-                    </div>
-                  </div>
+                      Finish Session & View Report
+                    </button>
 
-                  <div className="text-right font-mono">
-                    <span className="text-[10px] uppercase block opacity-80">Rating Shift</span>
-                    <span
-                      className={`text-lg font-black ${
-                        result?.provisional_refund > 0
-                          ? 'text-amber-400'
-                          : result?.elo_delta >= 0
-                          ? 'text-emerald-400'
-                          : 'text-red-400'
-                      }`}
+                    <button
+                      type="button"
+                      onClick={handleNextQuestion}
+                      className="px-8 py-3.5 bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-400 hover:to-amber-400 text-white font-black text-sm rounded-2xl shadow-xl transition cursor-pointer glow-orange flex items-center gap-2"
                     >
-                      {result?.provisional_refund > 0
-                        ? `🛡️ +${result.provisional_refund.toFixed(1)} ELO`
-                        : result?.elo_delta >= 0
-                        ? `+${result?.elo_delta} ELO`
-                        : `${result?.elo_delta} ELO`}
-                    </span>
+                      <span>{result?.is_session_finished ? 'VIEW FINAL MASTERY REPORT 🏆' : 'NEXT ADAPTIVE CHALLENGE ➔'}</span>
+                      <ArrowRight className="w-4 h-4 stroke-[3]" />
+                    </button>
                   </div>
                 </div>
-
-                {/* Active Provisional Refund Safeguard Banner */}
-                {result?.provisional_refund > 0 && (
-                  <div className="p-3 bg-amber-500/15 border border-amber-500/40 rounded-2xl flex items-center justify-between text-xs text-amber-200">
-                    <div className="flex items-center gap-2">
-                      <Shield className="w-4 h-4 text-amber-400 shrink-0" />
-                      <span><strong>Provisional Rating Restored:</strong> +{result.provisional_refund.toFixed(1)} Elo credited to your profile pending review.</span>
-                    </div>
-                    <span className="font-mono font-bold text-amber-400 bg-amber-500/20 px-2 py-0.5 rounded text-[10px]">SAFEGUARD ACTIVE</span>
-                  </div>
-                )}
-
-                {/* Synchronized Flying Rating Delta Progression Arena */}
-                {result && (
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between px-1">
-                      <span className="text-[11px] font-mono uppercase tracking-wider text-slate-400 font-bold flex items-center gap-1.5">
-                        <Sparkles className="w-3.5 h-3.5 text-orange-400" />
-                        <span>Authoritative Rating Progression</span>
-                      </span>
-                      <span className="text-[10px] font-mono text-slate-500">
-                        Synchronized Impact & Flight
-                      </span>
-                    </div>
-
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                      {/* Overall JEE Rating */}
-                      <ImpactRatingCounter
-                        key={`overall-${question.id}-${result.total_attempted || 0}`}
-                        label="Overall JEE Rating"
-                        badgeText="All-India Competitive Ladder"
-                        icon={Trophy}
-                        initialRating={result.overall_elo_before ?? user?.overall_elo ?? 1200}
-                        targetRating={result.overall_elo_after ?? (user?.overall_elo ? user.overall_elo + (result.overall_elo_delta || 0) : 1200)}
-                        delta={result.overall_elo_delta ?? 0}
-                        accent="orange"
-                        delay={0}
-                      />
-
-                      {/* Chapter Mastery Elo */}
-                      <ImpactRatingCounter
-                        key={`chapter-${question.id}-${result.total_attempted || 0}`}
-                        label="Chapter Mastery Elo"
-                        badgeText={`${result.subject_name || question.subject} • ${result.chapter_name || question.chapter}`}
-                        icon={Target}
-                        initialRating={result.chapter_elo_before ?? result.session_elo_before ?? question.chapter_elo ?? session.current_elo ?? 1200}
-                        targetRating={result.chapter_elo_after ?? result.session_elo_after ?? (session.current_elo || 1200)}
-                        delta={result.chapter_elo_delta ?? result.elo_delta ?? 0}
-                        accent="cyan"
-                        delay={120}
-                      />
-                    </div>
-                  </div>
-                )}
-
-                {/* On-Demand Verified Derivation & Answer Key */}
-                <div className="pt-1">
-                  <OnDemandDerivationBox
-                    questionId={question?.id}
-                    officialKey={result?.correct_answer || question?.correct_answer}
-                    initialSolution={result}
-                    onReportClick={() => {
-                      sound.click();
-                      setReportModalOpen(true);
-                    }}
-                  />
-                </div>
-
-                {/* Next Question CTA */}
-                <div className="flex items-center justify-between pt-2">
-                  <button
-                    type="button"
-                    onClick={handleFinishSession}
-                    className="px-4 py-2.5 rounded-xl border border-white/10 hover:bg-white/5 text-slate-400 hover:text-white text-xs font-mono transition"
-                  >
-                    Finish Session & View Report
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={handleNextQuestion}
-                    className="px-8 py-3.5 bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-400 hover:to-amber-400 text-white font-black text-sm rounded-2xl shadow-xl transition cursor-pointer glow-orange flex items-center gap-2"
-                  >
-                    <span>{result?.is_session_finished ? 'VIEW FINAL MASTERY REPORT 🏆' : 'NEXT ADAPTIVE CHALLENGE ➔'}</span>
-                    <ArrowRight className="w-4 h-4 stroke-[3]" />
-                  </button>
-                </div>
-              </div>
-            )}
+              );
+            })()}
           </div>
         </div>
       )}

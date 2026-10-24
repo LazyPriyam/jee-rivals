@@ -314,10 +314,42 @@ export default function TestAnalysisView({
     setExpandedSolutions(all);
   };
 
+  const [isPrintingAll, setIsPrintingAll] = useState(false);
+
   const handlePrint = () => {
     sound.click();
-    window.print();
+    setIsPrintingAll(true);
   };
+
+  useEffect(() => {
+    if (isPrintingAll) {
+      const timer = setTimeout(() => {
+        window.print();
+      }, 400);
+      const fallbackTimer = setTimeout(() => {
+        setIsPrintingAll(false);
+      }, 30000);
+      return () => {
+        clearTimeout(timer);
+        clearTimeout(fallbackTimer);
+      };
+    }
+  }, [isPrintingAll]);
+
+  useEffect(() => {
+    const handleAfterPrint = () => {
+      setIsPrintingAll(false);
+    };
+    const handleBeforePrint = () => {
+      setIsPrintingAll(true);
+    };
+    window.addEventListener('beforeprint', handleBeforePrint);
+    window.addEventListener('afterprint', handleAfterPrint);
+    return () => {
+      window.removeEventListener('beforeprint', handleBeforePrint);
+      window.removeEventListener('afterprint', handleAfterPrint);
+    };
+  }, []);
 
   const handleLaunchRemedial = async (subject, chapter) => {
     if (!user) return;
@@ -933,6 +965,24 @@ export default function TestAnalysisView({
 
   return (
     <div className="max-w-6xl mx-auto px-4 py-8 page-transition space-y-8 print:p-0 print:space-y-4">
+      {/* Floating Status Notification during PDF Preparation */}
+      {isPrintingAll && (
+        <div className="print:hidden fixed top-5 left-1/2 -translate-x-1/2 z-50 bg-[#161b26] border border-orange-500/80 px-6 py-3 rounded-2xl shadow-2xl flex items-center gap-4 animate-bounce">
+          <div className="flex items-center gap-2">
+            <span className="w-2.5 h-2.5 rounded-full bg-orange-400 animate-ping" />
+            <span className="text-xs font-mono font-bold text-white">
+              Incorporating all 9 pages for PDF Dossier export...
+            </span>
+          </div>
+          <button
+            onClick={() => setIsPrintingAll(false)}
+            className="px-2.5 py-1 rounded-lg bg-white/10 hover:bg-white/20 text-[11px] font-bold text-slate-200 transition cursor-pointer"
+          >
+            Exit Print Mode
+          </button>
+        </div>
+      )}
+
       {/* Top Header & Quick Actions */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 print:hidden">
         <button
@@ -947,10 +997,11 @@ export default function TestAnalysisView({
           <button
             type="button"
             onClick={handlePrint}
-            className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs border border-white/10 shadow transition cursor-pointer flex items-center gap-2"
+            disabled={isPrintingAll}
+            className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-white font-bold text-xs border border-white/10 shadow transition cursor-pointer flex items-center gap-2"
           >
-            <Printer className="w-3.5 h-3.5 text-orange-400" />
-            <span>Export 9-Page Dossier (PDF)</span>
+            <Printer className={`w-3.5 h-3.5 ${isPrintingAll ? 'animate-spin text-amber-400' : 'text-orange-400'}`} />
+            <span>{isPrintingAll ? 'Preparing 9-Page PDF...' : 'Export 9-Page Dossier (PDF)'}</span>
           </button>
           <span className="px-3 py-1 rounded-xl bg-orange-500/20 text-orange-400 font-mono text-xs font-bold border border-orange-500/30">
             {data.mode}
@@ -994,8 +1045,8 @@ export default function TestAnalysisView({
       {/* ========================================================================= */}
       {/* PAGE 1: PERFORMANCE OVERVIEW (THE BIG PICTURE) */}
       {/* ========================================================================= */}
-      {currentPage === 1 && (
-        <div className="space-y-6 animate-fadeIn">
+      {(isPrintingAll || currentPage === 1) && (
+        <div className={`space-y-6 animate-fadeIn ${isPrintingAll ? 'print-page-section' : ''}`}>
           {/* Executive Scorecard Banner */}
           <div className="bg-gradient-to-br from-[#1b2234] via-[#151a26] to-[#0e121c] border border-orange-500/30 rounded-3xl p-6 sm:p-8 shadow-2xl glow-orange-subtle print:border-black print:bg-white print:text-black">
             <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6 pb-6 border-b border-white/10 print:border-black">
@@ -1239,8 +1290,8 @@ export default function TestAnalysisView({
       {/* ========================================================================= */}
       {/* PAGE 2: TIME AND EFFICIENCY (WHERE THE THREE HOURS WENT) */}
       {/* ========================================================================= */}
-      {currentPage === 2 && (
-        <div className="space-y-6 animate-fadeIn">
+      {(isPrintingAll || currentPage === 2) && (
+        <div className={`space-y-6 animate-fadeIn ${isPrintingAll ? 'print-page-section' : ''}`}>
           <div className="bg-[#121622] border border-white/10 rounded-3xl p-6 sm:p-7 shadow-xl space-y-6">
             <div className="flex items-center justify-between pb-3 border-b border-white/5">
               <div>
@@ -1379,8 +1430,8 @@ export default function TestAnalysisView({
       {/* ========================================================================= */}
       {/* PAGE 3: EXAM TIMELINE AND STRATEGY */}
       {/* ========================================================================= */}
-      {currentPage === 3 && (
-        <div className="space-y-6 animate-fadeIn">
+      {(isPrintingAll || currentPage === 3) && (
+        <div className={`space-y-6 animate-fadeIn ${isPrintingAll ? 'print-page-section' : ''}`}>
           <div className="bg-[#121622] border border-white/10 rounded-3xl p-6 sm:p-7 shadow-xl space-y-6">
             <div className="flex items-center justify-between pb-3 border-b border-white/5">
               <div>
@@ -1474,8 +1525,8 @@ export default function TestAnalysisView({
       {/* ========================================================================= */}
       {/* PAGE 4: DIFFICULTY AND ATTEMPT QUALITY */}
       {/* ========================================================================= */}
-      {currentPage === 4 && (
-        <div className="space-y-6 animate-fadeIn">
+      {(isPrintingAll || currentPage === 4) && (
+        <div className={`space-y-6 animate-fadeIn ${isPrintingAll ? 'print-page-section' : ''}`}>
           <div className="bg-[#121622] border border-white/10 rounded-3xl p-6 sm:p-7 shadow-xl space-y-6">
             <div className="flex items-center justify-between pb-3 border-b border-white/5">
               <div>
@@ -1564,8 +1615,8 @@ export default function TestAnalysisView({
       {/* ========================================================================= */}
       {/* PAGE 5: CHAPTER-WISE PERFORMANCE */}
       {/* ========================================================================= */}
-      {currentPage === 5 && (
-        <div className="space-y-6 animate-fadeIn">
+      {(isPrintingAll || currentPage === 5) && (
+        <div className={`space-y-6 animate-fadeIn ${isPrintingAll ? 'print-page-section' : ''}`}>
           <div className="bg-[#121622] border border-white/10 rounded-3xl p-6 sm:p-7 shadow-xl space-y-6">
             <div className="flex items-center justify-between pb-3 border-b border-white/5">
               <div>
@@ -1635,7 +1686,7 @@ export default function TestAnalysisView({
                       <button
                         onClick={() => handleLaunchRemedial(c.subject, c.chapter)}
                         disabled={launchingDrill}
-                        className="px-3.5 py-2 rounded-xl bg-orange-500 hover:bg-orange-600 text-white font-bold text-xs transition cursor-pointer flex items-center gap-1.5"
+                        className="px-3.5 py-2 rounded-xl bg-orange-500 hover:bg-orange-600 text-white font-bold text-xs transition cursor-pointer flex items-center gap-1.5 print:hidden"
                       >
                         <Flame className="w-3.5 h-3.5" />
                         <span>Practice Drill</span>
@@ -1810,7 +1861,7 @@ export default function TestAnalysisView({
                         <button
                           onClick={() => handleLaunchRemedial(c.subject, c.chapter)}
                           disabled={launchingDrill}
-                          className="px-2.5 py-1 rounded-lg bg-orange-500/15 hover:bg-orange-500 text-orange-400 hover:text-white font-bold text-[10px] transition cursor-pointer flex items-center gap-1 border border-orange-500/30"
+                          className="px-2.5 py-1 rounded-lg bg-orange-500/15 hover:bg-orange-500 text-orange-400 hover:text-white font-bold text-[10px] transition cursor-pointer flex items-center gap-1 border border-orange-500/30 print:hidden"
                         >
                           <Flame className="w-2.5 h-2.5" />
                           <span>Practice</span>
@@ -1829,55 +1880,58 @@ export default function TestAnalysisView({
       {/* ========================================================================= */}
       {/* PAGES 6, 7, 8: QUESTION-BY-QUESTION AUDITS */}
       {/* ========================================================================= */}
-      {(currentPage === 6 || currentPage === 7 || currentPage === 8) && (() => {
-        const targetSubject = currentPage === 6 ? 'Physics' : currentPage === 7 ? 'Chemistry' : 'Mathematics';
-        const subjQuestions = processedQuestions.filter((q) => q.subj === targetSubject);
+      {(() => {
+        const renderSubjectAudit = (targetSubject, pageNum, isCurrent) => {
+          if (!isPrintingAll && !isCurrent) return null;
+          const subjQuestions = processedQuestions.filter((q) => q.subj === targetSubject);
 
-        // Filter by user selection
-        const displayQuestions = subjQuestions.filter((item) => {
-          if (auditFilter === 'CORRECT' && (!item.isAttempted || !item.isCorrect)) return false;
-          if (auditFilter === 'INCORRECT' && (!item.isAttempted || item.isCorrect)) return false;
-          if (auditFilter === 'UNATTEMPTED' && item.isAttempted) return false;
-          return true;
-        });
+          // In print mode, show all questions so full diagnosis is in the PDF dossier
+          const displayQuestions = isPrintingAll
+            ? subjQuestions
+            : subjQuestions.filter((item) => {
+                if (auditFilter === 'CORRECT' && (!item.isAttempted || !item.isCorrect)) return false;
+                if (auditFilter === 'INCORRECT' && (!item.isAttempted || item.isCorrect)) return false;
+                if (auditFilter === 'UNATTEMPTED' && item.isAttempted) return false;
+                return true;
+              });
 
-        const sStats = subjectStats[targetSubject] || { marks: 0, total: 25, correct: 0, incorrect: 0, timeSpent: 0 };
-        const sAtt = sStats.correct + sStats.incorrect;
-        const sAcc = sAtt > 0 ? Math.round((sStats.correct / sAtt) * 100) : 0;
+          const sStats = subjectStats[targetSubject] || { marks: 0, total: 25, correct: 0, incorrect: 0, timeSpent: 0 };
+          const sAtt = sStats.correct + sStats.incorrect;
+          const sAcc = sAtt > 0 ? Math.round((sStats.correct / sAtt) * 100) : 0;
 
-        return (
-          <div className="space-y-6 animate-fadeIn">
-            {/* Subject Header Banner */}
-            <div className="bg-[#121622] border border-white/10 rounded-3xl p-6 sm:p-7 shadow-xl space-y-5">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-white/5">
-                <div>
-                  <span className="text-[10px] px-2.5 py-0.5 rounded-full bg-orange-950 border border-orange-500/40 text-orange-400 font-mono font-bold uppercase tracking-wider">
-                    Page {currentPage} of 9 • {targetSubject} Audit
-                  </span>
-                  <h2 className="text-2xl font-black text-white mt-1">
-                    {targetSubject} Question-by-Question Diagnosis
-                  </h2>
-                </div>
-
-                {/* Score Summary */}
-                <div className="flex items-center gap-4 bg-[#171d2b] border border-white/10 rounded-2xl p-4 font-mono text-center">
-                  <div className="pr-3 border-r border-white/10">
-                    <span className="text-[10px] text-slate-400 uppercase block">Score</span>
-                    <span className="text-xl font-black text-white">{sStats.marks} pts</span>
-                  </div>
-                  <div className="pr-3 border-r border-white/10">
-                    <span className="text-[10px] text-slate-400 uppercase block">Accuracy</span>
-                    <span className="text-xl font-black text-emerald-400">{sAcc}%</span>
-                  </div>
+          return (
+            <div key={targetSubject} className={`space-y-6 animate-fadeIn ${isPrintingAll ? 'print-page-section' : ''}`}>
+              {/* Subject Header Banner */}
+              <div className="bg-[#121622] border border-white/10 rounded-3xl p-6 sm:p-7 shadow-xl space-y-5 print:border-black print:bg-white print:text-black">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-white/5 print:border-black">
                   <div>
-                    <span className="text-[10px] text-slate-400 uppercase block">Time</span>
-                    <span className="text-xl font-black text-cyan-400">~{Math.round(sStats.timeSpent / 60)}m</span>
+                    <span className="text-[10px] px-2.5 py-0.5 rounded-full bg-orange-950 border border-orange-500/40 text-orange-400 font-mono font-bold uppercase tracking-wider print:border-black print:text-black">
+                      Page {pageNum} of 9 • {targetSubject} Audit
+                    </span>
+                    <h2 className="text-2xl font-black text-white mt-1 print:text-black">
+                      {targetSubject} Question-by-Question Diagnosis
+                    </h2>
+                  </div>
+
+                  {/* Score Summary */}
+                  <div className="flex items-center gap-4 bg-[#171d2b] border border-white/10 rounded-2xl p-4 font-mono text-center print:border-black print:bg-white">
+                    <div className="pr-3 border-r border-white/10 print:border-black">
+                      <span className="text-[10px] text-slate-400 uppercase block print:text-slate-600">Score</span>
+                      <span className="text-xl font-black text-white print:text-black">{sStats.marks} pts</span>
+                    </div>
+                    <div className="pr-3 border-r border-white/10 print:border-black">
+                      <span className="text-[10px] text-slate-400 uppercase block print:text-slate-600">Accuracy</span>
+                      <span className="text-xl font-black text-emerald-400 print:text-emerald-700">{sAcc}%</span>
+                    </div>
+                    <div>
+                      <span className="text-[10px] text-slate-400 uppercase block print:text-slate-600">Time</span>
+                      <span className="text-xl font-black text-cyan-400 print:text-cyan-700">~{Math.round(sStats.timeSpent / 60)}m</span>
+                    </div>
                   </div>
                 </div>
-              </div>
 
-              {/* Filter Pills & Expand All */}
-              <div className="flex flex-wrap items-center justify-between gap-3">
+                {/* Filter Pills & Expand All (interactive only) */}
+                <div className="flex flex-wrap items-center justify-between gap-3 print:hidden">
                 <div className="flex items-center gap-2">
                   {[
                     { id: 'ALL', label: `All (${subjQuestions.length})` },
@@ -1924,13 +1978,13 @@ export default function TestAnalysisView({
               {displayQuestions.map((item) => {
                 const q = item.q;
                 const sol = item.sol;
-                const isExpanded = Boolean(expandedSolutions[q.id]);
+                const isExpanded = Boolean(expandedSolutions[q.id]) || isPrintingAll;
                 const roomReport = roomReports[q.id];
 
                 return (
                   <div
                     key={q.id}
-                    className={`p-5 rounded-3xl border transition shadow-lg ${
+                    className={`p-5 rounded-3xl border transition shadow-lg print:border-black print:bg-white print:text-black print-avoid-break ${
                       item.isCorrect
                         ? 'bg-[#131924] border-emerald-500/30'
                         : item.isAttempted
@@ -2260,7 +2314,7 @@ export default function TestAnalysisView({
                     )}
 
                     {/* Solution Toggle & Report Button */}
-                    <div className="mt-4 flex items-center justify-between pt-2">
+                    <div className="mt-4 flex items-center justify-between pt-2 print:hidden">
                       <button
                         onClick={() => toggleSolution(q.id)}
                         className="text-xs font-bold text-orange-400 hover:text-orange-300 transition flex items-center gap-1.5 cursor-pointer"
@@ -2321,7 +2375,9 @@ export default function TestAnalysisView({
                         )}
 
                         {/* On-Demand Derivation */}
-                        <OnDemandDerivationBox question={q} user={user} />
+                        <div className="print:hidden">
+                          <OnDemandDerivationBox question={q} user={user} />
+                        </div>
 
                         {/* Common Pitfall */}
                         {sol.common_pitfall && (
@@ -2343,13 +2399,22 @@ export default function TestAnalysisView({
             </div>
           </div>
         );
-      })()}
+      };
+
+      return (
+        <>
+          {renderSubjectAudit('Physics', 6, currentPage === 6)}
+          {renderSubjectAudit('Chemistry', 7, currentPage === 7)}
+          {renderSubjectAudit('Mathematics', 8, currentPage === 8)}
+        </>
+      );
+    })()}
 
       {/* ========================================================================= */}
       {/* PAGE 9: ELO & RATING DYNAMICS */}
       {/* ========================================================================= */}
-      {currentPage === 9 && (
-        <div className="space-y-6 animate-fadeIn">
+      {(isPrintingAll || currentPage === 9) && (
+        <div className={`space-y-6 animate-fadeIn ${isPrintingAll ? 'print-page-section' : ''}`}>
           {/* Executive Header Banner */}
           <div className="bg-gradient-to-br from-[#1b2234] via-[#151a26] to-[#0e121c] border border-amber-500/30 rounded-3xl p-6 sm:p-8 shadow-2xl glow-orange-subtle print:border-black print:bg-white print:text-black">
             <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6 pb-6 border-b border-white/10 print:border-black">
@@ -2551,7 +2616,7 @@ export default function TestAnalysisView({
                       type="button"
                       onClick={() => handleLaunchRemedial(ch.subject, ch.chapter)}
                       disabled={launchingDrill}
-                      className="mt-3 w-full py-1.5 px-3 rounded-xl bg-orange-500/10 hover:bg-orange-500/20 text-orange-400 border border-orange-500/30 text-[11px] font-bold transition flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
+                      className="mt-3 w-full py-1.5 px-3 rounded-xl bg-orange-500/10 hover:bg-orange-500/20 text-orange-400 border border-orange-500/30 text-[11px] font-bold transition flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50 print:hidden"
                     >
                       <Zap className="w-3 h-3 text-orange-400" />
                       <span>{launchingDrill ? 'Launching Drill...' : 'Rescue Drill (5 Qs)'}</span>

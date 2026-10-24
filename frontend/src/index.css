@@ -269,3 +269,36 @@
   }
 }
 
+/* Print & PDF Dossier Export Optimization */
+@media print {
+  @page {
+    size: A4 portrait;
+    margin: 12mm 15mm;
+  }
+
+  body, html {
+    background-color: #ffffff !important;
+    color: #0f172a !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  .print-page-section {
+    display: block !important;
+    break-after: page !important;
+    page-break-after: always !important;
+    margin-bottom: 2rem !important;
+  }
+
+  .print-page-section:last-child {
+    break-after: auto !important;
+    page-break-after: auto !important;
+  }
+
+  .print-avoid-break {
+    break-inside: avoid !important;
+    page-break-inside: avoid !important;
+  }
+}
+
+
