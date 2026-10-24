@@ -1163,6 +1163,12 @@ def quarantine_question(question_id: str, admin: bool = Depends(verify_admin_syn
     rec_res = reconcile_quarantined_question(question_id, rivals_conn=conn, resolver=resolver)
     conn.close()
 
+    try:
+        from backend.app.tools.question_cache import invalidate_question_cache
+        invalidate_question_cache()
+    except Exception:
+        pass
+
     return {
         "success": True,
         "message": f"Question {question_id} has been quarantined and purged from active test pools.",
@@ -1312,6 +1318,12 @@ def fix_question_key(question_id: str, payload: FixQuestionKeyRequest, admin: bo
     from backend.app.tools.moderation_reconciliation import reconcile_fixed_question
     rec_res = reconcile_fixed_question(question_id, clean_key, rivals_conn=conn, resolver=resolver)
     conn.close()
+
+    try:
+        from backend.app.tools.question_cache import invalidate_question_cache
+        invalidate_question_cache()
+    except Exception:
+        pass
 
     return {
         "success": True,
