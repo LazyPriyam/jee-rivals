@@ -343,6 +343,16 @@ export default function TestHistoryView({ user, inspectUsername, onSelectTest, o
               <Sliders className="w-4 h-4" />
               <span>Custom Blueprint</span>
             </button>
+            <button
+              onClick={() => {
+                sessionStorage.removeItem(`jee_cached_history_${targetUsername || 'me'}`);
+                fetchHistory();
+              }}
+              title="Refresh Archives"
+              className="p-2.5 rounded-xl bg-white/10 hover:bg-white/20 text-white font-bold text-xs transition border border-white/10 cursor-pointer flex items-center justify-center hover:text-orange-400"
+            >
+              <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin text-orange-400' : ''}`} />
+            </button>
           </div>
         </div>
 

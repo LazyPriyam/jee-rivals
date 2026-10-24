@@ -124,11 +124,34 @@ def reconcile_quarantined_question(
                 # If they didn't get it right (either wrong answer or skipped):
                 # NTA Dropped question rule: full marks (+4) awarded, -1 penalty removed.
                 score_boost = base_score + (neg_mark if user_ans else 0.0)
+                if isinstance(user_ans, dict):
+                    user_ans["correct"] = True
+                    user_ans["is_dropped"] = True
+                    user_ans["delta_marks"] = 4.0
+                    p_answers[question_id] = user_ans
+                else:
+                    p_answers[question_id] = {
+                        "selected": user_ans if user_ans else "SKIPPED",
+                        "correct": True,
+                        "is_dropped": True,
+                        "delta_marks": 4.0
+                    }
+                auth_marks = 0.0
+                for a_v in p_answers.values():
+                    if isinstance(a_v, dict):
+                        dm = a_v.get("delta_marks")
+                        if dm is not None:
+                            auth_marks += float(dm)
+                        elif a_v.get("correct") or a_v.get("is_dropped"):
+                            auth_marks += 4.0
+                        elif a_v.get("selected") not in ("NONE", "SKIPPED", "", None):
+                            auth_marks -= 1.0
+
                 rc.execute("""
                     UPDATE room_participants
-                    SET score = score + ?, marks = marks + ?
+                    SET score = score + ?, marks = ?, answers = ?
                     WHERE room_id = ? AND user_id = ?
-                """, (int(score_boost), score_boost, rm["id"], p_uid))
+                """, (int(score_boost), auth_marks, json.dumps(p_answers), rm["id"], p_uid))
                 summary["rivals_rooms_updated"] += 1
 
         # B. Elo Rating Compensation & Notifications
@@ -458,11 +481,22 @@ def reconcile_fixed_question(
                         raw_val["delta_score"] = int(base_score)
                         p_answers[question_id] = raw_val
 
+                    auth_marks = 0.0
+                    for a_v in p_answers.values():
+                        if isinstance(a_v, dict):
+                            dm = a_v.get("delta_marks")
+                            if dm is not None:
+                                auth_marks += float(dm)
+                            elif a_v.get("correct") or a_v.get("is_dropped"):
+                                auth_marks += 4.0
+                            elif a_v.get("selected") not in ("NONE", "SKIPPED", "", None):
+                                auth_marks -= 1.0
+
                     rc.execute("""
                         UPDATE room_participants
-                        SET score = score + ?, marks = marks + ?, answers = ?
+                        SET score = score + ?, marks = ?, answers = ?
                         WHERE room_id = ? AND user_id = ?
-                    """, (int(upgrade_delta), upgrade_delta, json.dumps(p_answers), rm["id"], p_uid))
+                    """, (int(upgrade_delta), auth_marks, json.dumps(p_answers), rm["id"], p_uid))
                     summary["rivals_rooms_updated"] += 1
                     if p_uid and not str(p_uid).startswith("bot_"):
                         room_affected_users.add((p_uid, rm_code, upgrade_delta))

@@ -261,8 +261,42 @@ def get_user_test_history(user: dict = Depends(get_current_user), cursor=None, l
         # Calculate accurate marks: for MOCK_TEST, (+4/-1 JEE standard)
         max_marks = float(total_questions * 4)
         if r["mode"] == "MOCK_TEST":
-            calculated_marks = float(correct_count * 4.0 - incorrect_count * 1.0)
-            final_marks = float(r["marks"]) if (r.get("marks") is not None and r["marks"] != 0.0) else calculated_marks
+            # Authoritatively sum marks from evaluated ans_map
+            calc_marks = 0.0
+            has_ans_data = False
+            for v in ans_map.values():
+                if isinstance(v, dict):
+                    has_ans_data = True
+                    dm = v.get("delta_marks")
+                    if dm is not None:
+                        calc_marks += float(dm)
+                    elif v.get("correct") or v.get("is_dropped"):
+                        calc_marks += 4.0
+                    elif v.get("selected") not in ("NONE", "SKIPPED", "", None) and v.get("attempted") is not False:
+                        calc_marks -= 1.0
+                elif isinstance(v, str) and v not in ("NONE", "SKIPPED", ""):
+                    has_ans_data = True
+                    calc_marks -= 1.0
+
+            stored_marks = float(r["marks"]) if r.get("marks") is not None else None
+            max_possible_stored = float(correct_count * 4.0)
+
+            if stored_marks is not None and stored_marks <= max_possible_stored and has_ans_data and abs(stored_marks - calc_marks) < 0.01:
+                final_marks = stored_marks
+            elif has_ans_data:
+                final_marks = calc_marks
+            elif stored_marks is not None and stored_marks <= max_possible_stored:
+                final_marks = stored_marks
+            else:
+                final_marks = float(correct_count * 4.0 - incorrect_count * 1.0)
+
+            # Self-heal corrupted marks in database table
+            if conn and r.get("marks") is not None and abs(float(r["marks"]) - final_marks) > 0.01:
+                try:
+                    c.execute("UPDATE room_participants SET marks = ? WHERE room_id = ? AND user_id = ?", (final_marks, r["id"], user["id"]))
+                    conn.commit()
+                except Exception:
+                    pass
         else:
             final_marks = float(r.get("marks") or (correct_count * 4.0 - incorrect_count * 1.0))
 
@@ -2087,6 +2121,7 @@ def get_room_results(code: str, user: Optional[dict] = Depends(get_optional_user
                                         INSERT INTO user_notifications (id, user_id, type, title, message, details, is_read, created_at)
                                         VALUES (?, ?, 'DROPPED_QUESTION_AWARD', ?, ?, ?, 0, ?)
                                     """, (notif_id, part_uid, notif_title, notif_msg, det_json, now_str))
+                                    conn.commit()
                             except Exception as notif_err:
                                 logger.warning(f"[ROOM_RESULTS] Dropped question notification note: {notif_err}")
 
@@ -2151,6 +2186,7 @@ def get_room_results(code: str, user: Optional[dict] = Depends(get_optional_user
                                             INSERT INTO user_notifications (id, user_id, type, title, message, details, is_read, created_at)
                                             VALUES (?, ?, 'KEY_CORRECTION_AWARD', ?, ?, ?, 0, ?)
                                         """, (notif_id, part_uid, notif_title, notif_msg, det_json, now_str))
+                                        conn.commit()
                                 except Exception as notif_err:
                                     logger.warning(f"[ROOM_RESULTS] Key correction notification note: {notif_err}")
 
@@ -2171,7 +2207,8 @@ def get_room_results(code: str, user: Optional[dict] = Depends(get_optional_user
                 if room.get("mode") == "MOCK_TEST":
                     participant_score = float(p.get("score") or 0.0)
 
-                if answers_modified:
+                marks_drift = abs(float(p.get("marks") or 0.0) - authoritative_marks) > 0.01
+                if answers_modified or marks_drift:
                     p_uid = str(p.get("user_id") or "")
                     r_id = str(p.get("room_id") or room_id)
                     if p_uid and r_id:
@@ -2180,7 +2217,8 @@ def get_room_results(code: str, user: Optional[dict] = Depends(get_optional_user
                                 UPDATE room_participants
                                 SET marks = ?, score = ?, answers = ?
                                 WHERE room_id = ? AND user_id = ?
-                            """, (participant_marks, int(participant_score), json.dumps(answers_dict), r_id, p_uid))
+                            """, (authoritative_marks, int(participant_score), json.dumps(answers_dict), r_id, p_uid))
+                            conn.commit()
                         except Exception as upd_err:
                             logger.warning(f"[ROOM_RESULTS] Could not persist reconciled participant marks: {upd_err}")
 

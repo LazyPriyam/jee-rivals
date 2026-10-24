@@ -595,11 +595,22 @@ def report_question(question_id: str, report_data: QuestionReportRequest, user: 
                         "delta_marks": 4.0
                     }
 
+                auth_marks = 0.0
+                for a_v in p_answers.values():
+                    if isinstance(a_v, dict):
+                        dm = a_v.get("delta_marks")
+                        if dm is not None:
+                            auth_marks += float(dm)
+                        elif a_v.get("correct") or a_v.get("is_dropped"):
+                            auth_marks += 4.0
+                        elif a_v.get("selected") not in ("NONE", "SKIPPED", "", None):
+                            auth_marks -= 1.0
+
                 c.execute("""
                     UPDATE room_participants
-                    SET marks = marks + ?, score = score + ?, answers = ?
+                    SET marks = ?, score = score + ?, answers = ?
                     WHERE room_id = ? AND user_id = ?
-                """, (bonus_marks_awarded, int(bonus_marks_awarded), json.dumps(p_answers), rp_dict["room_id"], uid))
+                """, (auth_marks, int(bonus_marks_awarded), json.dumps(p_answers), rp_dict["room_id"], uid))
 
     votes = {}
     consensus_status = "CONSENSUS_AGREED" if is_already_defective else "PENDING"

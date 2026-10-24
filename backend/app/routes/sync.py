@@ -800,4 +800,29 @@ def inspect_admin_daily_goals(
     conn.close()
     return {"today_ist": today_str, "start_utc_iso": start_utc_iso, "users": dossier}
 
+@router.post("/rooms/{code}/reconcile-marks")
+def admin_reconcile_room_marks(
+    code: str,
+    x_sync_token: Optional[str] = Header(None, alias="X-Sync-Token")
+):
+    if not x_sync_token or x_sync_token != ADMIN_SYNC_TOKEN:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or missing sync authentication token."
+        )
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute("SELECT id, mode FROM rooms WHERE UPPER(code) = UPPER(?)", (code,))
+    rm = c.fetchone()
+    if not rm:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Room not found.")
+    rm_id = rm["id"]
 
+    from backend.app.routes.rooms import get_room_results
+    results = get_room_results(code=code)
+
+    c.execute("SELECT user_id, marks, score, answers FROM room_participants WHERE room_id = ?", (rm_id,))
+    rows = [dict(r) for r in c.fetchall()]
+    conn.close()
+    return {"success": True, "room_code": code, "participants": rows, "results_participants": results.get("participants")}
