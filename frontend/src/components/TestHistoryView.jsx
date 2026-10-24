@@ -129,12 +129,19 @@ export default function TestHistoryView({ user, inspectUsername, onSelectTest, o
     );
   }
 
-  // Aggregate Metrics (Accurate computations based on real attempts)
-  const completedTests = history.filter((h) => h.status === 'COMPLETED' || h.is_finished);
+  // Aggregate Metrics (Accurate computations based on real attempts, excluding deleted tests)
+  const completedTests = history.filter((h) => (h.status === 'COMPLETED' || h.is_finished) && h.status !== 'DELETED');
   const totalTests = completedTests.length;
   const bestMarks = completedTests.length > 0 ? Math.max(...completedTests.map((h) => Number(h.marks) || 0)) : 0;
-  const totalAttempted = history.reduce((acc, h) => acc + (h.total_attempted || 0), 0);
-  const testsWithAttempts = history.filter((h) => (h.total_attempted || 0) > 0);
+  const bestScaledMarks = completedTests.length > 0
+    ? Math.max(...completedTests.map((h) => {
+        if (h.scaled_marks_300 !== undefined) return Number(h.scaled_marks_300);
+        const maxM = h.max_marks || (h.total_questions * 4) || 300;
+        return maxM > 0 ? Math.round(((Number(h.marks) || 0) / maxM) * 300 * 10) / 10 : 0;
+      }))
+    : 0;
+  const totalAttempted = completedTests.reduce((acc, h) => acc + (h.total_attempted || 0), 0);
+  const testsWithAttempts = completedTests.filter((h) => (h.total_attempted || 0) > 0);
   const avgAccuracy =
     testsWithAttempts.length > 0
       ? Math.round(
@@ -142,8 +149,9 @@ export default function TestHistoryView({ user, inspectUsername, onSelectTest, o
         )
       : 0;
 
-  // Filter history items
+  // Filter history items (exclude deleted tests)
   const filteredHistory = history.filter((item) => {
+    if (item.status === 'DELETED') return false;
     if (selectedMode === 'MOCK_TEST' && item.mode !== 'MOCK_TEST') return false;
     if (selectedMode === 'SPEED_DUEL' && item.mode !== 'SPEED_DUEL') return false;
     if (selectedMode === 'GROUP' && !item.is_group && (item.participant_count || 1) <= 1) return false;
@@ -163,15 +171,22 @@ export default function TestHistoryView({ user, inspectUsername, onSelectTest, o
     try {
       sound.click();
       await api.rooms.delete(testItem.code);
-      setHistory((prev) => prev.filter((h) => h.code !== testItem.code));
+      setHistory((prev) => prev.filter((h) => h.code !== testItem.code && h.room_id !== testItem.room_id));
       const targetUser = inspectUsername || user?.username || 'me';
-      const cacheKey = `jee_cached_history_${targetUser}`;
+      const cacheKeys = [
+        `jee_cached_history_${targetUser}`,
+        'jee_cached_history_me',
+        ...(user?.username ? [`jee_cached_history_${user.username}`] : [])
+      ];
       try {
-        const stored = sessionStorage.getItem(cacheKey);
-        if (stored) {
-          const list = JSON.parse(stored).filter((h) => h.code !== testItem.code);
-          sessionStorage.setItem(cacheKey, JSON.stringify(list));
+        for (const key of cacheKeys) {
+          const stored = sessionStorage.getItem(key);
+          if (stored) {
+            const list = JSON.parse(stored).filter((h) => h.code !== testItem.code && h.room_id !== testItem.room_id);
+            sessionStorage.setItem(key, JSON.stringify(list));
+          }
         }
+        sessionStorage.removeItem(`jee_cached_results_${testItem.code.toUpperCase()}`);
       } catch (_) {}
       window.dispatchEvent(new CustomEvent('jee_user_updated', { detail: user }));
       setDeleteConfirmModal(null);
@@ -212,8 +227,11 @@ export default function TestHistoryView({ user, inspectUsername, onSelectTest, o
       val = t.marks_percentage !== undefined ? t.marks_percentage : Math.max(0, Math.round((mVal / maxM) * 100));
       label = `${val}%`;
     } else if (graphMetric === 'marks') {
-      val = Math.round(mVal * 10) / 10;
-      label = `${val >= 0 ? '+' : ''}${val} M`;
+      // Scale any test to standard 300 marks for equitable comparison across part-syllabus / full-mock papers
+      val = t.scaled_marks_300 !== undefined
+        ? Number(t.scaled_marks_300)
+        : (maxM > 0 ? Math.round(((mVal / maxM) * 300) * 10) / 10 : 0);
+      label = `${val >= 0 ? '+' : ''}${val} / 300`;
     } else if (graphMetric === 'accuracy') {
       val = t.accuracy || 0;
       label = `${val}% Acc`;
@@ -253,9 +271,9 @@ export default function TestHistoryView({ user, inspectUsername, onSelectTest, o
   if (graphMetric === 'marks') {
     const rawVals = graphPoints.map((p) => p.val);
     const minM = rawVals.length > 0 ? Math.min(0, Math.min(...rawVals)) : 0;
-    const maxM = rawVals.length > 0 ? Math.max(50, Math.max(...rawVals)) : 300;
+    const maxM = rawVals.length > 0 ? Math.max(300, Math.max(...rawVals)) : 300;
     minPlotVal = Math.floor(minM / 10) * 10;
-    maxPlotVal = Math.ceil((maxM * 1.1) / 10) * 10;
+    maxPlotVal = Math.ceil(maxM / 10) * 10;
   } else {
     minPlotVal = 0;
     maxPlotVal = 100;
@@ -335,9 +353,10 @@ export default function TestHistoryView({ user, inspectUsername, onSelectTest, o
             <span className="text-2xl font-black text-white">{totalTests}</span>
           </div>
           <div className="bg-[#10141f] border border-white/10 rounded-2xl p-4">
-            <span className="text-xs text-slate-400 block mb-1">Peak Marks Record</span>
+            <span className="text-xs text-slate-400 block mb-1">Peak Score (Scaled /300)</span>
             <span className="text-2xl font-black text-orange-400">
-              {bestMarks >= 0 ? '+' : ''}{bestMarks.toFixed(1)}
+              {bestScaledMarks >= 0 ? '+' : ''}{bestScaledMarks.toFixed(1)}
+              <span className="text-xs text-slate-500 font-normal ml-1">/ 300</span>
             </span>
           </div>
           <div className="bg-[#10141f] border border-white/10 rounded-2xl p-4">
@@ -369,7 +388,7 @@ export default function TestHistoryView({ user, inspectUsername, onSelectTest, o
                       : 'bg-rose-950/80 text-rose-400 border-rose-500/40'
                   }`}>
                     {trendDelta > 0 ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
-                    {trendDelta > 0 ? `+${trendDelta}%` : `${trendDelta}%`} Trajectory
+                    {trendDelta > 0 ? `+${trendDelta}` : `${trendDelta}`} {graphMetric === 'marks' ? 'M (/300)' : '%'} Trajectory
                   </span>
                 )}
               </h2>
@@ -384,7 +403,7 @@ export default function TestHistoryView({ user, inspectUsername, onSelectTest, o
               <div className="flex items-center bg-[#0e111a] p-1 rounded-xl border border-white/10 font-mono text-[11px]">
                 {[
                   { id: 'marks_percentage', label: 'Marks %' },
-                  { id: 'marks', label: 'Score (M)' },
+                  { id: 'marks', label: 'Score (/300)' },
                   { id: 'accuracy', label: 'Accuracy %' },
                   { id: 'attempt_rate', label: 'Attempted %' }
                 ].map((m) => (
@@ -436,19 +455,19 @@ export default function TestHistoryView({ user, inspectUsername, onSelectTest, o
             <div className="bg-[#10141f] border border-white/5 rounded-xl p-3">
               <span className="text-[10px] text-slate-400 block mb-0.5">Average Performance</span>
               <span className="text-base font-black text-white">
-                {avgGraphVal}{graphMetric === 'marks' ? ' M' : '%'}
+                {avgGraphVal}{graphMetric === 'marks' ? ' / 300' : '%'}
               </span>
             </div>
             <div className="bg-[#10141f] border border-white/5 rounded-xl p-3">
               <span className="text-[10px] text-slate-400 block mb-0.5">Peak Session</span>
               <span className="text-base font-black text-orange-400">
-                {peakGraphVal}{graphMetric === 'marks' ? ' M' : '%'}
+                {peakGraphVal}{graphMetric === 'marks' ? ' / 300' : '%'}
               </span>
             </div>
             <div className="bg-[#10141f] border border-white/5 rounded-xl p-3">
               <span className="text-[10px] text-slate-400 block mb-0.5">Latest Session</span>
               <span className="text-base font-black text-sky-400">
-                {lastPoint}{graphMetric === 'marks' ? ' M' : '%'}
+                {lastPoint}{graphMetric === 'marks' ? ' / 300' : '%'}
               </span>
             </div>
             <div className="bg-[#10141f] border border-white/5 rounded-xl p-3">
@@ -512,7 +531,7 @@ export default function TestHistoryView({ user, inspectUsername, onSelectTest, o
                         textAnchor="end"
                         className="text-[9px] fill-slate-500 font-mono"
                       >
-                        {labelVal}{graphMetric === 'marks' ? '' : '%'}
+                        {labelVal}{graphMetric === 'marks' ? ' M' : '%'}
                       </text>
                     </g>
                   );
@@ -537,7 +556,7 @@ export default function TestHistoryView({ user, inspectUsername, onSelectTest, o
                       textAnchor="end"
                       className="text-[9px] fill-sky-400 font-mono font-bold"
                     >
-                      Avg: {avgGraphVal}{graphMetric === 'marks' ? 'M' : '%'}
+                      Avg: {avgGraphVal}{graphMetric === 'marks' ? ' M (/300)' : '%'}
                     </text>
                   </g>
                 )}
@@ -619,9 +638,9 @@ export default function TestHistoryView({ user, inspectUsername, onSelectTest, o
                       <strong className="text-orange-400">{hoveredPoint.label}</strong>
                     </div>
                     <div>
-                      <span className="text-slate-400 text-[10px] block">Marks</span>
+                      <span className="text-slate-400 text-[10px] block">Raw Marks</span>
                       <strong className="text-white">
-                        {hoveredPoint.test.marks}/{hoveredPoint.test.max_marks || 300}
+                        {hoveredPoint.test.marks}/{hoveredPoint.test.max_marks || (hoveredPoint.test.total_questions * 4) || 300}
                       </strong>
                     </div>
                     <div>

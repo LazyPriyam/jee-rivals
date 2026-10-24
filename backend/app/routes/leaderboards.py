@@ -458,7 +458,7 @@ def get_public_profile(username: str, force: bool = False):
                rp.score as my_score, rp.marks as my_marks
         FROM room_participants rp
         JOIN rooms r ON rp.room_id = r.id
-        WHERE rp.user_id = ? AND (r.status = 'COMPLETED' OR rp.is_finished = 1)
+        WHERE rp.user_id = ? AND r.status != 'DELETED' AND (r.status = 'COMPLETED' OR rp.is_finished = 1)
         ORDER BY r.created_at DESC
         LIMIT 15
     """, (user["id"],))

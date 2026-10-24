@@ -585,18 +585,35 @@ export default function TestAnalysisView({
   const lostPotential = incorrectCount * 4.0;
   const totalNegativeSwing = directPenalty + lostPotential;
 
-  // Previous test comparison
+  // Previous test comparison (exclude current test and any deleted tests)
   const previousTest = history.find(
-    (t) => (t.code || t.room_code) !== roomCode && (t.status === 'COMPLETED' || t.is_finished)
+    (t) =>
+      (t.code || t.room_code) !== roomCode &&
+      (t.status === 'COMPLETED' || t.is_finished) &&
+      t.status !== 'DELETED'
   );
   let prevComparison = null;
   if (previousTest) {
     const prevMarks = previousTest.marks !== undefined ? previousTest.marks : (previousTest.score || 0);
-    const prevTotal = (previousTest.total_questions || 75) * 4;
+    const prevTotal = previousTest.max_marks || (previousTest.total_questions ? previousTest.total_questions * 4 : 300);
     const prevAcc = previousTest.accuracy || 0;
+
+    // Scale both current test and previous test to 300 standard marks for equitable comparison
+    const currentScaled300 = maxPossibleMarks > 0 ? Math.round((totalMarks / maxPossibleMarks) * 300 * 10) / 10 : 0;
+    const prevScaled300 = previousTest.scaled_marks_300 !== undefined
+      ? Number(previousTest.scaled_marks_300)
+      : (prevTotal > 0 ? Math.round((prevMarks / prevTotal) * 300 * 10) / 10 : 0);
+
+    const deltaMarksScaled = Math.round((currentScaled300 - prevScaled300) * 10) / 10;
+    const deltaAccuracy = Math.round((accuracy - prevAcc) * 10) / 10;
+
     prevComparison = {
-      deltaMarks: Math.round(totalMarks - prevMarks),
-      deltaAccuracy: Math.round(accuracy - prevAcc),
+      deltaMarks: deltaMarksScaled,
+      deltaAccuracy,
+      currentScaled300,
+      prevScaled300,
+      currentMarks: totalMarks,
+      currentTotal: maxPossibleMarks,
       prevMarks,
       prevTotal,
       prevAcc,
@@ -1155,20 +1172,30 @@ export default function TestAnalysisView({
           {/* Previous Tests Comparison */}
           {prevComparison && (
             <div className="p-6 rounded-3xl bg-[#121622] border border-white/10 shadow-xl space-y-3">
-              <div className="flex items-center justify-between">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                 <div className="flex items-center gap-2">
                   <TrendingUp className="w-5 h-5 text-cyan-400" />
                   <h3 className="text-sm font-black uppercase tracking-wider text-white">
                     Comparison with Previous Test (#{prevComparison.prevCode})
                   </h3>
                 </div>
-                <span className="text-xs font-mono text-slate-400">
-                  Past: {prevComparison.prevMarks}/{prevComparison.prevTotal} ({prevComparison.prevAcc}% Acc)
-                </span>
+                <div className="flex flex-wrap items-center gap-2 text-xs font-mono text-slate-400">
+                  <span>
+                    Past: {prevComparison.prevMarks}/{prevComparison.prevTotal}
+                    {prevComparison.prevTotal !== 300 ? ` (${prevComparison.prevScaled300}/300)` : ''} ({prevComparison.prevAcc}% Acc)
+                  </span>
+                  {maxPossibleMarks !== 300 && (
+                    <span className="text-orange-400 font-bold">
+                      • Current Scaled: {prevComparison.currentScaled300}/300
+                    </span>
+                  )}
+                </div>
               </div>
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 pt-1 font-mono">
                 <div className="p-3.5 rounded-xl bg-[#171d2b] border border-white/5 text-center">
-                  <span className="text-[10px] uppercase text-slate-400 block">Score Delta</span>
+                  <span className="text-[10px] uppercase text-slate-400 block">
+                    Score Delta {prevComparison.currentTotal !== 300 || prevComparison.prevTotal !== 300 ? '(Scaled /300)' : ''}
+                  </span>
                   <span
                     className={`text-xl font-black ${
                       prevComparison.deltaMarks >= 0 ? 'text-emerald-400' : 'text-red-400'
@@ -1189,8 +1216,18 @@ export default function TestAnalysisView({
                 </div>
                 <div className="col-span-2 sm:col-span-1 p-3.5 rounded-xl bg-[#171d2b] border border-white/5 text-center flex flex-col justify-center">
                   <span className="text-[10px] uppercase text-slate-400 block">Trajectory Status</span>
-                  <span className="text-xs font-bold text-amber-300 mt-1">
-                    {prevComparison.deltaMarks > 0 ? 'Ascending Trajectory' : 'Stable Diagnostic'}
+                  <span className={`text-xs font-bold mt-1 ${
+                    prevComparison.deltaMarks > 0
+                      ? 'text-emerald-400'
+                      : prevComparison.deltaMarks < 0
+                      ? 'text-rose-400'
+                      : 'text-amber-300'
+                  }`}>
+                    {prevComparison.deltaMarks > 0
+                      ? `Ascending Trajectory (+${prevComparison.deltaMarks} M)`
+                      : prevComparison.deltaMarks < 0
+                      ? `Diagnostic Dip (${prevComparison.deltaMarks} M)`
+                      : 'Stable Diagnostic Baseline'}
                   </span>
                 </div>
               </div>

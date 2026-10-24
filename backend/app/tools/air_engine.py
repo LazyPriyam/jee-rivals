@@ -307,7 +307,7 @@ def get_user_full_mock_history(cursor, user_id: str) -> Dict[str, Any]:
                    p.marks, p.score, p.answers, p.is_finished, p.finished_at
             FROM rooms r
             JOIN room_participants p ON r.id = p.room_id
-            WHERE p.user_id = ? AND p.is_finished = 1
+            WHERE p.user_id = ? AND p.is_finished = 1 AND r.status != 'DELETED'
             ORDER BY COALESCE(r.completed_at, p.finished_at, r.created_at) DESC
             LIMIT 50
         """, (user_id,))

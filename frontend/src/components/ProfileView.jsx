@@ -2574,23 +2574,26 @@ export default function ProfileView({
             <div className="flex items-center gap-3">
               <div className="bg-[#11141d] border border-white/10 px-4 py-2.5 rounded-2xl text-center">
                 <span className="text-[10px] font-mono uppercase text-slate-400 block">Total Papers</span>
-                <span className="text-base font-black font-mono text-orange-400">{(data.test_history || []).length}</span>
+                <span className="text-base font-black font-mono text-orange-400">{(data.test_history || []).filter((t) => t.status !== 'DELETED').length}</span>
               </div>
               <div className="bg-[#11141d] border border-white/10 px-4 py-2.5 rounded-2xl text-center">
                 <span className="text-[10px] font-mono uppercase text-slate-400 block">Avg Accuracy</span>
                 <span className="text-base font-black font-mono text-emerald-400">
-                  {((data.test_history || []).length > 0
-                    ? Math.round((data.test_history || []).reduce((acc, t) => acc + (t.accuracy || 0), 0) / (data.test_history || []).length)
-                    : 0)}%
+                  {(() => {
+                    const activeTests = (data.test_history || []).filter((t) => t.status !== 'DELETED');
+                    return activeTests.length > 0
+                      ? Math.round(activeTests.reduce((acc, t) => acc + (t.accuracy || 0), 0) / activeTests.length)
+                      : 0;
+                  })()}%
                 </span>
               </div>
             </div>
           </div>
 
           {/* Tests List */}
-          {(data.test_history || []).length > 0 ? (
+          {(data.test_history || []).filter((t) => t.status !== 'DELETED').length > 0 ? (
             <div className="space-y-3.5">
-              {(data.test_history || []).map((t, idx) => {
+              {(data.test_history || []).filter((t) => t.status !== 'DELETED').map((t, idx) => {
                 const marksPct = t.marks_percentage || 0;
                 const scoreColor = marksPct >= 60 ? 'text-emerald-400' : marksPct >= 35 ? 'text-amber-400' : 'text-orange-400';
                 const formattedDate = formatIST(t.completed_at || t.created_at);
@@ -2638,7 +2641,7 @@ export default function ProfileView({
                           {t.marks} <span className="text-xs text-slate-500">/ {t.max_marks}</span>
                         </span>
                         <span className="text-[10px] text-slate-400 font-mono block">
-                          ({marksPct}%)
+                          ({marksPct}%{t.max_marks && t.max_marks !== 300 ? ` • ${t.scaled_marks_300 !== undefined ? t.scaled_marks_300 : Math.round((t.marks / t.max_marks) * 300)}/300` : ''})
                         </span>
                       </div>
 

@@ -222,6 +222,7 @@ def get_user_test_history(user: dict = Depends(get_current_user), cursor=None, l
         FROM rooms r
         JOIN room_participants p ON r.id = p.room_id
         WHERE p.user_id = ?
+          AND r.status != 'DELETED'
           AND (r.status IN ('IN_PROGRESS', 'COMPLETED') OR p.is_finished = 1)
         ORDER BY COALESCE(r.completed_at, p.finished_at, r.created_at) DESC
         LIMIT ?
@@ -266,6 +267,7 @@ def get_user_test_history(user: dict = Depends(get_current_user), cursor=None, l
             final_marks = float(r.get("marks") or (correct_count * 4.0 - incorrect_count * 1.0))
 
         marks_percentage = round((final_marks / max_marks) * 100, 1) if max_marks > 0 else 0.0
+        scaled_marks_300 = round((final_marks / max_marks) * 300.0, 1) if max_marks > 0 else 0.0
 
         participant_count = r.get("participant_count") or 1
         is_group = participant_count > 1
@@ -286,6 +288,7 @@ def get_user_test_history(user: dict = Depends(get_current_user), cursor=None, l
             "marks": final_marks,
             "max_marks": max_marks,
             "marks_percentage": marks_percentage,
+            "scaled_marks_300": scaled_marks_300,
             "total_attempted": total_attempted,
             "correct_count": correct_count,
             "incorrect_count": incorrect_count,
@@ -555,7 +558,12 @@ def delete_test_room(code: str, user: dict = Depends(get_current_user)):
         c.execute("SELECT id, host_id, code FROM rooms WHERE code = ? COLLATE NOCASE", (code_norm,))
         room = c.fetchone()
         if not room:
-            raise HTTPException(status_code=404, detail=f"Room #{code_norm} not found.")
+            # Idempotent response if already deleted
+            return {
+                "status": "success",
+                "message": f"Test #{code_norm} removed from records.",
+                "code": code_norm
+            }
 
         room_id = room["id"]
         user_id = str(user["id"])
@@ -578,6 +586,7 @@ def delete_test_room(code: str, user: dict = Depends(get_current_user)):
         # If no participants left or host requested delete on a solo mock, wipe the room
         if rem_count == 0 or str(room["host_id"]) == user_id:
             c.execute("DELETE FROM room_participants WHERE room_id = ?", (room_id,))
+            c.execute("UPDATE rooms SET status = 'DELETED' WHERE id = ?", (room_id,))
             c.execute("DELETE FROM rooms WHERE id = ?", (room_id,))
 
         conn.commit()
@@ -612,9 +621,9 @@ def get_room_state(code: str, user: dict) -> RoomState:
 
     c.execute("SELECT * FROM rooms WHERE code = ?", (code.upper(),))
     room_row = c.fetchone()
-    if not room_row:
+    if not room_row or (room_row["status"] if hasattr(room_row, "__getitem__") else None) == "DELETED":
         conn.close()
-        raise HTTPException(status_code=404, detail="Room not found.")
+        raise HTTPException(status_code=404, detail="Room not found or has been deleted.")
 
     room = dict(room_row)
     room_id = room["id"]
@@ -1889,8 +1898,8 @@ def get_room_results(code: str, user: Optional[dict] = Depends(get_optional_user
 
         c.execute("SELECT * FROM rooms WHERE code = ?", (code,))
         room_row = c.fetchone()
-        if not room_row:
-            raise HTTPException(status_code=404, detail="Room not found.")
+        if not room_row or (room_row["status"] if hasattr(room_row, "__getitem__") else None) == "DELETED":
+            raise HTTPException(status_code=404, detail="Room not found or has been deleted.")
 
         room = dict(room_row)
         room_id = room["id"]
@@ -2012,6 +2021,7 @@ def get_room_results(code: str, user: Optional[dict] = Depends(get_optional_user
                     "title": p.get("title") or "JEE Aspirant",
                     "score": float(p.get("score") or 0.0),
                     "marks": float(p.get("marks") if p.get("marks") is not None else 0.0),
+                    "scaled_marks_300": round((float(p.get("marks") if p.get("marks") is not None else 0.0) / max(1.0, float(total_q * 4))) * 300.0, 1),
                     "answers": answers_dict,
                     "total_attempted": attempted_cnt,
                     "correct_count": corr_cnt,
