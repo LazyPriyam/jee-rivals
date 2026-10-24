@@ -493,7 +493,7 @@ export default function TestAnalysisView({
     }
 
     // Defensive normalization against legacy stale-closure outlier bugs (e.g. Q1 absorbing 7722s):
-    const examDurationSec = Math.max(3600, ((room.total_duration_minutes || 180) + 15) * 60);
+    const examDurationSec = Math.max(3600, ((data?.total_duration_minutes || data?.duration_minutes || 180) + 15) * 60);
     if (timeSpent > examDurationSec) {
       timeSpent = isAttempted ? 120 : 0;
     } else if (!isAttempted && timeSpent > 600) {
@@ -2374,10 +2374,20 @@ export default function TestAnalysisView({
                           </div>
                         )}
 
-                        {/* On-Demand Derivation */}
-                        <div className="print:hidden">
-                          <OnDemandDerivationBox question={q} user={user} />
-                        </div>
+                        {/* On-Demand Derivation (interactive only, omitted from print DOM to prevent OOM) */}
+                        {!isPrintingAll && (
+                          <div className="print:hidden">
+                            <OnDemandDerivationBox
+                              questionId={q.id}
+                              officialKey={sol.correct_answer}
+                              initialSolution={sol}
+                              onReportClick={() => {
+                                sound.click();
+                                setReportTarget(q);
+                              }}
+                            />
+                          </div>
+                        )}
 
                         {/* Common Pitfall */}
                         {sol.common_pitfall && (
