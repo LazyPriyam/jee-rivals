@@ -511,6 +511,19 @@ def report_question(question_id: str, report_data: QuestionReportRequest, user: 
                     VALUES (?, ?, 'PROVISIONAL_ELO_RESTORED', ?, ?, ?, 0, ?)
                 """, (notif_id, uid, notif_title, notif_msg, details_json, now))
 
+    # Check if this question is already known to be defective or quarantined
+    c.execute("SELECT validation_status FROM questions WHERE id = ?", (question_id,))
+    vq_row = c.fetchone()
+    is_already_defective = False
+    if vq_row:
+        v_status = vq_row[0] if isinstance(vq_row, (list, tuple)) else vq_row["validation_status"]
+        if v_status == "QUARANTINED":
+            is_already_defective = True
+    if not is_already_defective:
+        c.execute("SELECT id FROM question_reports WHERE question_id = ? AND status = 'QUARANTINED' LIMIT 1", (question_id,))
+        if c.fetchone():
+            is_already_defective = True
+
     # Check if this report is from a multiplayer test room
     room_code = report_data.room_code.strip().upper() if report_data.room_code else None
     participant_ids: List[str] = []
@@ -530,9 +543,66 @@ def report_question(question_id: str, report_data: QuestionReportRequest, user: 
             if len(participant_ids) > 1:
                 is_multiplayer = True
 
+    # NTA Dropped Question Rule Reconciliation:
+    # If the question is confirmed defective or solo test reported:
+    bonus_marks_awarded = 0.0
+    if (is_already_defective or not is_multiplayer) and room_code and user and user.get("id"):
+        uid = user["id"]
+        c.execute("""
+            SELECT rp.id, rp.room_id, rp.answers, rp.marks, rp.score
+            FROM room_participants rp
+            JOIN rooms r ON rp.room_id = r.id
+            WHERE rp.user_id = ? AND r.code = ?
+            ORDER BY rp.rowid DESC LIMIT 1
+        """, (uid, room_code))
+        rp_found = c.fetchone()
+        if rp_found:
+            rp_dict = dict(rp_found)
+            raw_ans = rp_dict.get("answers") or "{}"
+            try:
+                p_answers = json.loads(raw_ans) if isinstance(raw_ans, str) else raw_ans
+            except Exception:
+                p_answers = {}
+
+            q_ans = p_answers.get(question_id)
+            is_corr = False
+            was_attempted = False
+            user_sel = None
+            if isinstance(q_ans, dict):
+                is_corr = bool(q_ans.get("correct"))
+                user_sel = q_ans.get("selected")
+                was_attempted = user_sel not in ("NONE", "SKIPPED", "", None)
+            elif q_ans:
+                user_sel = str(q_ans)
+                was_attempted = user_sel not in ("NONE", "SKIPPED", "")
+
+            if not is_corr:
+                # NTA Dropped Question rule:
+                # Attempted (-1 penalty): +5.0 mark swing (-1 revoked + 4.0 awarded)
+                # Skipped (0 marks): +4.0 mark swing
+                bonus_marks_awarded = 5.0 if was_attempted else 4.0
+                if isinstance(q_ans, dict):
+                    q_ans["correct"] = True
+                    q_ans["is_dropped"] = True
+                    q_ans["delta_marks"] = 4.0
+                    p_answers[question_id] = q_ans
+                else:
+                    p_answers[question_id] = {
+                        "selected": user_sel if was_attempted else "SKIPPED",
+                        "correct": True,
+                        "is_dropped": True,
+                        "delta_marks": 4.0
+                    }
+
+                c.execute("""
+                    UPDATE room_participants
+                    SET marks = marks + ?, score = score + ?, answers = ?
+                    WHERE id = ?
+                """, (bonus_marks_awarded, int(bonus_marks_awarded), json.dumps(p_answers), rp_dict["id"]))
+
     votes = {}
-    consensus_status = "PENDING"
-    if is_multiplayer:
+    consensus_status = "CONSENSUS_AGREED" if is_already_defective else "PENDING"
+    if is_multiplayer and not is_already_defective:
         # Reporter's vote is recorded as AGREE
         votes[reporter_id] = {
             "vote": "AGREE",
@@ -561,24 +631,69 @@ def report_question(question_id: str, report_data: QuestionReportRequest, user: 
                     VALUES (?, ?, 'ROOM_REPORT_VOTE_REQUEST', ?, ?, ?, 0, ?)
                 """, (notif_id, other_uid, notif_title, notif_msg, details_json, now))
 
+    # Send Notification to Reporter
+    if user and user.get("id"):
+        uid = user["id"]
+        notif_id = f"notif_{uuid.uuid4().hex[:12]}"
+        if bonus_marks_awarded > 0 or is_already_defective:
+            notif_title = f"🏆 Defect Verified: +{bonus_marks_awarded:.0f} Marks Awarded!" if bonus_marks_awarded > 0 else f"🏆 Defect Verified: Question #{question_id[:8]}"
+            notif_msg = (
+                f"Question #{question_id[:8]} ({rep_chapter}) defect was confirmed (lacks necessary problem values). "
+                f"Under official NTA Dropped Question guidelines, your test scorecard has been credited with +{bonus_marks_awarded:.0f} marks "
+                f"(penalty removed and +4.0 bonus awarded), and +{provisional_elo:.1f} rating safeguard applied."
+            )
+            details_json = json.dumps({
+                "question_id": question_id,
+                "room_code": room_code,
+                "bonus_marks": bonus_marks_awarded,
+                "provisional_elo": provisional_elo,
+                "action": "NTA_DROPPED_BONUS"
+            })
+            c.execute("""
+                INSERT INTO user_notifications (id, user_id, type, title, message, details, is_read, created_at)
+                VALUES (?, ?, 'REPORT_RESOLVED', ?, ?, ?, 0, ?)
+            """, (notif_id, uid, notif_title, notif_msg, details_json, now))
+        else:
+            notif_title = f"🛡️ Report Registered: Question #{question_id[:8]}"
+            notif_msg = (
+                f"You reported Question #{question_id[:8]} ({rep_chapter}) for {report_data.reason}. "
+                f"Your dispute has been registered for defect review. Rating safeguard (+{provisional_elo:.1f} Elo) "
+                f"has been provisionally credited to your profile. Once verified defective by moderators or contender consensus, "
+                f"full bonus marks (+4.0 marks) will be officially awarded to your scorecard under NTA Dropped Question rules."
+            )
+            details_json = json.dumps({
+                "question_id": question_id,
+                "chapter": rep_chapter,
+                "subject": rep_subject,
+                "provisional_elo": provisional_elo,
+                "action": "PROVISIONAL_REFUND"
+            })
+            c.execute("""
+                INSERT INTO user_notifications (id, user_id, type, title, message, details, is_read, created_at)
+                VALUES (?, ?, 'PROVISIONAL_ELO_RESTORED', ?, ?, ?, 0, ?)
+            """, (notif_id, uid, notif_title, notif_msg, details_json, now))
+
     # Insert question report record
+    initial_report_status = "QUARANTINED" if is_already_defective else "PENDING"
     c.execute("""
         INSERT INTO question_reports (
             id, question_id, reporter_id, reporter_username, reason, notes,
             status, created_at, provisional_elo_refunded, provisional_subject,
             room_code, votes, participant_ids, consensus_status
         )
-        VALUES (?, ?, ?, ?, ?, ?, 'PENDING', ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, (
         report_id, question_id, reporter_id, reporter_name,
-        report_data.reason, report_data.notes or "", now,
+        report_data.reason, report_data.notes or "", initial_report_status, now,
         provisional_elo, rep_subject,
         room_code, json.dumps(votes), json.dumps(participant_ids), consensus_status
     ))
     conn.commit()
     conn.close()
 
-    if is_multiplayer:
+    if bonus_marks_awarded > 0:
+        success_msg = f"Defect verified! Under NTA Dropped Question rules, +{bonus_marks_awarded:.0f} bonus marks have been awarded to your scorecard."
+    elif is_multiplayer:
         success_msg = f"Report submitted for Contender Review in Room #{room_code}. Other test participants have been requested to cast their vote."
     elif provisional_elo > 0:
         success_msg = f"Report submitted. +{provisional_elo:.1f} Elo provisionally restored pending review."
@@ -590,6 +705,8 @@ def report_question(question_id: str, report_data: QuestionReportRequest, user: 
         "message": success_msg,
         "report_id": report_id,
         "provisional_elo_refunded": provisional_elo,
+        "bonus_marks_awarded": bonus_marks_awarded,
+        "is_defective_verified": is_already_defective,
         "is_multiplayer": is_multiplayer,
         "room_code": room_code,
         "consensus_status": consensus_status

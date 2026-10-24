@@ -56,6 +56,7 @@ export default function ReportQuestionModal({
       });
 
       const refunded = Number(res?.provisional_elo_refunded || 0);
+      const bonusMarks = Number(res?.bonus_marks_awarded || 0);
       setProvisionalRefund(refunded);
 
       let skipped = false;
@@ -75,7 +76,9 @@ export default function ReportQuestionModal({
           reason: selectedReason,
           notes: notes.trim(),
           skipped,
-          provisional_elo_refunded: refunded
+          provisional_elo_refunded: refunded,
+          bonus_marks_awarded: bonusMarks,
+          is_defective_verified: Boolean(res?.is_defective_verified)
         });
       }
 

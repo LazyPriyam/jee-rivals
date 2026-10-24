@@ -136,15 +136,18 @@ export default function TestAnalysisView({
   const handleReportSuccess = (reportInfo) => {
     const qId = reportInfo?.questionId;
     const refund = Number(reportInfo?.provisional_elo_refunded || 0);
+    const bonus = Number(reportInfo?.bonus_marks_awarded || 0);
     if (qId) {
       setReportedQuestionIds((prev) => new Set(prev).add(qId));
     }
     fetchRoomReports();
-    if (refund > 0) {
+    fetchAnalysis();
+    if (refund > 0 || bonus > 0) {
       if (sound.levelUp) sound.levelUp();
       setProvisionalAlert({
         questionId: qId,
-        refund
+        refund,
+        bonus
       });
       // Synchronize updated user profile across Navbar and other tabs
       api.auth.getMe().then((freshUser) => {
@@ -500,12 +503,24 @@ export default function TestAnalysisView({
       timeSpent = 0;
     }
 
+    // Check if question is a dropped/defective question under official NTA rules:
+    const roomReport = roomReports[q.id];
+    const isDroppedQuestion = (q.validation_status || '').toUpperCase() === 'QUARANTINED' ||
+      Boolean(userSubmission?.is_dropped) ||
+      roomReport?.status === 'QUARANTINED' ||
+      roomReport?.consensus_status === 'CONSENSUS_AGREED';
+
+    if (isDroppedQuestion && !isCorrect) {
+      isCorrect = true;
+      markDelta = 4.0;
+    }
+
     totalTimeSpent += timeSpent;
 
-    if (!isAttempted) {
+    if (!isAttempted && !isDroppedQuestion) {
       unattemptedCount++;
       timeOnSkipped += timeSpent;
-    } else if (isCorrect) {
+    } else if (isCorrect || isDroppedQuestion) {
       correctCount++;
       timeOnCorrect += timeSpent;
     } else {
@@ -518,8 +533,8 @@ export default function TestAnalysisView({
     if (subjectStats[subj]) {
       subjectStats[subj].total++;
       subjectStats[subj].timeSpent += timeSpent;
-      if (!isAttempted) subjectStats[subj].unattempted++;
-      else if (isCorrect) {
+      if (!isAttempted && !isDroppedQuestion) subjectStats[subj].unattempted++;
+      else if (isCorrect || isDroppedQuestion) {
         subjectStats[subj].correct++;
         subjectStats[subj].marks += 4.0;
       } else {
@@ -550,6 +565,7 @@ export default function TestAnalysisView({
       userSelected,
       isCorrect,
       isAttempted,
+      isDropped: isDroppedQuestion,
       markDelta,
       timeSpent,
       dTier,
@@ -608,7 +624,8 @@ export default function TestAnalysisView({
   const attemptedCount = correctCount + incorrectCount;
   const accuracy = attemptedCount > 0 ? Math.round((correctCount / attemptedCount) * 100) : 0;
   const attemptRate = totalQuestions > 0 ? Math.round((attemptedCount / totalQuestions) * 100) : 0;
-  const totalMarks = myParticipant.marks !== undefined ? myParticipant.marks : (correctCount * 4 - incorrectCount * 1);
+  const totalComputedMarks = processedQuestions.reduce((acc, pq) => acc + (pq.markDelta || 0), 0);
+  const totalMarks = Math.max(Number(myParticipant.marks || 0), totalComputedMarks);
   const maxPossibleMarks = totalQuestions * 4;
   const scorePercent = maxPossibleMarks > 0 ? Math.round((totalMarks / maxPossibleMarks) * 100) : 0;
 
@@ -2009,19 +2026,20 @@ export default function TestAnalysisView({
                           <Clock className="w-3.5 h-3.5" />
                           <span>{Math.round(item.timeSpent)}s</span>
                         </span>
-                        {reportedQuestionIds.has(q.id) || roomReport ? (
+                        {item.isDropped || roomReport?.consensus_status === 'CONSENSUS_AGREED' ? (
+                          <span className="text-xs font-black px-2.5 py-0.5 rounded-full flex items-center gap-1.5 animate-pulse border bg-emerald-500/20 text-emerald-300 border-emerald-500/40">
+                            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+                            <span>+4.0 MARKS (DEFECT CONFIRMED • NTA BONUS)</span>
+                          </span>
+                        ) : reportedQuestionIds.has(q.id) || roomReport ? (
                           <span className={`text-xs font-black px-2.5 py-0.5 rounded-full flex items-center gap-1.5 animate-pulse border ${
-                            roomReport?.consensus_status === 'CONSENSUS_AGREED'
-                              ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
-                              : roomReport?.consensus_status === 'CONSENSUS_REJECTED'
+                            roomReport?.consensus_status === 'CONSENSUS_REJECTED'
                               ? 'bg-slate-800 text-slate-300 border-white/20'
                               : 'bg-amber-500/20 text-amber-300 border-amber-500/40'
                           }`}>
                             <Shield className="w-3 h-3 text-amber-400" />
                             <span>
-                              {roomReport?.consensus_status === 'CONSENSUS_AGREED'
-                                ? 'DEFECT CONFIRMED BY CONTENDERS'
-                                : roomReport?.consensus_status === 'CONSENSUS_REJECTED'
+                              {roomReport?.consensus_status === 'CONSENSUS_REJECTED'
                                 ? 'DISPUTE REJECTED BY CONTENDERS'
                                 : isMultiplayer
                                 ? 'CONTENDER VOTING IN PROGRESS'
@@ -2837,16 +2855,26 @@ export default function TestAnalysisView({
         />
       )}
 
-      {/* Floating Toast Notification when provisional Elo is restored */}
+      {/* Floating Toast Notification when provisional Elo or bonus marks are awarded */}
       {provisionalAlert && (
         <div className="fixed bottom-6 right-6 z-50 bg-[#1a2233] border border-amber-500/50 rounded-2xl p-4 shadow-2xl flex items-center gap-3 animate-in fade-in slide-in-from-bottom duration-200 max-w-sm">
           <div className="w-10 h-10 rounded-xl bg-amber-500/20 border border-amber-500/40 text-amber-300 flex items-center justify-center shrink-0">
-            <Shield className="w-5 h-5 text-amber-400" />
+            {provisionalAlert.bonus > 0 ? (
+              <CheckCircle2 className="w-5 h-5 text-emerald-400" />
+            ) : (
+              <Shield className="w-5 h-5 text-amber-400" />
+            )}
           </div>
           <div className="flex-1 min-w-0 text-xs">
-            <strong className="text-white block font-bold">Provisional Rating Restored!</strong>
+            <strong className="text-white block font-bold">
+              {provisionalAlert.bonus > 0
+                ? 'Defect Verified • Bonus Marks Awarded!'
+                : 'Provisional Rating Restored!'}
+            </strong>
             <p className="text-slate-300 mt-0.5 leading-snug">
-              +{provisionalAlert.refund.toFixed(1)} Elo credited to your rating while moderators review this question.
+              {provisionalAlert.bonus > 0
+                ? `+${provisionalAlert.bonus.toFixed(0)} Marks awarded to your scorecard under NTA Dropped Question rules.`
+                : `+${provisionalAlert.refund.toFixed(1)} Elo credited to your rating while moderators review this question.`}
             </p>
           </div>
           <button
