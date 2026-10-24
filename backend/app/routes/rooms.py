@@ -1247,11 +1247,17 @@ async def submit_bulk_mock(
 
     from backend.app.tools.question_cache import get_questions_cached_batch
     questions_map = get_questions_cached_batch(q_ids, cursor=c)
+    has_per_q_times = bool(req.question_times and any(v > 0 for v in req.question_times.values()))
+    max_exam_duration = max(3600, (room.get("total_duration_minutes", 180) + 15) * 60)
+    safe_total_time = min(max_exam_duration, max(1, req.total_time_seconds))
     for q_id in q_ids:
         user_choice = req.answers.get(q_id, "NONE")
-        q_time = (req.question_times.get(q_id) if req.question_times else None)
-        if q_time is None or q_time <= 0:
-            q_time = max(1, req.total_time_seconds // max(1, len(q_ids)))
+        if has_per_q_times:
+            # Respect genuine tracked time per question; unvisited / skipped questions stay 0
+            q_time = max(0, int(req.question_times.get(q_id, 0) or 0))
+            q_time = min(q_time, safe_total_time)
+        else:
+            q_time = max(1, safe_total_time // max(1, len(q_ids)))
 
         q = questions_map.get(str(q_id))
         if not q:

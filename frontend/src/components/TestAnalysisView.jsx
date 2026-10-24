@@ -446,14 +446,26 @@ export default function TestAnalysisView({
         isCorrect = Boolean(userSubmission.correct);
         markDelta = userSubmission.delta_marks !== undefined ? userSubmission.delta_marks : (isCorrect ? 4.0 : -1.0);
         isAttempted = userSelected !== 'NONE' && userSelected !== 'SKIPPED' && userSelected !== '' && userSelected !== null;
-        timeSpent = userSubmission.time_spent || userSubmission.time_spent_seconds || 60;
+        timeSpent = userSubmission.time_spent !== undefined
+          ? Math.max(0, Number(userSubmission.time_spent))
+          : (userSubmission.time_spent_seconds !== undefined
+              ? Math.max(0, Number(userSubmission.time_spent_seconds))
+              : (isAttempted ? 60 : 0));
       } else {
         userSelected = userSubmission;
         isAttempted = userSelected !== 'NONE' && userSelected !== 'SKIPPED' && userSelected !== '';
         isCorrect = String(userSelected).trim().toUpperCase() === String(sol.correct_answer).trim().toUpperCase();
         markDelta = isCorrect ? 4.0 : (isAttempted ? -1.0 : 0.0);
-        timeSpent = 60;
+        timeSpent = isAttempted ? 60 : 0;
       }
+    }
+
+    // Defensive normalization against legacy stale-closure outlier bugs (e.g. Q1 absorbing 7722s):
+    const examDurationSec = Math.max(3600, ((room.total_duration_minutes || 180) + 15) * 60);
+    if (timeSpent > examDurationSec) {
+      timeSpent = isAttempted ? 120 : 0;
+    } else if (!isAttempted && timeSpent > 600) {
+      timeSpent = 0;
     }
 
     totalTimeSpent += timeSpent;

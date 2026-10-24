@@ -94,7 +94,36 @@ export default function MockTestView({ room, user, onMatchComplete, onExitToDash
     return Math.max(0, Math.ceil((deadlineRef.current - Date.now()) / 1000));
   });
 
-  const startTimeRef = useRef(Date.now());
+  const getInitialStartTime = () => {
+    if (savedProgress?.startTime && Number(savedProgress.startTime) > 0) {
+      return Number(savedProgress.startTime);
+    }
+    if (room.started_at) {
+      try {
+        const utcStr = (room.started_at.endsWith('Z') || room.started_at.includes('+'))
+          ? room.started_at
+          : `${room.started_at}Z`;
+        const epoch = new Date(utcStr).getTime();
+        if (!isNaN(epoch) && epoch > 0 && epoch <= Date.now()) {
+          return epoch;
+        }
+      } catch (_) {}
+    }
+    return Date.now();
+  };
+
+  const startTimeRef = useRef(getInitialStartTime());
+  const currentIndexRef = useRef(currentIndex);
+  const questionsRef = useRef(questions);
+
+  useEffect(() => {
+    currentIndexRef.current = currentIndex;
+  }, [currentIndex]);
+
+  useEffect(() => {
+    questionsRef.current = questions;
+  }, [questions]);
+
   const timerRef = useRef(null);
 
   // Intercept browser back button and trigger exit warning modal
@@ -122,6 +151,7 @@ export default function MockTestView({ room, user, onMatchComplete, onExitToDash
       timelineEvents,
       deadline: deadlineRef.current,
       timeRemaining,
+      startTime: startTimeRef.current,
       timestamp: Date.now()
     });
   }, [currentIndex, answers, reviewMarks, visited, questionTimes, timelineEvents, timeRemaining, room.code, user?.id]);
@@ -157,12 +187,16 @@ export default function MockTestView({ room, user, onMatchComplete, onExitToDash
       const rem = Math.max(0, Math.ceil((deadlineRef.current - Date.now()) / 1000));
       setTimeRemaining(rem);
 
-      const activeQ = questions[currentIndex];
-      if (activeQ?.id) {
-        setQuestionTimes((prev) => ({
-          ...prev,
-          [activeQ.id]: (prev[activeQ.id] || 0) + 1
-        }));
+      if (document.visibilityState === 'visible') {
+        const currentIdx = currentIndexRef.current;
+        const currentQuestions = questionsRef.current;
+        const activeQ = currentQuestions?.[currentIdx];
+        if (activeQ?.id) {
+          setQuestionTimes((prev) => ({
+            ...prev,
+            [activeQ.id]: (prev[activeQ.id] || 0) + 1
+          }));
+        }
       }
 
       if (rem <= 0 && Date.now() - startTimeRef.current > 3000) {
@@ -335,7 +369,8 @@ export default function MockTestView({ room, user, onMatchComplete, onExitToDash
     clearMockTestDraftProgress(user?.id, room.code);
     clearActiveTestRoom(user?.id);
 
-    const totalTime = Math.round((Date.now() - startTimeRef.current) / 1000);
+    const maxDurationSec = Math.max(1800, ((room.total_duration_minutes || 180) + 15) * 60);
+    const totalTime = Math.min(maxDurationSec, Math.max(1, Math.round((Date.now() - startTimeRef.current) / 1000)));
     try {
       const res = await api.rooms.submitBulk(room.code, answers, totalTime, questionTimes, timelineEvents);
       onMatchComplete(res);
