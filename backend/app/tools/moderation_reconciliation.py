@@ -443,15 +443,26 @@ def reconcile_fixed_question(
                 except Exception:
                     p_answers = {}
 
-                user_ans = str(p_answers.get(str(q_idx)) or p_answers.get(question_id) or "").strip().upper()
+                raw_val = p_answers.get(str(q_idx)) or p_answers.get(question_id)
+                if isinstance(raw_val, dict):
+                    user_ans = str(raw_val.get("selected") or "").strip().upper()
+                else:
+                    user_ans = str(raw_val or "").strip().upper()
+
                 if user_ans == clean_key:
                     # Student had the correct key all along!
                     upgrade_delta = base_score + neg_mark
+                    if isinstance(raw_val, dict):
+                        raw_val["correct"] = True
+                        raw_val["delta_marks"] = base_score
+                        raw_val["delta_score"] = int(base_score)
+                        p_answers[question_id] = raw_val
+
                     rc.execute("""
                         UPDATE room_participants
-                        SET score = score + ?, marks = marks + ?
+                        SET score = score + ?, marks = marks + ?, answers = ?
                         WHERE room_id = ? AND user_id = ?
-                    """, (int(upgrade_delta), upgrade_delta, rm["id"], p_uid))
+                    """, (int(upgrade_delta), upgrade_delta, json.dumps(p_answers), rm["id"], p_uid))
                     summary["rivals_rooms_updated"] += 1
                     if p_uid and not str(p_uid).startswith("bot_"):
                         room_affected_users.add((p_uid, rm_code, upgrade_delta))

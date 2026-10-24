@@ -2090,6 +2090,70 @@ def get_room_results(code: str, user: Optional[dict] = Depends(get_optional_user
                             except Exception as notif_err:
                                 logger.warning(f"[ROOM_RESULTS] Dropped question notification note: {notif_err}")
 
+                # Also automatically reconcile any questions whose official answer key was revised/corrected
+                for q_entry in questions_data:
+                    q_info = q_entry.get("question", {})
+                    sol_info = q_entry.get("solution", {})
+                    q_cur_id = str(q_info.get("id") or "")
+                    if q_cur_id in defective_qids:
+                        continue
+
+                    clean_official_key = str(q_info.get("correct_answer") or sol_info.get("correct_answer") or "").strip().upper()
+                    if not clean_official_key:
+                        continue
+
+                    q_sub = answers_dict.get(q_cur_id)
+                    if not q_sub:
+                        continue
+
+                    user_sel = None
+                    was_corr = False
+                    if isinstance(q_sub, dict):
+                        user_sel = str(q_sub.get("selected") or "").strip().upper()
+                        was_corr = bool(q_sub.get("correct"))
+                    else:
+                        user_sel = str(q_sub or "").strip().upper()
+                        was_corr = False
+
+                    if user_sel and user_sel not in ("NONE", "SKIPPED", "") and user_sel == clean_official_key:
+                        if not was_corr:
+                            # Candidate chose the verified correct answer! Upgrade penalty (-1.0) -> +4.0 (+5.0 swing)
+                            mark_gain = 5.0
+                            participant_marks += mark_gain
+                            participant_score += mark_gain
+                            if isinstance(q_sub, dict):
+                                q_sub["correct"] = True
+                                q_sub["delta_marks"] = 4.0
+                                q_sub["delta_score"] = 4
+                                answers_dict[q_cur_id] = q_sub
+                            else:
+                                answers_dict[q_cur_id] = {
+                                    "selected": user_sel,
+                                    "correct": True,
+                                    "delta_marks": 4.0,
+                                    "delta_score": 4
+                                }
+                            answers_modified = True
+
+                            part_uid = str(p.get("user_id") or "")
+                            if part_uid:
+                                try:
+                                    notif_id = f"notif_keyfix_{code}_{q_cur_id}_{part_uid[:8]}"
+                                    c.execute("SELECT id FROM user_notifications WHERE id = ?", (notif_id,))
+                                    if not c.fetchone():
+                                        subj_name = q_info.get("subject") or "Examination"
+                                        ch_name = q_info.get("chapter") or ""
+                                        notif_title = f"🏆 Answer Key Corrected: {ch_name or subj_name}"
+                                        notif_msg = f"In examination #{code}, question official answer key was revised to '{clean_official_key}'. Your response was verified correct: +5.0 Marks awarded to your scorecard (reversing penalty to +4.0)."
+                                        det_json = json.dumps({"room_code": code, "question_id": q_cur_id, "new_key": clean_official_key, "bonus_marks": mark_gain})
+                                        now_str = datetime.datetime.utcnow().isoformat()
+                                        c.execute("""
+                                            INSERT INTO user_notifications (id, user_id, type, title, message, details, is_read, created_at)
+                                            VALUES (?, ?, 'KEY_CORRECTION_AWARD', ?, ?, ?, 0, ?)
+                                        """, (notif_id, part_uid, notif_title, notif_msg, det_json, now_str))
+                                except Exception as notif_err:
+                                    logger.warning(f"[ROOM_RESULTS] Key correction notification note: {notif_err}")
+
                 if answers_modified:
                     p_uid = str(p.get("user_id") or "")
                     r_id = str(p.get("room_id") or room_id)

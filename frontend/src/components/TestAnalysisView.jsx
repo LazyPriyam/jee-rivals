@@ -512,9 +512,17 @@ export default function TestAnalysisView({
     if (userSubmission) {
       if (typeof userSubmission === 'object') {
         userSelected = userSubmission.selected;
-        isCorrect = Boolean(userSubmission.correct);
-        markDelta = userSubmission.delta_marks !== undefined ? userSubmission.delta_marks : (isCorrect ? 4.0 : -1.0);
         isAttempted = userSelected !== 'NONE' && userSelected !== 'SKIPPED' && userSelected !== '' && userSelected !== null;
+
+        // Dynamically re-evaluate correctness against the updated answer key (in case moderation/admin fixed the key)
+        const activeKey = String(sol?.correct_answer || q?.correct_answer || '').trim().toUpperCase();
+        const selKey = String(userSelected || '').trim().toUpperCase();
+        const keyMatched = Boolean(isAttempted && activeKey && selKey && selKey === activeKey);
+
+        isCorrect = Boolean(userSubmission.correct) || keyMatched;
+        markDelta = keyMatched && !userSubmission.correct
+          ? 4.0
+          : (userSubmission.delta_marks !== undefined ? userSubmission.delta_marks : (isCorrect ? 4.0 : -1.0));
         timeSpent = userSubmission.time_spent !== undefined
           ? Math.max(0, Number(userSubmission.time_spent))
           : (userSubmission.time_spent_seconds !== undefined
