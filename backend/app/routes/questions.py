@@ -443,8 +443,8 @@ def report_question(question_id: str, report_data: QuestionReportRequest, user: 
                         else:
                             # Question was part of this test
                             provisional_elo = 15.0
-                    elif report_data.reason == "WRONG_ANSWER":
-                        # General fallback for questions reported as wrong key
+                    elif report_data.reason in ("WRONG_ANSWER", "AMBIGUOUS_QUESTION", "MISSING_DIAGRAM", "BROKEN_FORMATTING", "OTHER"):
+                        # General fallback for questions reported with any valid defect reason
                         provisional_elo = 15.0
 
             # Apply provisional restoration if elo lost

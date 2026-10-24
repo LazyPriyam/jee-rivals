@@ -149,7 +149,7 @@ export default function ReportQuestionModal({
               {isMultiplayer
                 ? 'Your report has been shared with fellow contenders in this room. Everyone who took this test can now vote to verify the defect in their test analysis.'
                 : provisionalRefund > 0
-                ? 'As an anti-frustration safeguard, your lost Elo has been provisionally credited back to your rating while moderators review the issue. If confirmed, this is locked in permanently with a bounty. If dismissed, the credit will be reverted.'
+                ? 'As an anti-frustration safeguard, your lost Elo has been provisionally credited back to your rating while moderators review the issue. Once verified defective, full bonus marks (+4 marks) are awarded under official NTA Dropped Question rules.'
                 : wasSkipped
                 ? 'Your report was dispatched to the moderation hub. This question was skipped with zero Elo penalty, and a fresh question has been drawn.'
                 : 'Thank you for keeping the question bank accurate! Your report has been dispatched to the human moderation hub.'}
@@ -182,16 +182,14 @@ export default function ReportQuestionModal({
               </div>
             )}
 
-            {/* Provisional Elo Safeguard Feature Callout */}
-            {selectedReason === 'WRONG_ANSWER' && (
-              <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded-2xl text-[11px] text-amber-300 flex items-center gap-2.5">
-                <Shield className="w-4 h-4 text-amber-400 shrink-0" />
-                <div className="leading-relaxed">
-                  <strong className="text-white block font-bold">Provisional Elo Safeguard Active:</strong>
-                  If you lost rating answering this question, your lost Elo is immediately credited back provisionally pending human moderation review.
-                </div>
+            {/* Provisional Elo & Marks Safeguard Feature Callout */}
+            <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded-2xl text-[11px] text-amber-300 flex items-center gap-2.5">
+              <Shield className="w-4 h-4 text-amber-400 shrink-0" />
+              <div className="leading-relaxed">
+                <strong className="text-white block font-bold">Provisional Rating Safeguard Active:</strong>
+                Submitting flags this question for defect verification and immediately restores provisional Elo. When verified defective by room contenders or moderators, the official <span className="font-bold text-amber-200">NTA Dropped Question rule</span> applies (+4 bonus marks awarded, penalty removed).
               </div>
-            )}
+            </div>
 
             {/* Snippet preview if available */}
             {activeQuestionText && (
