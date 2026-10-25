@@ -11,6 +11,36 @@ import datetime
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 
+def are_answers_match(user_val: Any, correct_key: str) -> bool:
+    """Robust equality check supporting Single Choice, Multiple Choice sets, and Numericals."""
+    if user_val is None or not correct_key:
+        return False
+    import re
+    if isinstance(user_val, str) and (user_val.startswith("[") or user_val.startswith("(")):
+        try:
+            parsed = json.loads(user_val)
+            if isinstance(parsed, (list, tuple)):
+                user_val = parsed
+        except Exception:
+            pass
+    if isinstance(user_val, (list, tuple, set)):
+        u_set = {str(x).strip().upper() for x in user_val if str(x).strip()}
+        c_set = {str(x).strip().upper() for x in re.sub(r"[^A-Za-z0-9]", " ", correct_key).split() if x.strip()}
+        return len(u_set) > 0 and u_set == c_set
+    u_str = str(user_val).strip().upper()
+    c_str = str(correct_key).strip().upper()
+    if u_str == c_str:
+        return True
+    u_chars = {c for c in re.sub(r"[^A-Z0-9]", "", u_str)}
+    c_chars = {c for c in re.sub(r"[^A-Z0-9]", "", c_str)}
+    if u_chars and u_chars == c_chars:
+        return True
+    try:
+        return abs(float(u_str) - float(c_str)) <= 0.05
+    except (ValueError, TypeError):
+        return False
+
+
 def _parse_iso(ts_str: Optional[str]) -> Optional[datetime.datetime]:
     if not ts_str:
         return None
@@ -472,7 +502,7 @@ def reconcile_fixed_question(
                 else:
                     user_ans = str(raw_val or "").strip().upper()
 
-                if user_ans == clean_key:
+                if are_answers_match(user_ans, clean_key):
                     # Student had the correct key all along!
                     upgrade_delta = base_score + neg_mark
                     if isinstance(raw_val, dict):
@@ -679,7 +709,7 @@ def reconcile_fixed_question(
         for att in attempts:
             t_id = att[0]
             u_ans = str(att[1] or "").strip().upper()
-            if u_ans == clean_key:
+            if are_answers_match(u_ans, clean_key):
                 note = f"[Moderation: Key updated to {clean_key} - Marks Awarded]"
                 curr_note = att[4] or ""
                 new_note = f"{curr_note} {note}".strip()
