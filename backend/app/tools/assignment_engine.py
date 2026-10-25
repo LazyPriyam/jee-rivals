@@ -106,6 +106,17 @@ def _get_user_learnt_chapters(
     return norm
 
 
+def _row_to_dict(row: Any, col_names: List[str]) -> dict:
+    """Robust conversion of a DB row (TursoRow, sqlite3.Row, or tuple) into a column-name dict."""
+    if hasattr(row, "_map") and isinstance(row._map, dict):
+        return dict(row._map)
+    if hasattr(row, "keys") and callable(row.keys):
+        return {k: row[k] for k in row.keys()}
+    if hasattr(row, "_vals"):
+        return dict(zip(col_names, row._vals))
+    return dict(zip(col_names, row))
+
+
 def _mask_question_for_session(q: dict, reflection: Optional[dict] = None) -> dict:
     """
     Returns a client-safe projection of a question for active solving.
@@ -180,9 +191,10 @@ def generate_daily_assignment(
         """, (user_id, today_str, batch_type))
         existing_row = c.fetchone()
         if existing_row:
-            # Check if this assignment actually has questions; if corrupted, purge it
             active_data = get_assignment_by_id(conn, user_id, existing_row[0])
-            if active_data and active_data.get("assignment") and len(active_data["assignment"].get("questions", [])) > 0:
+            qs = active_data.get("assignment", {}).get("questions", []) if active_data else []
+            is_valid = bool(active_data and active_data.get("assignment") and len(qs) > 0 and not any(q.get("text") == "text" or q.get("chapter") == "chapter" for q in qs))
+            if is_valid:
                 return active_data
             else:
                 c.execute("DELETE FROM daily_assignments WHERE id = ?", (existing_row[0],))
@@ -269,7 +281,7 @@ def generate_daily_assignment(
             WHERE subject = ? AND chapter IN ({placeholders}) AND question_type = 'SUBJECTIVE'
         """, [subj] + cand_list)
         subjective_rows = c.fetchall()
-        subj_candidates = [dict(zip(col_names, row)) for row in subjective_rows]
+        subj_candidates = [_row_to_dict(row, col_names) for row in subjective_rows]
 
         # Prioritize unassigned subjective questions
         unseen_subj = [q for q in subj_candidates if q["id"] not in recent_assigned_ids and q["id"] not in selected_ids]
@@ -301,7 +313,7 @@ def generate_daily_assignment(
                 LIMIT 150
             """, [subj] + cand_list)
             obj_rows = c.fetchall()
-            obj_candidates = [dict(zip(col_names, row)) for row in obj_rows]
+            obj_candidates = [_row_to_dict(row, col_names) for row in obj_rows]
 
             unseen_obj = [q for q in obj_candidates if q["id"] not in recent_assigned_ids and q["id"] not in selected_ids]
             if len(unseen_obj) < needed_obj:
@@ -334,7 +346,7 @@ def generate_daily_assignment(
                 LIMIT 200
             """, all_cand)
             fill_rows = c.fetchall()
-            fill_candidates = [dict(zip(col_names, row)) for row in fill_rows]
+            fill_candidates = [_row_to_dict(row, col_names) for row in fill_rows]
             unseen_fill = [q for q in fill_candidates if q["id"] not in recent_assigned_ids and q["id"] not in selected_ids]
             if len(unseen_fill) < needed_more:
                 unseen_fill = [q for q in fill_candidates if q["id"] not in selected_ids]
@@ -453,11 +465,18 @@ def get_active_or_latest_assignment(conn: sqlite3.Connection, user_id: str) -> O
     """Returns today's active in-progress assignment or the most recent one for user."""
     c = conn.cursor()
 
-    # Self-heal: purge any corrupted 0-question assignments
+    # Self-heal: purge any corrupted assignments (0 questions or dummy 'text' text from TursoRow bug)
     try:
         c.execute("""
             DELETE FROM daily_assignments
-            WHERE user_id = ? AND (total_questions <= 0 OR questions_data IS NULL OR questions_data = '[]')
+            WHERE user_id = ? AND (
+                total_questions <= 0
+                OR questions_data IS NULL
+                OR questions_data = '[]'
+                OR questions_data LIKE '%"text": "text"%'
+                OR questions_data LIKE '%"chapter": "chapter"%'
+                OR questions_data LIKE '%"question_type": "question_type"%'
+            )
         """, (user_id,))
         conn.commit()
     except Exception:
@@ -474,7 +493,9 @@ def get_active_or_latest_assignment(conn: sqlite3.Connection, user_id: str) -> O
     row = c.fetchone()
     if row:
         data = get_assignment_by_id(conn, user_id, row[0])
-        if data and data.get("assignment") and len(data["assignment"].get("questions", [])) > 0:
+        qs = data.get("assignment", {}).get("questions", []) if data else []
+        is_valid = bool(data and data.get("assignment") and len(qs) > 0 and not any(q.get("text") == "text" or q.get("chapter") == "chapter" for q in qs))
+        if is_valid:
             return data
         else:
             # Corrupted, delete it
@@ -490,7 +511,9 @@ def get_active_or_latest_assignment(conn: sqlite3.Connection, user_id: str) -> O
     row = c.fetchone()
     if row:
         data = get_assignment_by_id(conn, user_id, row[0])
-        if data and data.get("assignment") and len(data["assignment"].get("questions", [])) > 0:
+        qs = data.get("assignment", {}).get("questions", []) if data else []
+        is_valid = bool(data and data.get("assignment") and len(qs) > 0 and not any(q.get("text") == "text" or q.get("chapter") == "chapter" for q in qs))
+        if is_valid:
             return data
         else:
             c.execute("DELETE FROM daily_assignments WHERE id = ?", (row[0],))

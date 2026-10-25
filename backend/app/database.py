@@ -60,7 +60,7 @@ class TursoRow:
         return len(self._vals)
 
     def __iter__(self):
-        return iter(self._cols)
+        return iter(self._vals)
 
     def __repr__(self):
         return f"<TursoRow {self._map}>"
