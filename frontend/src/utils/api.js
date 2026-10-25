@@ -728,6 +728,18 @@ export const api = {
       request(`/api/assignments/${assignmentId}/complete`, {
         method: 'POST',
       }),
+    delete: (assignmentId) =>
+      request(`/api/assignments/${assignmentId}`, {
+        method: 'DELETE',
+      }),
+    leave: (assignmentId) =>
+      request(`/api/assignments/${assignmentId}/leave`, {
+        method: 'POST',
+      }),
+    reset: (assignmentId) =>
+      request(`/api/assignments/${assignmentId}/reset`, {
+        method: 'POST',
+      }),
   },
 };
 

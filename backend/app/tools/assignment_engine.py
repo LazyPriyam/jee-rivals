@@ -711,8 +711,8 @@ def complete_assignment(conn: sqlite3.Connection, user_id: str, assignment_id: s
     }
 
 
-def get_assignment_history(conn: sqlite3.Connection, user_id: str, limit: int = 20) -> List[Dict[str, Any]]:
-    """Returns past assignments with struggle overview."""
+def get_assignment_history(conn: sqlite3.Connection, user_id: str, limit: int = 50) -> Dict[str, Any]:
+    """Returns past assignments with struggle breakdown and global statistics."""
     c = conn.cursor()
     c.execute("""
         SELECT id, assignment_date, batch_type, title, status,
@@ -724,20 +724,130 @@ def get_assignment_history(conn: sqlite3.Connection, user_id: str, limit: int = 
     """, (user_id, limit))
     rows = c.fetchall()
 
+    # Query aggregate reflection metrics per assignment
+    c.execute("""
+        SELECT assignment_id,
+               COUNT(*) as total_refl,
+               SUM(CASE WHEN reflection_tag = 'BREAKTHROUGH' THEN 1 ELSE 0 END) as breakthroughs,
+               SUM(CASE WHEN reflection_tag = 'DEEP_DERIVATION' THEN 1 ELSE 0 END) as derivations,
+               SUM(CASE WHEN reflection_tag = 'HINT_CONSULTED' THEN 1 ELSE 0 END) as hints,
+               SUM(CASE WHEN reflection_tag = 'CONCEPT_TRAP' THEN 1 ELSE 0 END) as traps,
+               SUM(CASE WHEN is_correct = 1 THEN 1 ELSE 0 END) as correct_count,
+               SUM(COALESCE(time_spent_seconds, 0)) as total_time
+        FROM assignment_reflections
+        WHERE user_id = ?
+        GROUP BY assignment_id
+    """, (user_id,))
+    refl_rows = c.fetchall()
+    refl_map = {}
+    for r in refl_rows:
+        refl_map[r[0]] = {
+            "total_reflections": r[1] or 0,
+            "breakthroughs": r[2] or 0,
+            "derivations": r[3] or 0,
+            "hints": r[4] or 0,
+            "traps": r[5] or 0,
+            "correct_count": r[6] or 0,
+            "total_time_seconds": r[7] or 0,
+        }
+
     history = []
+    total_time_all = 0
+    total_breakthroughs_all = 0
+    total_reflections_all = 0
+    completed_assignments_count = 0
+
     for r in rows:
+        asgn_id = r[0]
+        st = r[4]
+        if st == "COMPLETED":
+            completed_assignments_count += 1
+
+        asgn_metrics = refl_map.get(asgn_id, {
+            "total_reflections": 0,
+            "breakthroughs": 0,
+            "derivations": 0,
+            "hints": 0,
+            "traps": 0,
+            "correct_count": 0,
+            "total_time_seconds": 0
+        })
+
+        total_time_all += asgn_metrics["total_time_seconds"]
+        total_breakthroughs_all += asgn_metrics["breakthroughs"]
+        total_reflections_all += asgn_metrics["total_reflections"]
+
         history.append({
-            "id": r[0],
+            "id": asgn_id,
             "assignment_date": r[1],
             "batch_type": r[2],
             "title": r[3],
-            "status": r[4],
+            "status": st,
             "total_questions": r[5],
             "completed_questions": r[6],
             "created_at": r[7],
             "completed_at": r[8],
+            "metrics": asgn_metrics
         })
-    return history
+
+    overall_breakthrough_rate = round((total_breakthroughs_all / total_reflections_all * 100), 1) if total_reflections_all > 0 else 0.0
+
+    global_stats = {
+        "total_assignments": len(rows),
+        "completed_assignments": completed_assignments_count,
+        "total_problems_reflected": total_reflections_all,
+        "overall_breakthrough_rate": overall_breakthrough_rate,
+        "total_time_seconds": total_time_all
+    }
+
+    return {
+        "history": history,
+        "stats": global_stats
+    }
+
+
+def delete_assignment(conn: sqlite3.Connection, user_id: str, assignment_id: str) -> Dict[str, Any]:
+    """Permanently deletes an assignment and its associated reflections."""
+    c = conn.cursor()
+    c.execute("SELECT id FROM daily_assignments WHERE id = ? AND user_id = ?", (assignment_id, user_id))
+    if not c.fetchone():
+        return {"success": False, "error": "Assignment not found"}
+
+    c.execute("DELETE FROM assignment_reflections WHERE assignment_id = ? AND user_id = ?", (assignment_id, user_id))
+    c.execute("DELETE FROM daily_assignments WHERE id = ? AND user_id = ?", (assignment_id, user_id))
+    conn.commit()
+    return {"success": True, "message": "Assignment deleted successfully"}
+
+
+def archive_or_leave_assignment(conn: sqlite3.Connection, user_id: str, assignment_id: str) -> Dict[str, Any]:
+    """Archives or leaves an active assignment so it no longer locks the active solving session."""
+    c = conn.cursor()
+    c.execute("SELECT id, status FROM daily_assignments WHERE id = ? AND user_id = ?", (assignment_id, user_id))
+    row = c.fetchone()
+    if not row:
+        return {"success": False, "error": "Assignment not found"}
+
+    new_status = "ARCHIVED" if row[1] != "COMPLETED" else "COMPLETED"
+    c.execute("UPDATE daily_assignments SET status = ? WHERE id = ? AND user_id = ?", (new_status, assignment_id, user_id))
+    conn.commit()
+    return {"success": True, "status": new_status, "message": "Batch archived successfully"}
+
+
+def reset_assignment(conn: sqlite3.Connection, user_id: str, assignment_id: str) -> Dict[str, Any]:
+    """Resets reflections for an assignment so it can be re-attempted from scratch."""
+    c = conn.cursor()
+    c.execute("SELECT id FROM daily_assignments WHERE id = ? AND user_id = ?", (assignment_id, user_id))
+    if not c.fetchone():
+        return {"success": False, "error": "Assignment not found"}
+
+    c.execute("DELETE FROM assignment_reflections WHERE assignment_id = ? AND user_id = ?", (assignment_id, user_id))
+    c.execute("""
+        UPDATE daily_assignments
+        SET status = 'IN_PROGRESS', completed_questions = 0, completed_at = NULL
+        WHERE id = ? AND user_id = ?
+    """, (assignment_id, user_id))
+    conn.commit()
+    return {"success": True, "message": "Assignment reset successfully"}
 
 
 def get_assignment_insights(conn: sqlite3.Connection, user_id: str) -> Dict[str, Any]:

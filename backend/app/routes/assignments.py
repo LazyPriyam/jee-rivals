@@ -19,6 +19,9 @@ from backend.app.tools.assignment_engine import (
     complete_assignment,
     get_assignment_history,
     get_assignment_insights,
+    delete_assignment,
+    archive_or_leave_assignment,
+    reset_assignment,
 )
 
 logger = logging.getLogger("jee_rivals.assignments")
@@ -92,14 +95,18 @@ def generate_assignment_route(
 
 @router.get("/history")
 def get_history_route(
-    limit: int = Query(20, ge=1, le=100),
+    limit: int = Query(50, ge=1, le=100),
     user: dict = Depends(verify_lazypriyam)
 ):
-    """Retrieves assignment completion history."""
+    """Retrieves assignment history and aggregate dashboard statistics."""
     conn = get_connection()
     try:
-        history = get_assignment_history(conn, user["id"], limit=limit)
-        return {"success": True, "history": history}
+        data = get_assignment_history(conn, user["id"], limit=limit)
+        return {
+            "success": True,
+            "history": data.get("history", []),
+            "stats": data.get("stats", {})
+        }
     finally:
         conn.close()
 
@@ -166,6 +173,54 @@ def complete_assignment_route(
         res = complete_assignment(conn, user["id"], assignment_id)
         if not res.get("success"):
             raise HTTPException(status_code=400, detail=res.get("error", "Failed to complete assignment"))
+        return res
+    finally:
+        conn.close()
+
+
+@router.delete("/{assignment_id}")
+def delete_assignment_route(
+    assignment_id: str,
+    user: dict = Depends(verify_lazypriyam)
+):
+    """Permanently deletes an assignment and its reflections."""
+    conn = get_connection()
+    try:
+        res = delete_assignment(conn, user["id"], assignment_id)
+        if not res.get("success"):
+            raise HTTPException(status_code=400, detail=res.get("error", "Failed to delete assignment"))
+        return res
+    finally:
+        conn.close()
+
+
+@router.post("/{assignment_id}/leave")
+def leave_assignment_route(
+    assignment_id: str,
+    user: dict = Depends(verify_lazypriyam)
+):
+    """Leaves / archives an assignment so it no longer locks the active solving session."""
+    conn = get_connection()
+    try:
+        res = archive_or_leave_assignment(conn, user["id"], assignment_id)
+        if not res.get("success"):
+            raise HTTPException(status_code=400, detail=res.get("error", "Failed to leave assignment"))
+        return res
+    finally:
+        conn.close()
+
+
+@router.post("/{assignment_id}/reset")
+def reset_assignment_route(
+    assignment_id: str,
+    user: dict = Depends(verify_lazypriyam)
+):
+    """Resets all reflections for an assignment so it can be re-attempted from scratch."""
+    conn = get_connection()
+    try:
+        res = reset_assignment(conn, user["id"], assignment_id)
+        if not res.get("success"):
+            raise HTTPException(status_code=400, detail=res.get("error", "Failed to reset assignment"))
         return res
     finally:
         conn.close()

@@ -25,7 +25,11 @@ import {
   X,
   Target,
   Trophy,
-  Loader2
+  Loader2,
+  Trash2,
+  LogOut,
+  LayoutDashboard,
+  Play
 } from 'lucide-react';
 
 import MathRenderer from './MathRenderer';
@@ -86,10 +90,14 @@ export default function DailyAssignmentsView({ user, isActive, onNavigateSkills 
   const [assignment, setAssignment] = useState(null);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [batchType, setBatchType] = useState('DAILY'); // 'DAILY' or 'WEEKEND'
+  const [viewMode, setViewMode] = useState('ACTIVE'); // 'ACTIVE' or 'DASHBOARD'
   const [showInsights, setShowInsights] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
   const [insightsData, setInsightsData] = useState(null);
   const [historyData, setHistoryData] = useState([]);
+  const [globalStats, setGlobalStats] = useState(null);
+  const [historyFilter, setHistoryFilter] = useState('ALL'); // 'ALL', 'IN_PROGRESS', 'COMPLETED', 'ARCHIVED'
+  const [actionLoadingId, setActionLoadingId] = useState(null);
   const [scratchpad, setScratchpad] = useState('');
   const [scratchpadStatus, setScratchpadStatus] = useState('saved'); // 'saving', 'saved', 'unsaved'
   const [selectedAnswer, setSelectedAnswer] = useState('');
@@ -162,6 +170,19 @@ export default function DailyAssignmentsView({ user, isActive, onNavigateSkills 
 
   const learntCount = liveLearntChapters.length;
 
+  // Load history & global statistics
+  const loadHistory = useCallback(async () => {
+    try {
+      const res = await api.assignments.getHistory(100);
+      if (res && res.history) {
+        setHistoryData(res.history);
+        if (res.stats) setGlobalStats(res.stats);
+      }
+    } catch (err) {
+      console.error('Failed to load history:', err);
+    }
+  }, []);
+
   // Load Active Assignment on mount
   const loadActiveAssignment = useCallback(async () => {
     try {
@@ -172,6 +193,7 @@ export default function DailyAssignmentsView({ user, isActive, onNavigateSkills 
         setBatchType(res.assignment.batch_type || 'DAILY');
       } else {
         setAssignment(null);
+        setViewMode('DASHBOARD');
       }
     } catch (err) {
       console.error('Failed to load active assignment:', err);
@@ -183,8 +205,9 @@ export default function DailyAssignmentsView({ user, isActive, onNavigateSkills 
   useEffect(() => {
     if (isActive) {
       loadActiveAssignment();
+      loadHistory();
     }
-  }, [isActive, loadActiveAssignment]);
+  }, [isActive, loadActiveAssignment, loadHistory]);
 
   // Generate new assignment
   const handleGenerate = async (targetBatchType, forceNew = false) => {
@@ -196,7 +219,9 @@ export default function DailyAssignmentsView({ user, isActive, onNavigateSkills 
         setAssignment(res.assignment);
         setBatchType(res.assignment.batch_type || targetBatchType);
         setCurrentIndex(0);
+        setViewMode('ACTIVE');
         sound.start();
+        loadHistory();
       } else if (res && (res.code === 'NO_LEARNT_CHAPTERS' || res.code === 'NO_QUESTIONS_FOUND')) {
         alert(res.message);
       } else if (res && res.error) {
@@ -412,11 +437,101 @@ export default function DailyAssignmentsView({ user, isActive, onNavigateSkills 
         setCompletionStats(res.stats);
         setShowCompletionModal(true);
         sound.victory();
-        // Reload active assignment state
-        loadActiveAssignment();
+        await loadActiveAssignment();
+        await loadHistory();
       }
     } catch (err) {
       console.error('Failed to complete assignment:', err);
+    }
+  };
+
+  // Leave active batch (archive without deleting)
+  const handleLeaveBatch = async (asgnId) => {
+    const idToLeave = asgnId || assignment?.id;
+    if (!idToLeave) return;
+    if (!window.confirm("Leave this batch? Your progress will remain saved in your archives and you can resume anytime or start a fresh batch.")) {
+      return;
+    }
+    try {
+      setActionLoadingId(idToLeave);
+      sound.click();
+      await api.assignments.leave(idToLeave);
+      await loadActiveAssignment();
+      await loadHistory();
+      setViewMode('DASHBOARD');
+    } catch (err) {
+      console.error('Failed to leave batch:', err);
+      alert('Failed to leave batch: ' + (err.message || 'Server error'));
+    } finally {
+      setActionLoadingId(null);
+    }
+  };
+
+  // Delete assignment permanently
+  const handleDeleteAssignment = async (asgnId, title = 'this assignment') => {
+    if (!window.confirm(`Permanently delete "${title}"? This cannot be undone.`)) {
+      return;
+    }
+    try {
+      setActionLoadingId(asgnId);
+      sound.click();
+      await api.assignments.delete(asgnId);
+      if (assignment?.id === asgnId) {
+        setAssignment(null);
+        setViewMode('DASHBOARD');
+      }
+      await loadHistory();
+      await loadActiveAssignment();
+    } catch (err) {
+      console.error('Failed to delete assignment:', err);
+      alert('Failed to delete assignment: ' + (err.message || 'Server error'));
+    } finally {
+      setActionLoadingId(null);
+    }
+  };
+
+  // Reset assignment reflections to re-solve from scratch
+  const handleResetAssignment = async (asgnId, title = 'this assignment') => {
+    if (!window.confirm(`Reset "${title}"? This will clear all logged reflections and answers so you can re-solve from question 1.`)) {
+      return;
+    }
+    try {
+      setActionLoadingId(asgnId);
+      sound.click();
+      await api.assignments.reset(asgnId);
+      if (assignment?.id === asgnId) {
+        const res = await api.assignments.getById(asgnId);
+        if (res && res.assignment) {
+          setAssignment(res.assignment);
+          setCurrentIndex(0);
+        }
+      }
+      await loadHistory();
+    } catch (err) {
+      console.error('Failed to reset assignment:', err);
+      alert('Failed to reset assignment: ' + (err.message || 'Server error'));
+    } finally {
+      setActionLoadingId(null);
+    }
+  };
+
+  // Open assignment into active problem desk
+  const handleOpenAssignment = async (asgnId) => {
+    try {
+      setLoading(true);
+      sound.click();
+      const res = await api.assignments.getById(asgnId);
+      if (res && res.assignment) {
+        setAssignment(res.assignment);
+        setBatchType(res.assignment.batch_type || 'DAILY');
+        setCurrentIndex(0);
+        setViewMode('ACTIVE');
+      }
+    } catch (err) {
+      console.error('Failed to open assignment:', err);
+      alert('Failed to open assignment: ' + (err.message || 'Server error'));
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -528,94 +643,350 @@ export default function DailyAssignmentsView({ user, isActive, onNavigateSkills 
     );
   }
 
-  // Empty state: No active assignment yet or 0 questions
-  if (!assignment || !assignment.questions || assignment.questions.length === 0) {
-    return (
-      <div className="max-w-4xl mx-auto px-4 py-12 text-center page-transition">
-        <div className="w-20 h-20 mx-auto rounded-3xl bg-gradient-to-br from-orange-500/20 to-amber-500/10 border border-orange-500/30 flex items-center justify-center text-orange-400 mb-6 shadow-xl shadow-orange-950/40">
-          <BookMarked className="w-10 h-10" />
-        </div>
-        <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-orange-500/15 border border-orange-500/30 text-orange-400 text-xs font-black tracking-wide uppercase mb-3">
-          <Sparkles className="w-3.5 h-3.5" />
-          <span>Personal Coaching Assignment Desk</span>
-        </div>
-        <h1 className="text-2xl md:text-3xl font-black text-white tracking-tight mb-3">
-          Daily Elite Problem Capsule
-        </h1>
-        <p className="text-slate-400 max-w-xl mx-auto text-sm leading-relaxed mb-8">
-          Challenge your conceptual instincts every single day. Pure balanced mix of high-caliber subjective derivations (Irodov, Pathfinder, Krotov) and verified JEE Advanced problems across your <span className="text-orange-400 font-bold">{learntCount} learnt chapters</span>.
-        </p>
+  // MANAGEMENT DASHBOARD VIEW (rendered when viewMode === 'DASHBOARD' or when no assignment is loaded)
+  if (viewMode === 'DASHBOARD' || !assignment || !assignment.questions || assignment.questions.length === 0) {
+    const hasActiveAssignment = Boolean(assignment && assignment.questions && assignment.questions.length > 0);
+    const inProgCount = historyData.filter(h => h.status === 'IN_PROGRESS').length;
+    const compCount = historyData.filter(h => h.status === 'COMPLETED').length;
+    const archCount = historyData.filter(h => h.status === 'ARCHIVED').length;
 
-        {/* Batch Selection Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-w-2xl mx-auto mb-8">
-          {/* Daily Capsule */}
+    const filteredHistory = historyData.filter(item => {
+      if (historyFilter === 'IN_PROGRESS') return item.status === 'IN_PROGRESS';
+      if (historyFilter === 'COMPLETED') return item.status === 'COMPLETED';
+      if (historyFilter === 'ARCHIVED') return item.status === 'ARCHIVED';
+      return true;
+    });
+
+    return (
+      <div className="max-w-6xl mx-auto px-4 py-8 space-y-8 page-transition">
+        {/* Hero Management Header */}
+        <div className="p-6 md:p-8 rounded-3xl bg-[#141824] border border-white/10 shadow-2xl relative overflow-hidden">
+          <div className="absolute top-0 right-0 w-96 h-96 bg-gradient-to-bl from-orange-500/10 via-amber-500/5 to-transparent blur-3xl pointer-events-none" />
+
+          <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-6 relative z-10">
+            <div className="space-y-2 max-w-xl">
+              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-orange-500/15 border border-orange-500/30 text-orange-400 text-xs font-black tracking-wide uppercase">
+                <Sparkles className="w-3.5 h-3.5" />
+                <span>Aspirant Command Desk • LazyPriyam Exclusive</span>
+              </div>
+              <h1 className="text-2xl md:text-3xl font-black text-white tracking-tight">
+                Daily Assignments Manager
+              </h1>
+              <p className="text-xs md:text-sm text-slate-400 leading-relaxed">
+                Manage, review, resume, and audit every assignment. Sampling balanced problems across your <span className="text-orange-400 font-bold">{learntCount} learnt chapters</span>.
+              </p>
+            </div>
+
+            {/* Quick Actions */}
+            <div className="flex flex-wrap items-center gap-2.5 w-full md:w-auto">
+              {hasActiveAssignment && (
+                <button
+                  onClick={() => {
+                    sound.click();
+                    setViewMode('ACTIVE');
+                  }}
+                  className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 text-black font-black text-xs hover:brightness-110 active:scale-95 transition cursor-pointer shadow-lg shadow-emerald-500/20 flex items-center gap-2"
+                >
+                  <Play className="w-4 h-4 fill-current" />
+                  <span>Resume Current Batch</span>
+                </button>
+              )}
+              <button
+                onClick={handleOpenInsights}
+                className="px-3.5 py-2.5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-slate-200 text-xs font-bold transition flex items-center gap-2 cursor-pointer"
+              >
+                <BarChart3 className="w-4 h-4 text-orange-400" />
+                <span>Struggle Insights</span>
+              </button>
+              <button
+                onClick={() => handleGenerate('DAILY', true)}
+                className="px-3.5 py-2.5 rounded-xl bg-orange-500/15 hover:bg-orange-500/25 border border-orange-500/30 text-orange-400 text-xs font-black transition flex items-center gap-2 cursor-pointer"
+              >
+                <Zap className="w-4 h-4" />
+                <span>+ Daily Capsule</span>
+              </button>
+              <button
+                onClick={() => handleGenerate('WEEKEND', true)}
+                className="px-3.5 py-2.5 rounded-xl bg-blue-500/15 hover:bg-blue-500/25 border border-blue-500/30 text-blue-400 text-xs font-black transition flex items-center gap-2 cursor-pointer"
+              >
+                <Shield className="w-4 h-4" />
+                <span>+ Weekend Titan</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Global Analytics Overview Grid */}
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 mt-6 pt-6 border-t border-white/5">
+            <div className="p-3.5 rounded-2xl bg-[#0e121a]/80 border border-white/5 text-center">
+              <div className="text-xl md:text-2xl font-black text-white">
+                {globalStats?.total_assignments ?? historyData.length}
+              </div>
+              <div className="text-[11px] font-bold text-slate-400 mt-0.5">Total Sheets</div>
+            </div>
+            <div className="p-3.5 rounded-2xl bg-[#0e121a]/80 border border-white/5 text-center">
+              <div className="text-xl md:text-2xl font-black text-emerald-400">
+                {globalStats?.completed_assignments ?? compCount}
+              </div>
+              <div className="text-[11px] font-bold text-slate-400 mt-0.5">Conquered</div>
+            </div>
+            <div className="p-3.5 rounded-2xl bg-[#0e121a]/80 border border-white/5 text-center">
+              <div className="text-xl md:text-2xl font-black text-blue-400">
+                {globalStats?.total_problems_reflected ?? 0}
+              </div>
+              <div className="text-[11px] font-bold text-slate-400 mt-0.5">Problems Reflected</div>
+            </div>
+            <div className="p-3.5 rounded-2xl bg-[#0e121a]/80 border border-white/5 text-center">
+              <div className="text-xl md:text-2xl font-black text-purple-400">
+                {globalStats?.overall_breakthrough_rate ? `${globalStats.overall_breakthrough_rate}%` : '0%'}
+              </div>
+              <div className="text-[11px] font-bold text-slate-400 mt-0.5">Breakthrough Rate</div>
+            </div>
+            <div className="p-3.5 rounded-2xl bg-[#0e121a]/80 border border-white/5 text-center col-span-2 sm:col-span-1">
+              <div className="text-xl md:text-2xl font-black text-amber-400">
+                {formatTime(globalStats?.total_time_seconds || 0)}
+              </div>
+              <div className="text-[11px] font-bold text-slate-400 mt-0.5">Deep Work Time</div>
+            </div>
+          </div>
+        </div>
+
+        {/* Quick Batch Starters Banner */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div
             onClick={() => handleGenerate('DAILY')}
-            className="p-6 rounded-2xl bg-[#141824] border border-orange-500/30 hover:border-orange-500 transition cursor-pointer group text-left hover:scale-[1.02] shadow-lg shadow-black/40"
+            className="p-5 rounded-2xl bg-[#141824] border border-orange-500/20 hover:border-orange-500 transition cursor-pointer group hover:scale-[1.01] shadow-lg shadow-black/40 flex items-center justify-between"
           >
-            <div className="flex items-center justify-between mb-3">
-              <div className="w-10 h-10 rounded-xl bg-orange-500/15 text-orange-400 flex items-center justify-center">
-                <Zap className="w-5 h-5" />
+            <div className="flex items-center gap-4">
+              <div className="w-12 h-12 rounded-2xl bg-orange-500/15 text-orange-400 flex items-center justify-center shrink-0">
+                <Zap className="w-6 h-6" />
               </div>
-              <span className="text-xs font-black px-2.5 py-1 rounded-full bg-orange-500/10 text-orange-400 border border-orange-500/30">
-                Recommended Today
-              </span>
+              <div>
+                <div className="text-sm font-black text-white group-hover:text-orange-400 transition">
+                  Daily Elite Capsule
+                </div>
+                <div className="text-xs text-slate-400 mt-0.5">
+                  3 to 5 balanced problems (Physics, Chemistry, Math). 30-45m workout.
+                </div>
+              </div>
             </div>
-            <h3 className="text-lg font-black text-white group-hover:text-orange-400 transition mb-1">
-              Daily Elite Capsule
-            </h3>
-            <p className="text-xs text-slate-400 leading-relaxed mb-4">
-              3 to 5 problems. 1 Physics, 1 Chemistry, 1 Math. Ideal 30-45 minute morning workout to cement retention.
-            </p>
-            <div className="flex items-center gap-2 text-orange-400 font-bold text-xs">
-              <span>Start Daily Batch</span>
-              <ChevronRight className="w-4 h-4 group-hover:translate-x-1 transition" />
-            </div>
+            <ChevronRight className="w-5 h-5 text-slate-500 group-hover:text-orange-400 group-hover:translate-x-1 transition shrink-0 ml-2" />
           </div>
 
-          {/* Weekend Titan */}
           <div
             onClick={() => handleGenerate('WEEKEND')}
-            className="p-6 rounded-2xl bg-[#141824] border border-blue-500/30 hover:border-blue-500 transition cursor-pointer group text-left hover:scale-[1.02] shadow-lg shadow-black/40"
+            className="p-5 rounded-2xl bg-[#141824] border border-blue-500/20 hover:border-blue-500 transition cursor-pointer group hover:scale-[1.01] shadow-lg shadow-black/40 flex items-center justify-between"
           >
-            <div className="flex items-center justify-between mb-3">
-              <div className="w-10 h-10 rounded-xl bg-blue-500/15 text-blue-400 flex items-center justify-center">
-                <Shield className="w-5 h-5" />
+            <div className="flex items-center gap-4">
+              <div className="w-12 h-12 rounded-2xl bg-blue-500/15 text-blue-400 flex items-center justify-center shrink-0">
+                <Shield className="w-6 h-6" />
               </div>
-              <span className="text-xs font-black px-2.5 py-1 rounded-full bg-blue-500/10 text-blue-400 border border-blue-500/30">
-                Weekend Deep Dive
-              </span>
+              <div>
+                <div className="text-sm font-black text-white group-hover:text-blue-400 transition">
+                  Weekend Titan Sheet
+                </div>
+                <div className="text-xs text-slate-400 mt-0.5">
+                  10 to 12 deep multi-concept olympiad derivations spanning all learnt chapters.
+                </div>
+              </div>
             </div>
-            <h3 className="text-lg font-black text-white group-hover:text-blue-400 transition mb-1">
-              Weekend Titan Sheet
-            </h3>
-            <p className="text-xs text-slate-400 leading-relaxed mb-4">
-              10 to 12 deep problems spanning all learnt chapters. Multi-concept olympiad derivations and tough matrix matches.
-            </p>
-            <div className="flex items-center gap-2 text-blue-400 font-bold text-xs">
-              <span>Start Weekend Sheet</span>
-              <ChevronRight className="w-4 h-4 group-hover:translate-x-1 transition" />
-            </div>
+            <ChevronRight className="w-5 h-5 text-slate-500 group-hover:text-blue-400 group-hover:translate-x-1 transition shrink-0 ml-2" />
           </div>
         </div>
 
-        <div className="flex items-center justify-center gap-4 text-xs font-bold text-slate-400">
-          <button
-            onClick={handleOpenInsights}
-            className="hover:text-white transition flex items-center gap-1.5 cursor-pointer"
-          >
-            <BarChart3 className="w-4 h-4 text-orange-400" />
-            <span>Struggle Insights</span>
-          </button>
-          <span>•</span>
-          <button
-            onClick={handleOpenHistory}
-            className="hover:text-white transition flex items-center gap-1.5 cursor-pointer"
-          >
-            <Calendar className="w-4 h-4 text-blue-400" />
-            <span>Past Archives</span>
-          </button>
+        {/* Filter Strip */}
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 border-b border-white/5 pb-4">
+          <div className="flex items-center gap-1.5 p-1 rounded-xl bg-white/5 border border-white/10 text-xs">
+            <button
+              onClick={() => setHistoryFilter('ALL')}
+              className={`px-3 py-1.5 rounded-lg font-bold transition cursor-pointer ${
+                historyFilter === 'ALL' ? 'bg-orange-500 text-black shadow' : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              All ({historyData.length})
+            </button>
+            <button
+              onClick={() => setHistoryFilter('IN_PROGRESS')}
+              className={`px-3 py-1.5 rounded-lg font-bold transition cursor-pointer ${
+                historyFilter === 'IN_PROGRESS' ? 'bg-amber-500 text-black shadow' : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              In Progress ({inProgCount})
+            </button>
+            <button
+              onClick={() => setHistoryFilter('COMPLETED')}
+              className={`px-3 py-1.5 rounded-lg font-bold transition cursor-pointer ${
+                historyFilter === 'COMPLETED' ? 'bg-emerald-500 text-black shadow' : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              Completed ({compCount})
+            </button>
+            <button
+              onClick={() => setHistoryFilter('ARCHIVED')}
+              className={`px-3 py-1.5 rounded-lg font-bold transition cursor-pointer ${
+                historyFilter === 'ARCHIVED' ? 'bg-slate-300 text-black shadow' : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              Archived ({archCount})
+            </button>
+          </div>
+
+          <div className="text-xs text-slate-500">
+            Showing {filteredHistory.length} assignment{filteredHistory.length === 1 ? '' : 's'}
+          </div>
         </div>
+
+        {/* Assignments Cards Grid */}
+        {filteredHistory.length > 0 ? (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {filteredHistory.map((item) => {
+              const isCurrentActive = assignment?.id === item.id;
+              const percent = Math.round((item.completed_questions / Math.max(1, item.total_questions)) * 100);
+              const m = item.metrics || {};
+              const isLoadingThis = actionLoadingId === item.id;
+
+              return (
+                <div
+                  key={item.id}
+                  className={`p-5 rounded-2xl bg-[#141824] border transition flex flex-col justify-between shadow-xl space-y-4 ${
+                    isCurrentActive
+                      ? 'border-orange-500/70 ring-1 ring-orange-500/40 shadow-orange-950/20'
+                      : 'border-white/10 hover:border-white/20'
+                  }`}
+                >
+                  {/* Top Bar of Card */}
+                  <div>
+                    <div className="flex items-center justify-between gap-2 mb-2">
+                      <div className="flex items-center gap-2">
+                        <div className={`w-7 h-7 rounded-lg flex items-center justify-center ${
+                          item.batch_type === 'WEEKEND' ? 'bg-blue-500/15 text-blue-400' : 'bg-orange-500/15 text-orange-400'
+                        }`}>
+                          {item.batch_type === 'WEEKEND' ? <Shield className="w-3.5 h-3.5" /> : <Zap className="w-3.5 h-3.5" />}
+                        </div>
+                        <span className="text-[11px] font-mono text-slate-400">
+                          {item.assignment_date}
+                        </span>
+                      </div>
+
+                      {/* Status Badges */}
+                      <div>
+                        {item.status === 'COMPLETED' ? (
+                          <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 flex items-center gap-1">
+                            <CheckCircle2 className="w-3 h-3" />
+                            <span>COMPLETED</span>
+                          </span>
+                        ) : item.status === 'IN_PROGRESS' ? (
+                          <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/40 flex items-center gap-1">
+                            <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
+                            <span>IN PROGRESS</span>
+                          </span>
+                        ) : (
+                          <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-slate-500/20 text-slate-300 border border-slate-500/40">
+                            ARCHIVED
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    <h3 className="text-base font-black text-white tracking-tight">
+                      {item.title}
+                    </h3>
+                  </div>
+
+                  {/* Progress Bar */}
+                  <div className="space-y-1.5">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="text-slate-400 text-[11px]">Completion Progress</span>
+                      <span className="font-mono font-bold text-slate-200">
+                        {item.completed_questions}/{item.total_questions} Reflected ({percent}%)
+                      </span>
+                    </div>
+                    <div className="w-full h-2 rounded-full bg-white/5 overflow-hidden border border-white/5">
+                      <div
+                        className={`h-full rounded-full transition-all duration-500 ${
+                          item.status === 'COMPLETED'
+                            ? 'bg-gradient-to-r from-emerald-500 to-teal-400'
+                            : 'bg-gradient-to-r from-orange-500 to-amber-400'
+                        }`}
+                        style={{ width: `${percent}%` }}
+                      />
+                    </div>
+                  </div>
+
+                  {/* Struggle Breakdown Chips */}
+                  <div className="grid grid-cols-4 gap-1.5 text-center py-1">
+                    <div className="p-1.5 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-300">
+                      <div className="text-xs font-mono font-black">{m.breakthroughs || 0}</div>
+                      <div className="text-[9px] uppercase font-bold text-emerald-400/70">Breakth.</div>
+                    </div>
+                    <div className="p-1.5 rounded-lg bg-blue-500/10 border border-blue-500/20 text-blue-300">
+                      <div className="text-xs font-mono font-black">{m.derivations || 0}</div>
+                      <div className="text-[9px] uppercase font-bold text-blue-400/70">Deriv.</div>
+                    </div>
+                    <div className="p-1.5 rounded-lg bg-amber-500/10 border border-amber-500/20 text-amber-300">
+                      <div className="text-xs font-mono font-black">{m.hints || 0}</div>
+                      <div className="text-[9px] uppercase font-bold text-amber-400/70">Hints</div>
+                    </div>
+                    <div className="p-1.5 rounded-lg bg-rose-500/10 border border-rose-500/20 text-rose-300">
+                      <div className="text-xs font-mono font-black">{m.traps || 0}</div>
+                      <div className="text-[9px] uppercase font-bold text-rose-400/70">Traps</div>
+                    </div>
+                  </div>
+
+                  {/* Action Buttons Bar */}
+                  <div className="flex items-center gap-2 pt-2 border-t border-white/5">
+                    <button
+                      onClick={() => handleOpenAssignment(item.id)}
+                      disabled={isLoadingThis}
+                      className="flex-1 py-2 rounded-xl bg-orange-500 hover:bg-orange-400 text-black font-black text-xs transition cursor-pointer flex items-center justify-center gap-1.5 shadow-lg shadow-orange-950/20"
+                    >
+                      <Play className="w-3.5 h-3.5 fill-current" />
+                      <span>{item.status === 'COMPLETED' ? 'Review Solutions' : 'Open Problem Desk'}</span>
+                    </button>
+
+                    {item.status === 'IN_PROGRESS' && (
+                      <button
+                        onClick={() => handleLeaveBatch(item.id)}
+                        disabled={isLoadingThis}
+                        title="Leave batch (save and archive without deleting)"
+                        className="p-2 rounded-xl bg-white/5 hover:bg-white/10 text-amber-400 border border-white/10 text-xs font-bold transition cursor-pointer flex items-center justify-center"
+                      >
+                        <LogOut className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+
+                    <button
+                      onClick={() => handleResetAssignment(item.id, item.title)}
+                      disabled={isLoadingThis}
+                      title="Reset reflections to solve from question 1"
+                      className="p-2 rounded-xl bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white border border-white/10 text-xs font-bold transition cursor-pointer flex items-center justify-center"
+                    >
+                      <RotateCcw className="w-3.5 h-3.5" />
+                    </button>
+
+                    <button
+                      onClick={() => handleDeleteAssignment(item.id, item.title)}
+                      disabled={isLoadingThis}
+                      title="Delete assignment permanently"
+                      className="p-2 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/30 text-xs font-bold transition cursor-pointer flex items-center justify-center"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <div className="p-12 text-center rounded-3xl bg-[#141824] border border-white/5 space-y-3">
+            <BookMarked className="w-10 h-10 text-slate-500 mx-auto" />
+            <h3 className="text-base font-bold text-white">No assignments found</h3>
+            <p className="text-xs text-slate-400 max-w-sm mx-auto">
+              {historyFilter === 'ALL'
+                ? 'Launch your first Daily Elite Capsule or Weekend Titan Sheet above to populate your dashboard.'
+                : `No assignments currently in ${historyFilter.toLowerCase().replace('_', ' ')} status.`}
+            </p>
+          </div>
+        )}
       </div>
     );
   }
@@ -653,7 +1024,30 @@ export default function DailyAssignmentsView({ user, isActive, onNavigateSkills 
         </div>
 
         {/* Action Buttons */}
-        <div className="flex items-center gap-2 w-full md:w-auto justify-end">
+        <div className="flex items-center gap-2 w-full md:w-auto justify-end flex-wrap">
+          <button
+            onClick={() => {
+              sound.click();
+              loadHistory();
+              setViewMode('DASHBOARD');
+            }}
+            title="Management Dashboard"
+            className="px-3 py-2 rounded-xl bg-blue-500/15 hover:bg-blue-500/25 border border-blue-500/30 text-blue-300 text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-lg shadow-blue-950/30"
+          >
+            <LayoutDashboard className="w-4 h-4 text-blue-400" />
+            <span>Dashboard</span>
+          </button>
+          {assignment.status === 'IN_PROGRESS' && (
+            <button
+              onClick={() => handleLeaveBatch(assignment.id)}
+              disabled={actionLoadingId === assignment.id}
+              title="Leave / Archive Batch"
+              className="px-3 py-2 rounded-xl bg-[#1d2333] hover:bg-[#252c40] border border-white/10 text-amber-300 hover:text-white text-xs font-bold transition flex items-center gap-1.5 cursor-pointer"
+            >
+              <LogOut className="w-3.5 h-3.5 text-amber-400" />
+              <span>Leave Batch</span>
+            </button>
+          )}
           <button
             onClick={handleOpenInsights}
             title="Struggle Analytics"
@@ -661,14 +1055,6 @@ export default function DailyAssignmentsView({ user, isActive, onNavigateSkills 
           >
             <BarChart3 className="w-4 h-4 text-orange-400" />
             <span className="hidden sm:inline">Insights</span>
-          </button>
-          <button
-            onClick={handleOpenHistory}
-            title="Archives"
-            className="px-3 py-2 rounded-xl bg-[#1d2333] hover:bg-[#252c40] border border-white/10 text-slate-300 hover:text-white text-xs font-bold transition flex items-center gap-1.5 cursor-pointer"
-          >
-            <Calendar className="w-4 h-4 text-blue-400" />
-            <span className="hidden sm:inline">Archives</span>
           </button>
           <button
             onClick={() => {
@@ -1129,21 +1515,34 @@ export default function DailyAssignmentsView({ user, isActive, onNavigateSkills 
               </div>
             </div>
 
-            <div className="flex items-center gap-3 pt-2">
-              <button
-                onClick={() => setShowCompletionModal(false)}
-                className="flex-1 py-2.5 rounded-xl bg-white/10 hover:bg-white/15 text-white font-bold text-xs transition cursor-pointer"
-              >
-                Review Problems
-              </button>
+            <div className="flex flex-col gap-2 pt-2">
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={() => setShowCompletionModal(false)}
+                  className="flex-1 py-2.5 rounded-xl bg-white/10 hover:bg-white/15 text-white font-bold text-xs transition cursor-pointer"
+                >
+                  Review Sheet
+                </button>
+                <button
+                  onClick={() => {
+                    setShowCompletionModal(false);
+                    handleGenerate(batchType, true);
+                  }}
+                  className="flex-1 py-2.5 rounded-xl bg-orange-500 hover:bg-orange-400 text-black font-black text-xs transition cursor-pointer"
+                >
+                  Start Next Batch
+                </button>
+              </div>
               <button
                 onClick={() => {
                   setShowCompletionModal(false);
-                  handleGenerate(batchType, true);
+                  loadHistory();
+                  setViewMode('DASHBOARD');
                 }}
-                className="flex-1 py-2.5 rounded-xl bg-orange-500 hover:bg-orange-400 text-black font-black text-xs transition cursor-pointer"
+                className="w-full py-2.5 rounded-xl bg-blue-500/20 hover:bg-blue-500/30 border border-blue-500/30 text-blue-300 font-bold text-xs transition cursor-pointer flex items-center justify-center gap-2"
               >
-                Start Next Batch
+                <LayoutDashboard className="w-3.5 h-3.5" />
+                <span>Go to Assignments Dashboard</span>
               </button>
             </div>
           </div>
