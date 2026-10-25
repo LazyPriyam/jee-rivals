@@ -362,6 +362,9 @@ def select_next_adaptive_question(
     cached_bank = get_all_questions_cached(cursor)
 
     def _matches_adaptive_filters(q, subj, ch_target, ch_norm, eff_allowed, t_exam):
+        # Quarantine: Subjective questions are strictly reserved for Daily Assignments
+        if str(q.get("question_type") or "").strip().upper() == "SUBJECTIVE":
+            return False
         if subj and subj != "Full Syllabus" and q.get("subject") != subj:
             return False
         if ch_target:

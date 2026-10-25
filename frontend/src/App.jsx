@@ -13,6 +13,7 @@ import LeaderboardsView from './components/LeaderboardsView';
 import ProfileView from './components/ProfileView';
 import TournamentsView from './components/TournamentsView';
 import AdaptivePracticeView from './components/AdaptivePracticeView';
+import DailyAssignmentsView from './components/DailyAssignmentsView';
 import ChapterMasteryView from './components/ChapterMasteryView';
 import SphereGridSkillTree from './components/SphereGridSkillTree';
 import TestHistoryView from './components/TestHistoryView';
@@ -575,6 +576,17 @@ export default function App() {
               onNavigateTab={switchTab}
               isActive={activeTab === 'adaptive'}
               onUpdateUser={setUser}
+            />
+          </div>
+        )}
+
+        {/* Tab: Daily Assignments (LazyPriyam Exclusive Stealth Rollout) */}
+        {user?.username?.trim().toLowerCase() === 'lazypriyam' && visitedTabs.assignments && (
+          <div className={activeTab === 'assignments' ? 'block' : 'hidden'}>
+            <DailyAssignmentsView
+              user={user}
+              isActive={activeTab === 'assignments'}
+              onNavigateSkills={() => switchTab('skills')}
             />
           </div>
         )}

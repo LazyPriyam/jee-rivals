@@ -66,6 +66,9 @@ def _get_verified_pool(all_qs: List[dict]) -> List[dict]:
     """Filters and heals candidate pool using fast in-memory verification."""
     verified = []
     for q in all_qs:
+        # Quarantine: Subjective questions are strictly reserved for Daily Assignments
+        if str(q.get("question_type") or "").strip().upper() == "SUBJECTIVE":
+            continue
         is_ok, healed, _ = audit_and_heal_question(q)
         if is_ok and healed:
             verified.append(healed)
@@ -642,6 +645,8 @@ def select_mock_and_room_questions(
     norm_chapters_set = {c.lower() for c in norm_chapters}
 
     for q in all_cached:
+        if str(q.get("question_type") or "").strip().upper() == "SUBJECTIVE":
+            continue
         q_subj = _normalize_subject(q.get("subject"))
         if q_subj not in by_subject_raw:
             continue

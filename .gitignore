@@ -31,3 +31,5 @@ backend/storage/jee_rivals.db
 backend/storage/backups/*.db
 backend/storage/*backup*.db
 backend/storage/rivals.db
+backend/storage/*.bak*
+backend/rivals.db

@@ -30,6 +30,7 @@ from backend.app.routes.updates import router as updates_router
 from backend.app.routes.mastery import router as mastery_router
 from backend.app.routes.streaks import router as streaks_router
 from backend.app.routes.safety import router as safety_router
+from backend.app.routes.assignments import router as assignments_router
 
 # Initialize Database
 init_db()
@@ -113,6 +114,7 @@ app.include_router(updates_router)
 app.include_router(mastery_router)
 app.include_router(streaks_router)
 app.include_router(safety_router)
+app.include_router(assignments_router)
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):

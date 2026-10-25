@@ -22,7 +22,8 @@ import {
   Clock,
   ShieldAlert,
   Settings,
-  Crosshair
+  Crosshair,
+  Sparkles
 } from 'lucide-react';
 import { sound } from '../utils/sound';
 import { api } from '../utils/api';
@@ -87,9 +88,12 @@ export default function Navbar({
 
   const divStyle = (user && DIVISION_COLORS[getDivisionBaseTier(user.current_division)]) || DIVISION_COLORS.BRONZE;
 
+  const isLazyPriyam = user?.username?.trim().toLowerCase() === 'lazypriyam';
+
   const navItems = [
     { id: 'arena', label: 'Arena & Duels', icon: Swords },
     { id: 'adaptive', label: 'Adaptive AI', icon: Brain },
+    ...(isLazyPriyam ? [{ id: 'assignments', label: 'Daily Assignments', icon: Sparkles }] : []),
     { id: 'mastery', label: 'Chapter Mastery', icon: Crosshair },
     { id: 'skills', label: 'Skill Tree', icon: Compass },
     { id: 'mocks', label: 'NTA Mocks', icon: BookOpen },

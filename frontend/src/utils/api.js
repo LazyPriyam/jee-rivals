@@ -705,5 +705,25 @@ export const api = {
     checkIn: () => request('/api/streaks/check-in', { method: 'POST' }),
     buyFreeze: () => request('/api/streaks/buy-freeze', { method: 'POST' }),
   },
+  assignments: {
+    getActive: () => request('/api/assignments/active'),
+    generate: (batchType = 'DAILY', forceNew = false) =>
+      request('/api/assignments/generate', {
+        method: 'POST',
+        body: JSON.stringify({ batch_type: batchType, force_new: forceNew }),
+      }),
+    getHistory: (limit = 20) => request(`/api/assignments/history?limit=${limit}`),
+    getInsights: () => request('/api/assignments/insights'),
+    getById: (id) => request(`/api/assignments/${id}`),
+    submitReflection: (assignmentId, questionId, reflectionData) =>
+      request(`/api/assignments/${assignmentId}/reflect/${questionId}`, {
+        method: 'POST',
+        body: JSON.stringify(reflectionData),
+      }),
+    complete: (assignmentId) =>
+      request(`/api/assignments/${assignmentId}/complete`, {
+        method: 'POST',
+      }),
+  },
 };
 

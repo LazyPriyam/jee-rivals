@@ -603,6 +603,69 @@ def migration_010_room_question_report_voting(conn: sqlite3.Connection):
     c.execute("CREATE INDEX IF NOT EXISTS idx_question_reports_room ON question_reports(room_code);")
 
 
+def migration_011_daily_assignments(conn: sqlite3.Connection):
+    """
+    Safely adds daily assignments schema:
+    1. Adds source_page, source_qnum, and source_section to questions table for book citations.
+    2. Creates daily_assignments table for tracking daily capsules and weekend titan sheets.
+    3. Creates assignment_reflections table for cognitive struggle tags and scratchpad notes.
+    """
+    c = conn.cursor()
+    # 1. Add citation columns to questions
+    c.execute("PRAGMA table_info(questions);")
+    existing_cols = {row[1] for row in c.fetchall()}
+    if "source_page" not in existing_cols:
+        c.execute("ALTER TABLE questions ADD COLUMN source_page INTEGER DEFAULT NULL;")
+    if "source_qnum" not in existing_cols:
+        c.execute("ALTER TABLE questions ADD COLUMN source_qnum TEXT DEFAULT NULL;")
+    if "source_section" not in existing_cols:
+        c.execute("ALTER TABLE questions ADD COLUMN source_section TEXT DEFAULT NULL;")
+
+    # 2. Daily Assignments Table
+    c.execute("""
+    CREATE TABLE IF NOT EXISTS daily_assignments (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        assignment_date TEXT NOT NULL,
+        batch_type TEXT NOT NULL DEFAULT 'DAILY',
+        title TEXT NOT NULL,
+        status TEXT DEFAULT 'IN_PROGRESS',
+        total_questions INTEGER DEFAULT 0,
+        completed_questions INTEGER DEFAULT 0,
+        questions_data TEXT DEFAULT '[]',
+        created_at TEXT NOT NULL,
+        completed_at TEXT DEFAULT NULL
+    );
+    """)
+    c.execute("CREATE INDEX IF NOT EXISTS idx_daily_assignments_user_date ON daily_assignments(user_id, assignment_date);")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_daily_assignments_user_status ON daily_assignments(user_id, status);")
+
+    # 3. Assignment Reflections Table
+    c.execute("""
+    CREATE TABLE IF NOT EXISTS assignment_reflections (
+        id TEXT PRIMARY KEY,
+        assignment_id TEXT NOT NULL,
+        user_id TEXT NOT NULL,
+        question_id TEXT NOT NULL,
+        subject TEXT NOT NULL,
+        chapter TEXT NOT NULL,
+        question_type TEXT NOT NULL,
+        reflection_tag TEXT DEFAULT NULL,
+        self_rating TEXT DEFAULT NULL,
+        user_answer TEXT DEFAULT NULL,
+        scratchpad_notes TEXT DEFAULT '',
+        time_spent_seconds INTEGER DEFAULT 0,
+        is_correct INTEGER DEFAULT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT DEFAULT NULL,
+        UNIQUE(assignment_id, question_id)
+    );
+    """)
+    c.execute("CREATE INDEX IF NOT EXISTS idx_assignment_reflections_asgn ON assignment_reflections(assignment_id);")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_assignment_reflections_user ON assignment_reflections(user_id, created_at);")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_assignment_reflections_question ON assignment_reflections(question_id);")
+
+
 # Master migration registry (ordered sequentially)
 MIGRATIONS: List[Dict[str, Any]] = [
     {
@@ -654,6 +717,11 @@ MIGRATIONS: List[Dict[str, Any]] = [
         "version": 10,
         "name": "room_question_report_voting",
         "func": migration_010_room_question_report_voting,
+    },
+    {
+        "version": 11,
+        "name": "daily_assignments",
+        "func": migration_011_daily_assignments,
     },
 ]
 
