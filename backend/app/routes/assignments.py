@@ -46,6 +46,7 @@ def verify_lazypriyam(user: dict = Depends(get_current_user)) -> dict:
 class GenerateAssignmentRequest(BaseModel):
     batch_type: Optional[str] = "DAILY"  # 'DAILY' or 'WEEKEND'
     force_new: Optional[bool] = False
+    learnt_chapters: Optional[list] = None
 
 
 class ReflectionSubmissionRequest(BaseModel):
@@ -81,7 +82,8 @@ def generate_assignment_route(
             conn=conn,
             user=user,
             batch_type=req.batch_type or "DAILY",
-            force_new=bool(req.force_new)
+            force_new=bool(req.force_new),
+            learnt_chapters_override=req.learnt_chapters
         )
         return result
     finally:

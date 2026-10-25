@@ -102,25 +102,72 @@ export default function DailyAssignmentsView({ user, isActive, onNavigateSkills 
   const saveTimerRef = useRef(null);
   const questionTimerRef = useRef(null);
 
-  // Parse learnt chapters count
-  const learntCount = React.useMemo(() => {
-    if (!user || !user.learnt_chapters) return 0;
+  // Parse learnt chapters list and count (synced with localStorage & jee_user_updated)
+  const [liveLearntChapters, setLiveLearntChapters] = useState(() => {
     try {
-      const parsed = typeof user.learnt_chapters === 'string'
-        ? JSON.parse(user.learnt_chapters)
-        : user.learnt_chapters;
-      return Array.isArray(parsed) ? parsed.length : 0;
-    } catch (_) {
-      return 0;
-    }
+      if (user?.learnt_chapters) {
+        const parsed = typeof user.learnt_chapters === 'string'
+          ? JSON.parse(user.learnt_chapters)
+          : user.learnt_chapters;
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+      if (user?.id) {
+        const raw = localStorage.getItem(`jee_user_learnt_chapters_${user.id}`);
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed)) return parsed;
+        }
+      }
+    } catch (_) {}
+    return [];
+  });
+
+  useEffect(() => {
+    const handleUserUpdate = (e) => {
+      const updatedUser = e?.detail;
+      if (updatedUser?.learnt_chapters) {
+        const parsed = typeof updatedUser.learnt_chapters === 'string'
+          ? JSON.parse(updatedUser.learnt_chapters)
+          : updatedUser.learnt_chapters;
+        if (Array.isArray(parsed)) setLiveLearntChapters(parsed);
+      }
+    };
+    window.addEventListener('jee_user_updated', handleUserUpdate);
+    return () => window.removeEventListener('jee_user_updated', handleUserUpdate);
+  }, []);
+
+  useEffect(() => {
+    try {
+      if (user?.learnt_chapters) {
+        const parsed = typeof user.learnt_chapters === 'string'
+          ? JSON.parse(user.learnt_chapters)
+          : user.learnt_chapters;
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          setLiveLearntChapters(parsed);
+          return;
+        }
+      }
+      if (user?.id) {
+        const raw = localStorage.getItem(`jee_user_learnt_chapters_${user.id}`);
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed)) {
+            setLiveLearntChapters(parsed);
+            return;
+          }
+        }
+      }
+    } catch (_) {}
   }, [user]);
+
+  const learntCount = liveLearntChapters.length;
 
   // Load Active Assignment on mount
   const loadActiveAssignment = useCallback(async () => {
     try {
       setLoading(true);
       const res = await api.assignments.getActive();
-      if (res && res.assignment) {
+      if (res && res.assignment && Array.isArray(res.assignment.questions) && res.assignment.questions.length > 0) {
         setAssignment(res.assignment);
         setBatchType(res.assignment.batch_type || 'DAILY');
       } else {
@@ -144,14 +191,16 @@ export default function DailyAssignmentsView({ user, isActive, onNavigateSkills 
     try {
       setLoading(true);
       sound.click();
-      const res = await api.assignments.generate(targetBatchType, forceNew);
-      if (res && res.assignment) {
+      const res = await api.assignments.generate(targetBatchType, forceNew, liveLearntChapters);
+      if (res && res.assignment && Array.isArray(res.assignment.questions) && res.assignment.questions.length > 0) {
         setAssignment(res.assignment);
         setBatchType(res.assignment.batch_type || targetBatchType);
         setCurrentIndex(0);
         sound.start();
-      } else if (res && res.code === 'NO_LEARNT_CHAPTERS') {
+      } else if (res && (res.code === 'NO_LEARNT_CHAPTERS' || res.code === 'NO_QUESTIONS_FOUND')) {
         alert(res.message);
+      } else if (res && res.error) {
+        alert(res.error);
       }
     } catch (err) {
       console.error('Failed to generate assignment:', err);
@@ -479,8 +528,8 @@ export default function DailyAssignmentsView({ user, isActive, onNavigateSkills 
     );
   }
 
-  // Empty state: No active assignment yet
-  if (!assignment) {
+  // Empty state: No active assignment yet or 0 questions
+  if (!assignment || !assignment.questions || assignment.questions.length === 0) {
     return (
       <div className="max-w-4xl mx-auto px-4 py-12 text-center page-transition">
         <div className="w-20 h-20 mx-auto rounded-3xl bg-gradient-to-br from-orange-500/20 to-amber-500/10 border border-orange-500/30 flex items-center justify-center text-orange-400 mb-6 shadow-xl shadow-orange-950/40">
@@ -988,8 +1037,14 @@ export default function DailyAssignmentsView({ user, isActive, onNavigateSkills 
 
       {/* COMPLETION MODAL */}
       {showCompletionModal && completionStats && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="max-w-lg w-full bg-[#141824] border border-orange-500/40 rounded-3xl p-6 shadow-2xl space-y-5 animate-in fade-in zoom-in-95">
+        <div
+          onClick={() => setShowCompletionModal(false)}
+          className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-start sm:items-center justify-center p-4 pt-12 sm:pt-6 overflow-y-auto cursor-pointer"
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="max-w-lg w-full bg-[#141824] border border-orange-500/40 rounded-3xl p-6 shadow-2xl space-y-5 animate-in fade-in zoom-in-95 cursor-default my-auto"
+          >
             <div className="text-center space-y-2">
               <div className="w-16 h-16 mx-auto rounded-2xl bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center text-emerald-400">
                 <Trophy className="w-8 h-8" />
@@ -1064,8 +1119,14 @@ export default function DailyAssignmentsView({ user, isActive, onNavigateSkills 
 
       {/* STRUGGLE INSIGHTS DRAWER */}
       {showInsights && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="max-w-2xl w-full bg-[#141824] border border-white/10 rounded-3xl p-6 shadow-2xl space-y-6 max-h-[90vh] overflow-y-auto">
+        <div
+          onClick={() => setShowInsights(false)}
+          className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-start sm:items-center justify-center p-4 pt-12 sm:pt-6 overflow-y-auto cursor-pointer"
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="max-w-2xl w-full bg-[#141824] border border-white/10 rounded-3xl p-6 shadow-2xl space-y-6 max-h-[85vh] overflow-y-auto cursor-default my-auto"
+          >
             <div className="flex items-center justify-between border-b border-white/10 pb-4">
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 rounded-xl bg-orange-500/15 text-orange-400 flex items-center justify-center">
@@ -1161,8 +1222,14 @@ export default function DailyAssignmentsView({ user, isActive, onNavigateSkills 
 
       {/* ARCHIVE HISTORY DRAWER */}
       {showHistory && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="max-w-xl w-full bg-[#141824] border border-white/10 rounded-3xl p-6 shadow-2xl space-y-4 max-h-[85vh] overflow-y-auto">
+        <div
+          onClick={() => setShowHistory(false)}
+          className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-start sm:items-center justify-center p-4 pt-12 sm:pt-6 overflow-y-auto cursor-pointer"
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="max-w-xl w-full bg-[#141824] border border-white/10 rounded-3xl p-6 shadow-2xl space-y-4 max-h-[85vh] overflow-y-auto cursor-default my-auto"
+          >
             <div className="flex items-center justify-between border-b border-white/10 pb-4">
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 rounded-xl bg-blue-500/15 text-blue-400 flex items-center justify-center">

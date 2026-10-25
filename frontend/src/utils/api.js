@@ -707,10 +707,14 @@ export const api = {
   },
   assignments: {
     getActive: () => request('/api/assignments/active'),
-    generate: (batchType = 'DAILY', forceNew = false) =>
+    generate: (batchType = 'DAILY', forceNew = false, learntChapters = null) =>
       request('/api/assignments/generate', {
         method: 'POST',
-        body: JSON.stringify({ batch_type: batchType, force_new: forceNew }),
+        body: JSON.stringify({
+          batch_type: batchType,
+          force_new: forceNew,
+          learnt_chapters: learntChapters
+        }),
       }),
     getHistory: (limit = 20) => request(`/api/assignments/history?limit=${limit}`),
     getInsights: () => request('/api/assignments/insights'),

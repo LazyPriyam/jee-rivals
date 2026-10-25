@@ -32,27 +32,78 @@ VALID_SELF_RATINGS = {
     "SOLUTION_NEEDED",    # Needed full book solution / couldn't crack
 }
 
+# Bidirectional chapter alias expansion to guarantee DB queries match questions table
+CHAPTER_DB_SYNONYMS: Dict[str, List[str]] = {
+    "kinematics": ["Kinematics", "Kinematics 1D & 2D", "Projectile Motion", "Rectilinear Motion", "Relative Motion"],
+    "kinematics 1d & 2d": ["Kinematics", "Kinematics 1D & 2D", "Projectile Motion", "Rectilinear Motion", "Relative Motion"],
+    "mathematical tools": ["Mathematical Tools", "Fundamental of Mathematics"],
+    "fundamental of mathematics": ["Mathematical Tools", "Fundamental of Mathematics"],
+    "optical instruments": ["Optical Instruments", "Geometrical Optics"],
+    "geometrical optics": ["Geometrical Optics", "Optical Instruments"],
+    "some basic concepts of chemistry (mole concept)": ["Some Basic Concepts of Chemistry (Mole Concept)", "Some Basic Concepts of Chemistry", "Mole Concept"],
+    "some basic concepts of chemistry": ["Some Basic Concepts of Chemistry (Mole Concept)", "Some Basic Concepts of Chemistry", "Mole Concept"],
+    "chemical thermodynamics & thermochemistry": ["Chemical Thermodynamics & Thermochemistry", "Chemical Thermodynamics", "Thermodynamics"],
+    "chemical bonding and molecular structure": ["Chemical Bonding and Molecular Structure", "Chemical Bonding"],
+    "general organic chemistry & iupac nomenclature": ["General Organic Chemistry & IUPAC Nomenclature", "General Organic Chemistry", "GOC"],
+}
 
-def _get_user_learnt_chapters(conn: sqlite3.Connection, user_id: str) -> List[str]:
-    """Retrieves and normalizes the user's active learnt chapters from users table."""
-    c = conn.cursor()
-    c.execute("SELECT learnt_chapters FROM users WHERE id = ?", (user_id,))
-    row = c.fetchone()
-    if not row or not row[0]:
+
+def expand_chapter_candidates(ch: str) -> List[str]:
+    """Expands a chapter name to all possible strings stored in questions.chapter."""
+    candidates = set()
+    if not ch:
         return []
-    try:
-        raw_list = json.loads(row[0]) if isinstance(row[0], str) else row[0]
-        if not isinstance(raw_list, list):
-            return []
-        norm = []
-        for ch in raw_list:
-            if ch and str(ch).strip():
-                nc = normalize_chapter_name(str(ch).strip())
-                if nc and nc not in norm:
-                    norm.append(nc)
-        return norm
-    except Exception:
+    clean = ch.strip()
+    candidates.add(clean)
+    norm = normalize_chapter_name(clean)
+    if norm:
+        candidates.add(norm)
+    clean_lower = clean.lower()
+    norm_lower = norm.lower() if norm else clean_lower
+    for k, synonyms in CHAPTER_DB_SYNONYMS.items():
+        if k == clean_lower or k == norm_lower or k in clean_lower or clean_lower in k:
+            candidates.update(synonyms)
+    return list(candidates)
+
+
+def _get_user_learnt_chapters(
+    conn: sqlite3.Connection,
+    user_id: str,
+    override_list: Optional[List[str]] = None
+) -> List[str]:
+    """Retrieves and normalizes the user's active learnt chapters from override or users table."""
+    raw_list = override_list
+    if not raw_list:
+        c = conn.cursor()
+        c.execute("SELECT learnt_chapters FROM users WHERE id = ?", (user_id,))
+        row = c.fetchone()
+        if row and row[0]:
+            try:
+                raw_list = json.loads(row[0]) if isinstance(row[0], str) else row[0]
+            except Exception:
+                raw_list = []
+
+    # If client passed an override list, update users table as well to keep in sync
+    if override_list and len(override_list) > 0:
+        try:
+            c = conn.cursor()
+            c.execute("UPDATE users SET learnt_chapters = ? WHERE id = ?", (json.dumps(override_list), user_id))
+            conn.commit()
+        except Exception:
+            pass
+
+    if not raw_list or not isinstance(raw_list, list):
         return []
+
+    norm = []
+    for ch in raw_list:
+        if ch and str(ch).strip():
+            nc = normalize_chapter_name(str(ch).strip())
+            if nc and nc not in norm:
+                norm.append(nc)
+            elif str(ch).strip() not in norm:
+                norm.append(str(ch).strip())
+    return norm
 
 
 def _mask_question_for_session(q: dict, reflection: Optional[dict] = None) -> dict:
@@ -103,7 +154,8 @@ def generate_daily_assignment(
     conn: sqlite3.Connection,
     user: dict,
     batch_type: str = "DAILY",
-    force_new: bool = False
+    force_new: bool = False,
+    learnt_chapters_override: Optional[List[str]] = None
 ) -> Dict[str, Any]:
     """
     Generates a new Daily Elite Capsule or Weekend Titan Sheet,
@@ -128,10 +180,16 @@ def generate_daily_assignment(
         """, (user_id, today_str, batch_type))
         existing_row = c.fetchone()
         if existing_row:
-            return get_assignment_by_id(conn, user_id, existing_row[0])
+            # Check if this assignment actually has questions; if corrupted, purge it
+            active_data = get_assignment_by_id(conn, user_id, existing_row[0])
+            if active_data and active_data.get("assignment") and len(active_data["assignment"].get("questions", [])) > 0:
+                return active_data
+            else:
+                c.execute("DELETE FROM daily_assignments WHERE id = ?", (existing_row[0],))
+                conn.commit()
 
     # 2. Retrieve user's learnt chapters
-    learnt_chapters = _get_user_learnt_chapters(conn, user_id)
+    learnt_chapters = _get_user_learnt_chapters(conn, user_id, override_list=learnt_chapters_override)
     if not learnt_chapters:
         return {
             "success": False,
@@ -176,6 +234,12 @@ def generate_daily_assignment(
 
     selected_questions: List[dict] = []
     selected_ids = set()
+    col_names = [
+        "id", "subject", "unit", "chapter", "question_type", "text", "options",
+        "has_diagram", "diagram_urls", "correct_answer", "solution_text",
+        "difficulty_tier", "elo_rating", "source_book", "source_page",
+        "source_qnum", "source_section"
+    ]
 
     for subj in active_subjects:
         ch_list = subj_chapters.get(subj, [])
@@ -185,7 +249,15 @@ def generate_daily_assignment(
         if subj_quota <= 0:
             continue
 
-        placeholders = ",".join("?" for _ in ch_list)
+        # Expand chapter aliases to cover all DB variants (e.g. Kinematics -> Kinematics 1D & 2D)
+        expanded_candidates = set()
+        for ch in ch_list:
+            expanded_candidates.update(expand_chapter_candidates(ch))
+        cand_list = list(expanded_candidates)
+        if not cand_list:
+            cand_list = ch_list
+
+        placeholders = ",".join("?" for _ in cand_list)
 
         # A. Fetch candidate Subjective questions for this subject & learnt chapters
         c.execute(f"""
@@ -195,16 +267,8 @@ def generate_daily_assignment(
                    source_qnum, source_section
             FROM questions
             WHERE subject = ? AND chapter IN ({placeholders}) AND question_type = 'SUBJECTIVE'
-        """, [subj] + ch_list)
+        """, [subj] + cand_list)
         subjective_rows = c.fetchall()
-
-        # Convert to dicts
-        col_names = [
-            "id", "subject", "unit", "chapter", "question_type", "text", "options",
-            "has_diagram", "diagram_urls", "correct_answer", "solution_text",
-            "difficulty_tier", "elo_rating", "source_book", "source_page",
-            "source_qnum", "source_section"
-        ]
         subj_candidates = [dict(zip(col_names, row)) for row in subjective_rows]
 
         # Prioritize unassigned subjective questions
@@ -235,7 +299,7 @@ def generate_daily_assignment(
                   AND validation_status = 'VALIDATED'
                 ORDER BY elo_rating DESC
                 LIMIT 150
-            """, [subj] + ch_list)
+            """, [subj] + cand_list)
             obj_rows = c.fetchall()
             obj_candidates = [dict(zip(col_names, row)) for row in obj_rows]
 
@@ -247,6 +311,46 @@ def generate_daily_assignment(
             for q in unseen_obj[:needed_obj]:
                 selected_questions.append(q)
                 selected_ids.add(q["id"])
+
+    # Fallback fill: if total questions picked is less than target_count,
+    # sample remaining from ANY expanded learnt chapter across subjects
+    if len(selected_questions) < target_count:
+        all_expanded = set()
+        for ch in learnt_chapters:
+            all_expanded.update(expand_chapter_candidates(ch))
+        all_cand = list(all_expanded)
+        if all_cand:
+            needed_more = target_count - len(selected_questions)
+            all_placeholders = ",".join("?" for _ in all_cand)
+            c.execute(f"""
+                SELECT id, subject, unit, chapter, question_type, text, options,
+                       has_diagram, diagram_urls, correct_answer, solution_text,
+                       difficulty_tier, elo_rating, source_book, source_page,
+                       source_qnum, source_section
+                FROM questions
+                WHERE chapter IN ({all_placeholders})
+                  AND validation_status = 'VALIDATED'
+                ORDER BY elo_rating DESC
+                LIMIT 200
+            """, all_cand)
+            fill_rows = c.fetchall()
+            fill_candidates = [dict(zip(col_names, row)) for row in fill_rows]
+            unseen_fill = [q for q in fill_candidates if q["id"] not in recent_assigned_ids and q["id"] not in selected_ids]
+            if len(unseen_fill) < needed_more:
+                unseen_fill = [q for q in fill_candidates if q["id"] not in selected_ids]
+            random.shuffle(unseen_fill)
+            for q in unseen_fill[:needed_more]:
+                selected_questions.append(q)
+                selected_ids.add(q["id"])
+
+    # Hard safeguard: NEVER insert a 0-question assignment
+    if not selected_questions:
+        return {
+            "success": False,
+            "code": "NO_QUESTIONS_FOUND",
+            "message": f"Could not find practice questions for your current learnt chapters ({', '.join(learnt_chapters[:3])}). Please mark additional chapters in the Skill Tree.",
+            "assignment": None
+        }
 
     # Shuffle the sheet slightly so questions are interleaved across subjects
     random.shuffle(selected_questions)
@@ -347,8 +451,19 @@ def get_assignment_by_id(conn: sqlite3.Connection, user_id: str, assignment_id: 
 
 def get_active_or_latest_assignment(conn: sqlite3.Connection, user_id: str) -> Optional[Dict[str, Any]]:
     """Returns today's active in-progress assignment or the most recent one for user."""
-    today_str = datetime.date.today().isoformat()
     c = conn.cursor()
+
+    # Self-heal: purge any corrupted 0-question assignments
+    try:
+        c.execute("""
+            DELETE FROM daily_assignments
+            WHERE user_id = ? AND (total_questions <= 0 OR questions_data IS NULL OR questions_data = '[]')
+        """, (user_id,))
+        conn.commit()
+    except Exception:
+        pass
+
+    today_str = datetime.date.today().isoformat()
 
     # Look for active assignment today
     c.execute("""
@@ -358,7 +473,13 @@ def get_active_or_latest_assignment(conn: sqlite3.Connection, user_id: str) -> O
     """, (user_id, today_str))
     row = c.fetchone()
     if row:
-        return get_assignment_by_id(conn, user_id, row[0])
+        data = get_assignment_by_id(conn, user_id, row[0])
+        if data and data.get("assignment") and len(data["assignment"].get("questions", [])) > 0:
+            return data
+        else:
+            # Corrupted, delete it
+            c.execute("DELETE FROM daily_assignments WHERE id = ?", (row[0],))
+            conn.commit()
 
     # Fallback to latest assignment ever
     c.execute("""
@@ -368,7 +489,12 @@ def get_active_or_latest_assignment(conn: sqlite3.Connection, user_id: str) -> O
     """, (user_id,))
     row = c.fetchone()
     if row:
-        return get_assignment_by_id(conn, user_id, row[0])
+        data = get_assignment_by_id(conn, user_id, row[0])
+        if data and data.get("assignment") and len(data["assignment"].get("questions", [])) > 0:
+            return data
+        else:
+            c.execute("DELETE FROM daily_assignments WHERE id = ?", (row[0],))
+            conn.commit()
 
     return None
 
