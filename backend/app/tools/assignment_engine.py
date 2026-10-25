@@ -568,10 +568,27 @@ def submit_question_reflection(
         elif self_rating == "SOLUTION_NEEDED":
             is_correct = 0
     else:
-        # Objective check
+        # Objective check (Single Choice, Multi Choice, Numerical)
         corr = str(target_q.get("correct_answer") or "").strip().upper()
         if user_answer and corr:
-            is_correct = 1 if str(user_answer).strip().upper() == corr else 0
+            u_clean = str(user_answer).strip().upper()
+            if u_clean == corr:
+                is_correct = 1
+            else:
+                # Check multi-choice set equivalence e.g. "A, B" vs "B, A"
+                u_set = {x.strip() for x in u_clean.replace(";", ",").split(",") if x.strip()}
+                c_set = {x.strip() for x in corr.replace(";", ",").split(",") if x.strip()}
+                if len(u_set) > 0 and u_set == c_set:
+                    is_correct = 1
+                else:
+                    # Check numerical float tolerance
+                    try:
+                        u_val = float(u_clean)
+                        c_val = float(corr)
+                        tol = float(target_q.get("numerical_tolerance") or 0.05)
+                        is_correct = 1 if abs(u_val - c_val) <= max(tol, 0.05) else 0
+                    except (ValueError, TypeError):
+                        is_correct = 0
 
     now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
     reflection_id = f"refl_{uuid.uuid4().hex[:12]}"

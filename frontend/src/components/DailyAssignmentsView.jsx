@@ -798,35 +798,68 @@ export default function DailyAssignmentsView({ user, isActive, onNavigateSkills 
                       opts = [];
                     }
                     if (Array.isArray(opts) && opts.length > 0) {
+                      const isMulti = ['MULTIPLE_CHOICE', 'MULTI_CHOICE'].includes(currentQ.question_type);
+                      const selectedKeys = selectedAnswer
+                        ? selectedAnswer.split(',').map((s) => s.trim().toUpperCase())
+                        : [];
+
                       return (
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                          {opts.map((opt, i) => {
-                            const optKey = String.fromCharCode(65 + i);
-                            const isSelected = selectedAnswer === optKey;
-                            return (
-                              <button
-                                key={i}
-                                onClick={() => {
-                                  sound.click();
+                        <div className="space-y-2">
+                          {isMulti && (
+                            <div className="text-[11px] text-purple-300 font-bold flex items-center justify-between px-2">
+                              <span>Multiple Choice: Select all correct options</span>
+                              <span className="font-mono text-amber-300">Selected: {selectedAnswer || 'None'}</span>
+                            </div>
+                          )}
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                            {opts.map((opt, i) => {
+                              const optKey = (opt && typeof opt === 'object' && opt.key)
+                                ? String(opt.key).trim().toUpperCase()
+                                : String.fromCharCode(65 + i);
+
+                              const optText = typeof opt === 'string'
+                                ? opt
+                                : (opt?.text ?? opt?.value ?? opt?.label ?? opt?.formula ?? '');
+
+                              const isSelected = isMulti
+                                ? selectedKeys.includes(optKey)
+                                : selectedAnswer?.trim().toUpperCase() === optKey;
+
+                              const handleToggle = () => {
+                                sound.click();
+                                if (isMulti) {
+                                  let next = new Set(selectedKeys);
+                                  if (next.has(optKey)) next.delete(optKey);
+                                  else next.add(optKey);
+                                  const joined = Array.from(next).sort().join(', ');
+                                  setSelectedAnswer(joined);
+                                } else {
                                   setSelectedAnswer(optKey);
-                                }}
-                                className={`p-3 rounded-xl border text-left text-xs font-medium transition cursor-pointer flex items-center gap-2.5 ${
-                                  isSelected
-                                    ? 'bg-orange-500/20 border-orange-500 text-white font-bold'
-                                    : 'bg-[#181d2a] border-white/10 text-slate-300 hover:border-white/20'
-                                }`}
-                              >
-                                <span className={`w-6 h-6 rounded-lg flex items-center justify-center font-black text-xs shrink-0 ${
-                                  isSelected ? 'bg-orange-500 text-black' : 'bg-white/5 text-slate-400'
-                                }`}>
-                                  {optKey}
-                                </span>
-                                <div className="overflow-x-auto flex-1">
-                                  <MathRenderer text={typeof opt === 'string' ? opt : JSON.stringify(opt)} />
-                                </div>
-                              </button>
-                            );
-                          })}
+                                }
+                              };
+
+                              return (
+                                <button
+                                  key={optKey || i}
+                                  onClick={handleToggle}
+                                  className={`p-3 rounded-xl border text-left text-xs font-medium transition cursor-pointer flex items-center gap-2.5 ${
+                                    isSelected
+                                      ? 'bg-orange-500/20 border-orange-500 text-white font-bold'
+                                      : 'bg-[#181d2a] border-white/10 text-slate-300 hover:border-white/20'
+                                  }`}
+                                >
+                                  <span className={`w-6 h-6 rounded-lg flex items-center justify-center font-black text-xs shrink-0 ${
+                                    isSelected ? 'bg-orange-500 text-black' : 'bg-white/5 text-slate-400'
+                                  }`}>
+                                    {optKey}
+                                  </span>
+                                  <div className="overflow-x-auto flex-1">
+                                    <MathRenderer text={optText} />
+                                  </div>
+                                </button>
+                              );
+                            })}
+                          </div>
                         </div>
                       );
                     }
