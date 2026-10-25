@@ -566,8 +566,8 @@ export const api = {
       request(`/api/friends/notifications/${id}/read`, {
         method: 'POST',
       }),
-    markAllNotificationsRead: () =>
-      request('/api/friends/notifications/read-all', {
+    markAllNotificationsRead: (scope = 'alerts') =>
+      request(`/api/friends/notifications/read-all?scope=${encodeURIComponent(scope)}`, {
         method: 'POST',
       }),
     getConversations: () => request('/api/friends/conversations'),

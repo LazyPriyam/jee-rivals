@@ -19,7 +19,9 @@ import {
   Layers,
   ArrowRight,
   MessageSquare,
-  MessageCircle
+  MessageCircle,
+  ChevronDown,
+  ChevronUp
 } from 'lucide-react';
 
 const DIVISION_COLORS = {
@@ -55,6 +57,7 @@ export default function NotificationPanel({
   const [conversations, setConversations] = useState([]);
   const [loadingConversations, setLoadingConversations] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [showReadUpdates, setShowReadUpdates] = useState(false);
   const [processingId, setProcessingId] = useState(null);
   const storageToastKey = user?.id ? `jee_seen_toast_ids_${user.id}` : null;
   const [seenToastIds, setSeenToastIds] = useState(() => {
@@ -203,7 +206,8 @@ export default function NotificationPanel({
     sound.click();
     setLoading(true);
     try {
-      await api.friends.markAllNotificationsRead();
+      const scope = activeTab === 'messages' ? 'messages' : 'alerts';
+      await api.friends.markAllNotificationsRead(scope);
       await fetchNotifications();
       if (activeTab === 'messages') {
         await fetchConversations();
@@ -232,16 +236,113 @@ export default function NotificationPanel({
     return formatISTDateTimeShort(isoString, '');
   };
 
+  const renderSystemUpdateCard = (u, isUnread) => {
+    const category = (u.category || 'PLATFORM').toUpperCase();
+    const isSyl = category === 'SYLLABUS';
+    const isQB = category === 'QUESTION_BANK';
+
+    return (
+      <div
+        key={u.id}
+        className={`p-3 rounded-2xl shadow-md relative group transition border ${
+          isUnread
+            ? 'bg-[#151d2e] border-amber-500/50 shadow-amber-950/20'
+            : 'bg-[#131620] border-white/5 opacity-85 hover:opacity-100'
+        }`}
+      >
+        <div className="flex items-start justify-between gap-2">
+          <div className="flex items-start gap-2.5 flex-1 min-w-0">
+            <div
+              className={`w-7 h-7 rounded-xl border flex items-center justify-center text-xs shrink-0 mt-0.5 ${
+                isUnread
+                  ? 'bg-amber-500/20 border-amber-500/40 text-amber-400'
+                  : 'bg-white/5 border-white/10 text-slate-400'
+              }`}
+            >
+              {isSyl ? (
+                <Layers className="w-3.5 h-3.5" />
+              ) : isQB ? (
+                <BookOpen className="w-3.5 h-3.5" />
+              ) : (
+                <Zap className="w-3.5 h-3.5" />
+              )}
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <span className="font-bold text-xs text-white line-clamp-1">
+                  {u.title}
+                </span>
+                {isUnread && (
+                  <span className="text-[8px] font-black uppercase px-1.5 py-0.2 rounded bg-amber-500/30 text-amber-300 border border-amber-500/40 font-mono animate-pulse">
+                    NEW
+                  </span>
+                )}
+                {u.version && (
+                  <span className="text-[9px] font-mono px-1.5 py-0.2 rounded bg-white/10 text-amber-300 font-bold">
+                    {u.version}
+                  </span>
+                )}
+              </div>
+              <p className="text-[11px] text-slate-300 mt-1 leading-relaxed line-clamp-2">
+                {u.summary}
+              </p>
+              <div className="flex items-center gap-3 mt-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (onOpenUpdateModal) onOpenUpdateModal(u);
+                  }}
+                  className="text-[10px] font-bold text-orange-400 hover:text-orange-300 flex items-center gap-1 cursor-pointer"
+                >
+                  <span>Read Changelog</span>
+                  <ArrowRight className="w-2.5 h-2.5" />
+                </button>
+                <span className="text-[9px] text-slate-500 font-mono">
+                  {formatISTDateTimeShort(u.created_at, 'Recent')}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {isUnread && (
+            <button
+              type="button"
+              disabled={processingId === u.id}
+              onClick={() => handleDismissSystemUpdate(u.id)}
+              className="p-1.5 text-slate-400 hover:text-white rounded-lg hover:bg-white/10 transition cursor-pointer shrink-0"
+              title="Mark update as read"
+            >
+              <Check className="w-3.5 h-3.5 text-amber-400" />
+            </button>
+          )}
+        </div>
+      </div>
+    );
+  };
+
   if (!isOpen) return null;
 
   const totalCount = data.total_count || 0;
   const unreadMessagesCount = data.unread_messages_count || 0;
-  const alertsCount = Math.max(0, totalCount - unreadMessagesCount);
+  const unreadSystemUpdates = (data.system_updates || []).filter((u) => !u.is_read);
+  const readSystemUpdates = (data.system_updates || []).filter((u) => u.is_read);
+
+  const alertsCount =
+    (data.friend_requests?.length || 0) +
+    (data.challenges?.length || 0) +
+    (data.unread_alerts_count !== undefined
+      ? data.unread_alerts_count
+      : (data.moderation_updates?.length || 0)) +
+    unreadSystemUpdates.length;
+
   const hasAnyAlerts =
-    (data.system_updates?.length > 0) ||
-    (data.moderation_updates?.length > 0) ||
+    (data.friend_requests?.length > 0) ||
     (data.challenges?.length > 0) ||
-    (data.friend_requests?.length > 0);
+    (data.moderation_updates?.length > 0) ||
+    (unreadSystemUpdates.length > 0) ||
+    (readSystemUpdates.length > 0);
+
+  const canClear = activeTab === 'alerts' ? alertsCount > 0 : unreadMessagesCount > 0;
 
   return (
     <>
@@ -274,15 +375,17 @@ export default function NotificationPanel({
           </div>
 
           <div className="flex items-center gap-1">
-            {totalCount > 0 && (
+            {canClear && (
               <button
                 onClick={handleMarkAllRead}
                 disabled={loading}
-                title="Mark all as read"
+                title={activeTab === 'messages' ? 'Mark unread chats as read' : 'Clear all alerts & release notes'}
                 className="px-2 py-1 text-[11px] font-bold text-slate-300 hover:text-white rounded-lg hover:bg-white/5 transition cursor-pointer flex items-center gap-1 border border-white/5"
               >
                 <CheckCheck className="w-3.5 h-3.5 text-emerald-400" />
-                <span className="hidden sm:inline">Clear All</span>
+                <span className="hidden sm:inline">
+                  {activeTab === 'messages' ? 'Clear Chats' : 'Clear Alerts'}
+                </span>
               </button>
             )}
             <button
@@ -497,81 +600,103 @@ export default function NotificationPanel({
                     </div>
                   )}
 
-                  {/* Moderation & Elo Compensation Section */}
+                  {/* Platform Alerts & Rewards Section */}
                   {data.moderation_updates?.length > 0 && (
                     <div>
                       <div className="flex items-center gap-1.5 mb-2.5 text-[11px] font-bold text-emerald-400 uppercase tracking-wider">
-                        <Shield className="w-3.5 h-3.5" />
-                        <span>Moderation Updates ({data.moderation_updates.length})</span>
+                        <Sparkles className="w-3.5 h-3.5" />
+                        <span>Platform Alerts & Rewards ({data.moderation_updates.length})</span>
                       </div>
 
                       <div className="space-y-2">
                         {data.moderation_updates.map((m) => {
-                          const isProvisional = m.type === 'PROVISIONAL_ELO_RESTORED';
+                          let detailsObj = null;
+                          if (m.details) {
+                            if (typeof m.details === 'string') {
+                              try { detailsObj = JSON.parse(m.details); } catch (_) {}
+                            } else if (typeof m.details === 'object') {
+                              detailsObj = m.details;
+                            }
+                          }
+
+                          const isProvisional = m.type === 'PROVISIONAL_ELO_RESTORED' || m.type === 'QUESTION_PROVISIONAL_CREDIT';
+                          const isReportResolved = m.type === 'REPORT_RESOLVED' || m.type === 'REPORT_ACCEPTED';
                           const isDismissed = m.type === 'REPORT_DISMISSED';
                           const isSeasonPodium = m.type === 'SEASON_PODIUM';
                           const isSeasonPromotion = m.type === 'SEASON_PROMOTION';
+                          const isSeasonRelegation = m.type === 'SEASON_RELEGATION';
                           const isSeasonWrap = m.type === 'SEASON_WRAP';
+                          const isStreak = m.type === 'STREAK_MILESTONE' || m.type === 'STREAK_SHIELD_USED';
+                          const isDailyGoal = m.type === 'DAILY_GOAL_COMPLETED';
+                          const isRoomScore = m.type === 'ROOM_SCORE_ADJUSTED';
 
-                          const cardClass = isDismissed
-                            ? 'bg-rose-950/25 border-rose-500/35'
-                            : isSeasonPodium
-                            ? 'bg-amber-950/40 border-amber-500/50 shadow-amber-500/10'
-                            : isSeasonPromotion
-                            ? 'bg-emerald-950/40 border-emerald-500/50 shadow-emerald-500/10'
-                            : isSeasonWrap
-                            ? 'bg-blue-950/30 border-blue-500/40'
-                            : isProvisional
-                            ? 'bg-amber-950/30 border-amber-500/40'
-                            : 'bg-emerald-950/30 border-emerald-500/40';
+                          let cardClass = 'bg-emerald-950/30 border-emerald-500/40';
+                          let iconClass = 'bg-emerald-500/20 border-emerald-500/40 text-emerald-300';
+                          let badgeText = 'System Verified & Credited';
+                          let badgeColor = 'text-emerald-400/80';
+                          let iconEmoji = '✨';
 
-                          const iconClass = isDismissed
-                            ? 'bg-rose-500/20 border-rose-500/40 text-rose-300'
-                            : isSeasonPodium
-                            ? 'bg-amber-500/25 border-amber-500/50 text-amber-300'
-                            : isSeasonPromotion
-                            ? 'bg-emerald-500/25 border-emerald-500/50 text-emerald-300'
-                            : isSeasonWrap
-                            ? 'bg-blue-500/20 border-blue-500/40 text-blue-300'
-                            : isProvisional
-                            ? 'bg-amber-500/20 border-amber-500/40 text-amber-300'
-                            : 'bg-emerald-500/20 border-emerald-500/40 text-emerald-300';
-
-                          const badgeText = isDismissed
-                            ? 'Report Dismissed • Credit Reverted'
-                            : isSeasonPodium
-                            ? 'Season Podium Medal Winner'
-                            : isSeasonPromotion
-                            ? 'Weekly Promotion Zone'
-                            : isSeasonWrap
-                            ? 'Weekly Season Concluded'
-                            : isProvisional
-                            ? 'Provisional Safeguard • Pending Review'
-                            : 'System Verified & Credited';
-
-                          const badgeColor = isDismissed
-                            ? 'text-rose-400/90'
-                            : isSeasonPodium
-                            ? 'text-amber-400 font-bold'
-                            : isSeasonPromotion
-                            ? 'text-emerald-400 font-bold'
-                            : isSeasonWrap
-                            ? 'text-blue-400/90'
-                            : isProvisional
-                            ? 'text-amber-400/90'
-                            : 'text-emerald-400/80';
-
-                          const iconEmoji = isDismissed
-                            ? '⚖️'
-                            : isSeasonPodium
-                            ? '🏆'
-                            : isSeasonPromotion
-                            ? '🟢'
-                            : isSeasonWrap
-                            ? '📅'
-                            : isProvisional
-                            ? '🛡️'
-                            : '✨';
+                          if (isDismissed) {
+                            cardClass = 'bg-rose-950/25 border-rose-500/35';
+                            iconClass = 'bg-rose-500/20 border-rose-500/40 text-rose-300';
+                            badgeText = 'Report Dismissed • Credit Reverted';
+                            badgeColor = 'text-rose-400/90 font-bold';
+                            iconEmoji = '⚖️';
+                          } else if (isSeasonPodium) {
+                            cardClass = 'bg-amber-950/40 border-amber-500/50 shadow-amber-500/10';
+                            iconClass = 'bg-amber-500/25 border-amber-500/50 text-amber-300';
+                            badgeText = 'Season Podium Medal Winner';
+                            badgeColor = 'text-amber-400 font-bold';
+                            iconEmoji = '🏆';
+                          } else if (isSeasonPromotion) {
+                            cardClass = 'bg-emerald-950/40 border-emerald-500/50 shadow-emerald-500/10';
+                            iconClass = 'bg-emerald-500/25 border-emerald-500/50 text-emerald-300';
+                            badgeText = 'Weekly Promotion Zone';
+                            badgeColor = 'text-emerald-400 font-bold';
+                            iconEmoji = '🟢';
+                          } else if (isSeasonRelegation) {
+                            cardClass = 'bg-rose-950/25 border-rose-500/35';
+                            iconClass = 'bg-rose-500/20 border-rose-500/40 text-rose-300';
+                            badgeText = 'Division Relegation';
+                            badgeColor = 'text-rose-400/90 font-bold';
+                            iconEmoji = '🔻';
+                          } else if (isSeasonWrap) {
+                            cardClass = 'bg-blue-950/30 border-blue-500/40';
+                            iconClass = 'bg-blue-500/20 border-blue-500/40 text-blue-300';
+                            badgeText = 'Weekly Season Concluded';
+                            badgeColor = 'text-blue-400/90 font-bold';
+                            iconEmoji = '📅';
+                          } else if (isReportResolved) {
+                            cardClass = 'bg-emerald-950/40 border-emerald-500/50 shadow-emerald-500/10';
+                            iconClass = 'bg-emerald-500/25 border-emerald-500/50 text-emerald-300';
+                            badgeText = 'Report Verified • Score & Elo Upgraded';
+                            badgeColor = 'text-emerald-400 font-bold';
+                            iconEmoji = '🏆';
+                          } else if (isProvisional) {
+                            cardClass = 'bg-amber-950/30 border-amber-500/40';
+                            iconClass = 'bg-amber-500/20 border-amber-500/40 text-amber-300';
+                            badgeText = 'Provisional Safeguard • Review Pending';
+                            badgeColor = 'text-amber-400/90 font-bold';
+                            iconEmoji = '🛡️';
+                          } else if (isStreak) {
+                            cardClass = 'bg-orange-950/30 border-orange-500/40';
+                            iconClass = 'bg-orange-500/20 border-orange-500/40 text-orange-300';
+                            badgeText = m.type === 'STREAK_SHIELD_USED' ? 'Streak Protected by Shield' : 'Streak Milestone Achieved';
+                            badgeColor = 'text-orange-400 font-bold';
+                            iconEmoji = '🔥';
+                          } else if (isDailyGoal) {
+                            cardClass = 'bg-indigo-950/30 border-indigo-500/40';
+                            iconClass = 'bg-indigo-500/20 border-indigo-500/40 text-indigo-300';
+                            badgeText = 'Daily Goal Conquered';
+                            badgeColor = 'text-indigo-400 font-bold';
+                            iconEmoji = '🎯';
+                          } else if (isRoomScore) {
+                            cardClass = 'bg-purple-950/30 border-purple-500/40';
+                            iconClass = 'bg-purple-500/20 border-purple-500/40 text-purple-300';
+                            badgeText = 'Duel Score Re-Graded';
+                            badgeColor = 'text-purple-400 font-bold';
+                            iconEmoji = '⚔️';
+                          }
 
                           return (
                             <div
@@ -579,20 +704,59 @@ export default function NotificationPanel({
                               className={`p-3 border rounded-2xl shadow-md relative group ${cardClass}`}
                             >
                               <div className="flex items-start justify-between gap-2">
-                                <div className="flex items-start gap-2.5">
+                                <div className="flex items-start gap-2.5 flex-1 min-w-0">
                                   <div className={`w-7 h-7 rounded-xl border flex items-center justify-center text-xs shrink-0 mt-0.5 font-bold ${iconClass}`}>
                                     {iconEmoji}
                                   </div>
-                                  <div>
+                                  <div className="flex-1 min-w-0">
                                     <span className="font-bold text-xs text-white block">
                                       {m.title}
                                     </span>
                                     <p className="text-[11px] text-slate-300 mt-1 leading-relaxed">
                                       {m.message}
                                     </p>
-                                    <span className={`text-[9px] font-mono mt-1.5 block font-bold ${badgeColor}`}>
-                                      {badgeText}
-                                    </span>
+
+                                    {/* Rewards & Adjustments chips */}
+                                    {detailsObj && (
+                                      <div className="flex items-center gap-1.5 flex-wrap mt-2">
+                                        {detailsObj.new_key && (
+                                          <span className="px-1.5 py-0.5 rounded bg-blue-500/20 border border-blue-500/30 text-blue-300 text-[10px] font-mono font-bold">
+                                            Key: {detailsObj.new_key}
+                                          </span>
+                                        )}
+                                        {detailsObj.earned_elo !== undefined && (
+                                          <span className="px-1.5 py-0.5 rounded bg-emerald-500/20 border border-emerald-500/30 text-emerald-300 text-[10px] font-mono font-bold">
+                                            +{detailsObj.earned_elo} Elo
+                                          </span>
+                                        )}
+                                        {detailsObj.refund_elo !== undefined && (
+                                          <span className="px-1.5 py-0.5 rounded bg-emerald-500/20 border border-emerald-500/30 text-emerald-300 text-[10px] font-mono font-bold">
+                                            +{detailsObj.refund_elo} Elo
+                                          </span>
+                                        )}
+                                        {detailsObj.bonus_rp !== undefined && (
+                                          <span className="px-1.5 py-0.5 rounded bg-amber-500/20 border border-amber-500/30 text-amber-300 text-[10px] font-mono font-bold">
+                                            +{detailsObj.bonus_rp} RP
+                                          </span>
+                                        )}
+                                        {detailsObj.reverted_elo !== undefined && (
+                                          <span className="px-1.5 py-0.5 rounded bg-rose-500/20 border border-rose-500/30 text-rose-300 text-[10px] font-mono font-bold">
+                                            -{detailsObj.reverted_elo} Elo
+                                          </span>
+                                        )}
+                                      </div>
+                                    )}
+
+                                    <div className="flex items-center justify-between gap-2 mt-2 pt-1 border-t border-white/5">
+                                      <span className={`text-[9px] font-mono block font-bold ${badgeColor}`}>
+                                        {badgeText}
+                                      </span>
+                                      {m.created_at && (
+                                        <span className="text-[9px] text-slate-500 font-mono">
+                                          {formatISTDateTimeShort(m.created_at, 'Recent')}
+                                        </span>
+                                      )}
+                                    </div>
                                   </div>
                                 </div>
                                 <button
@@ -612,90 +776,43 @@ export default function NotificationPanel({
                     </div>
                   )}
 
-                  {/* System & Content Updates Section */}
-                  {data.system_updates?.length > 0 && (
+                  {/* Release Notes & System Updates Section (Unread) */}
+                  {unreadSystemUpdates.length > 0 && (
                     <div>
                       <div className="flex items-center gap-1.5 mb-2.5 text-[11px] font-bold text-amber-400 uppercase tracking-wider">
                         <Sparkles className="w-3.5 h-3.5" />
-                        <span>System & Content Updates ({data.system_updates.length})</span>
+                        <span>System & Content Updates ({unreadSystemUpdates.length})</span>
                       </div>
-
                       <div className="space-y-2">
-                        {data.system_updates.map((u) => {
-                          const category = (u.category || 'PLATFORM').toUpperCase();
-                          const isSyl = category === 'SYLLABUS';
-                          const isQB = category === 'QUESTION_BANK';
-                          const isUnread = !u.is_read;
-
-                          return (
-                            <div
-                              key={u.id}
-                              className={`p-3 rounded-2xl shadow-md relative group transition border ${
-                                isUnread
-                                  ? 'bg-[#151d2e] border-amber-500/50 shadow-amber-950/20'
-                                  : 'bg-[#131620] border-white/5 opacity-85 hover:opacity-100'
-                              }`}
-                            >
-                              <div className="flex items-start justify-between gap-2">
-                                <div className="flex items-start gap-2.5 flex-1 min-w-0">
-                                  <div className={`w-7 h-7 rounded-xl border flex items-center justify-center text-xs shrink-0 mt-0.5 ${
-                                    isUnread ? 'bg-amber-500/20 border-amber-500/40 text-amber-400' : 'bg-white/5 border-white/10 text-slate-400'
-                                  }`}>
-                                    {isSyl ? <Layers className="w-3.5 h-3.5" /> : isQB ? <BookOpen className="w-3.5 h-3.5" /> : <Zap className="w-3.5 h-3.5" />}
-                                  </div>
-                                  <div className="flex-1 min-w-0">
-                                    <div className="flex items-center gap-1.5 flex-wrap">
-                                      <span className="font-bold text-xs text-white line-clamp-1">
-                                        {u.title}
-                                      </span>
-                                      {isUnread && (
-                                        <span className="text-[8px] font-black uppercase px-1.5 py-0.2 rounded bg-amber-500/30 text-amber-300 border border-amber-500/40 font-mono animate-pulse">
-                                          NEW
-                                        </span>
-                                      )}
-                                      {u.version && (
-                                        <span className="text-[9px] font-mono px-1.5 py-0.2 rounded bg-white/10 text-amber-300 font-bold">
-                                          {u.version}
-                                        </span>
-                                      )}
-                                    </div>
-                                    <p className="text-[11px] text-slate-300 mt-1 leading-relaxed line-clamp-2">
-                                      {u.summary}
-                                    </p>
-                                    <div className="flex items-center gap-3 mt-2">
-                                      <button
-                                        type="button"
-                                        onClick={() => {
-                                          if (onOpenUpdateModal) onOpenUpdateModal(u);
-                                        }}
-                                        className="text-[10px] font-bold text-orange-400 hover:text-orange-300 flex items-center gap-1 cursor-pointer"
-                                      >
-                                        <span>Read Changelog</span>
-                                        <ArrowRight className="w-2.5 h-2.5" />
-                                      </button>
-                                      <span className="text-[9px] text-slate-500 font-mono">
-                                        {formatISTDateTimeShort(u.created_at, 'Recent')}
-                                      </span>
-                                    </div>
-                                  </div>
-                                </div>
-
-                                {isUnread && (
-                                  <button
-                                    type="button"
-                                    disabled={processingId === u.id}
-                                    onClick={() => handleDismissSystemUpdate(u.id)}
-                                    className="p-1.5 text-slate-400 hover:text-white rounded-lg hover:bg-white/10 transition cursor-pointer shrink-0"
-                                    title="Mark update as read"
-                                  >
-                                    <Check className="w-3.5 h-3.5 text-amber-400" />
-                                  </button>
-                                )}
-                              </div>
-                            </div>
-                          );
-                        })}
+                        {unreadSystemUpdates.map((u) => renderSystemUpdateCard(u, true))}
                       </div>
+                    </div>
+                  )}
+
+                  {/* Earlier Release Notes (Collapsible when caught up) */}
+                  {readSystemUpdates.length > 0 && (
+                    <div className="pt-2 border-t border-white/10">
+                      <button
+                        type="button"
+                        onClick={() => setShowReadUpdates((prev) => !prev)}
+                        className="w-full py-2 px-3 rounded-xl bg-white/5 hover:bg-white/10 text-slate-400 hover:text-slate-200 text-xs font-semibold flex items-center justify-between transition cursor-pointer border border-white/5"
+                      >
+                        <span className="flex items-center gap-1.5">
+                          <BookOpen className="w-3.5 h-3.5 text-slate-400" />
+                          <span>{showReadUpdates ? 'Hide Earlier Release Notes' : `View Earlier Release Notes (${readSystemUpdates.length})`}</span>
+                        </span>
+                        {showReadUpdates ? (
+                          <ChevronUp className="w-3.5 h-3.5 text-slate-400" />
+                        ) : (
+                          <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
+                        )}
+                      </button>
+
+                      {showReadUpdates && (
+                        <div className="space-y-2 mt-2.5">
+                          {readSystemUpdates.map((u) => renderSystemUpdateCard(u, false))}
+                        </div>
+                      )}
                     </div>
                   )}
                 </>

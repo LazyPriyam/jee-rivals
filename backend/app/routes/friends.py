@@ -2,7 +2,7 @@ import uuid
 import datetime
 import json
 from typing import List, Optional, Dict, Any
-from fastapi import APIRouter, HTTPException, Depends, status
+from fastapi import APIRouter, HTTPException, Depends, status, Query
 from pydantic import BaseModel
 
 from backend.app.database import get_connection, get_user_by_id, get_user_by_username
@@ -325,6 +325,22 @@ def get_user_notifications(user: dict = Depends(get_current_user)):
     conn = get_connection()
     c = conn.cursor()
 
+    # 0. Auto-expire stale pending challenges (older than 2 hours or room no longer exists)
+    try:
+        c.execute("""
+            UPDATE direct_challenges 
+            SET status = 'EXPIRED' 
+            WHERE receiver_id = ? 
+              AND status = 'PENDING' 
+              AND (
+                room_code NOT IN (SELECT code FROM rooms)
+                OR datetime(created_at) < datetime('now', '-2 hours')
+              )
+        """, (user["id"],))
+        conn.commit()
+    except Exception:
+        pass
+
     # 1. Incoming friend requests
     c.execute("""
         SELECT f.user_id as sender_id, f.created_at,
@@ -347,14 +363,21 @@ def get_user_notifications(user: dict = Depends(get_current_user)):
     """, (user["id"],))
     challenges = [dict(r) for r in c.fetchall()]
 
-    # 3. Moderation & Compensation Updates
+    # 3. Platform Alerts & Moderation Updates (Exclude raw direct messages, which have their own Messages tab)
     c.execute("""
         SELECT * FROM user_notifications
-        WHERE user_id = ? AND is_read = 0
+        WHERE user_id = ? AND is_read = 0 AND (type != 'DIRECT_MESSAGE' OR type IS NULL)
         ORDER BY created_at DESC
-        LIMIT 10
+        LIMIT 50
     """, (user["id"],))
     moderation_updates = [dict(r) for r in c.fetchall()]
+
+    c.execute("""
+        SELECT COUNT(*) FROM user_notifications
+        WHERE user_id = ? AND is_read = 0 AND (type != 'DIRECT_MESSAGE' OR type IS NULL)
+    """, (user["id"],))
+    cnt_row = c.fetchone()
+    unread_alerts_count = cnt_row[0] if cnt_row else len(moderation_updates)
 
     # 4. Unread Direct Messages Count
     c.execute("""
@@ -383,7 +406,8 @@ def get_user_notifications(user: dict = Depends(get_current_user)):
         "system_updates": all_system_updates,
         "unread_system_updates_count": len(unread_system_updates),
         "unread_messages_count": unread_messages_count,
-        "total_count": len(friend_requests) + len(challenges) + len(moderation_updates) + len(unread_system_updates) + unread_messages_count
+        "unread_alerts_count": unread_alerts_count,
+        "total_count": len(friend_requests) + len(challenges) + unread_alerts_count + len(unread_system_updates) + unread_messages_count
     }
 
 
@@ -406,21 +430,29 @@ def mark_notification_read(notification_id: str, user: dict = Depends(get_curren
 
 
 @router.post("/notifications/read-all")
-def mark_all_notifications_read(user: dict = Depends(get_current_user)):
+def mark_all_notifications_read(
+    scope: str = Query("alerts"),
+    user: dict = Depends(get_current_user)
+):
     conn = get_connection()
     c = conn.cursor()
-    c.execute("UPDATE user_notifications SET is_read = 1 WHERE user_id = ?", (user["id"],))
-    c.execute("UPDATE direct_messages SET is_read = 1 WHERE receiver_id = ?", (user["id"],))
+
+    if scope in ("alerts", "all"):
+        c.execute("UPDATE user_notifications SET is_read = 1 WHERE user_id = ? AND (type != 'DIRECT_MESSAGE' OR type IS NULL)", (user["id"],))
+        try:
+            from backend.app.tools.system_updates_engine import mark_all_updates_read
+            mark_all_updates_read(user["id"])
+        except Exception:
+            pass
+
+    if scope in ("messages", "all"):
+        c.execute("UPDATE direct_messages SET is_read = 1 WHERE receiver_id = ?", (user["id"],))
+        c.execute("UPDATE user_notifications SET is_read = 1 WHERE user_id = ? AND type = 'DIRECT_MESSAGE'", (user["id"],))
+
     conn.commit()
     conn.close()
 
-    try:
-        from backend.app.tools.system_updates_engine import mark_all_updates_read
-        mark_all_updates_read(user["id"])
-    except Exception:
-        pass
-
-    return {"success": True}
+    return {"success": True, "scope": scope}
 
 
 @router.delete("/{friend_id}")
@@ -665,6 +697,8 @@ def respond_to_challenge(challenge_id: str, req: RespondChallengeModel, user: di
     c.execute("SELECT id FROM rooms WHERE code = ?", (code,))
     r_row = c.fetchone()
     if not r_row:
+        c.execute("UPDATE direct_challenges SET status = 'EXPIRED' WHERE id = ?", (challenge_id,))
+        conn.commit()
         conn.close()
         raise HTTPException(status_code=404, detail="The duel room has expired or closed.")
 
