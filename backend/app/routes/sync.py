@@ -73,7 +73,8 @@ def sync_data(payload: SyncPayload, x_sync_token: Optional[str] = Header(None, a
         ("key_formulas", "TEXT"),
         ("source_book", "TEXT"),
         ("validation_status", "TEXT DEFAULT 'VALIDATED'"),
-        ("validation_flags", "TEXT DEFAULT '[]'")
+        ("validation_flags", "TEXT DEFAULT '[]'"),
+        ("linked_chapters", "TEXT DEFAULT '[]'")
     ]
     for col_name, col_def in expected_q_cols:
         if col_name not in valid_cols:
@@ -137,6 +138,8 @@ def sync_data(payload: SyncPayload, x_sync_token: Optional[str] = Header(None, a
             passage_text = q.get("passage_text")
             sub_idx = q.get("subquestion_index")
             sub_tot = q.get("subquestion_total")
+            raw_linked = q.get("linked_chapters", [])
+            linked_str = raw_linked if isinstance(raw_linked, str) else json.dumps(raw_linked)
 
             raw_elo = q.get("elo_rating")
             try:
@@ -169,7 +172,8 @@ def sync_data(payload: SyncPayload, x_sync_token: Optional[str] = Header(None, a
                 "passage_title": passage_title,
                 "passage_text": passage_text,
                 "subquestion_index": sub_idx,
-                "subquestion_total": sub_tot
+                "subquestion_total": sub_tot,
+                "linked_chapters": linked_str
             }
 
             active_cols = [col for col in data_map.keys() if col in valid_cols]
