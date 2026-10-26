@@ -38,11 +38,13 @@ def get_current_season_meta() -> Dict[str, Any]:
     prev_year = year if week > 1 else year - 1
     completed_season_code = f"{prev_year}-W{prev_week:02d}"
 
-    # Current week ends next Monday 05:29:59 AM IST (Sunday 23:59:59 UTC)
-    days_until_sunday = 7 - weekday
+    # Current week ends next Sunday 23:59:59 UTC (Monday 05:30:00 AM IST)
+    days_until_sunday = (7 - weekday) % 7
     next_reset_dt = (now_utc + datetime.timedelta(days=days_until_sunday)).replace(
         hour=23, minute=59, second=59, microsecond=0
     )
+    if next_reset_dt <= now_utc:
+        next_reset_dt += datetime.timedelta(days=7)
 
     return {
         "active_season_code": active_season_code,

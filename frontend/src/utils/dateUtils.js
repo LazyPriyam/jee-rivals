@@ -180,7 +180,7 @@ export function formatLastOnline(lastActiveIso, isOnline = false) {
   const exactTimeIST = formatISTTime(d);
   const exactDateIST = formatISTDate(d);
 
-  // Active very recently (< 3 mins)
+  // Active very recently (< 3 mins or slight negative clock skew)
   if (diffMin < 3) {
     return {
       isOnline: true,
@@ -202,19 +202,28 @@ export function formatLastOnline(lastActiveIso, isOnline = false) {
     };
   }
 
-  // Active today (< 24 hours)
-  if (diffHour < 24) {
+  // Accurate calendar date comparison in Asia/Kolkata timezone
+  const nowDateIST = new Intl.DateTimeFormat("en-CA", { timeZone: IST_TIMEZONE }).format(now);
+  const targetDateIST = new Intl.DateTimeFormat("en-CA", { timeZone: IST_TIMEZONE }).format(d);
+
+  // Active today in IST calendar
+  if (nowDateIST === targetDateIST) {
     return {
       isOnline: false,
       badgeText: `Last seen today at ${exactTimeIST}`,
       statusColor: "slate",
       detail: `Last seen today at ${exactTimeIST}`,
-      short: `${diffHour}h ago`,
+      short: `${Math.max(1, diffHour)}h ago`,
     };
   }
 
-  // Active yesterday (< 48 hours)
-  if (diffHour < 48) {
+  // Calculate calendar day difference in IST
+  const nowDateObj = new Date(nowDateIST + "T00:00:00Z");
+  const targetDateObj = new Date(targetDateIST + "T00:00:00Z");
+  const dayDiff = Math.round((nowDateObj.getTime() - targetDateObj.getTime()) / (86400 * 1000));
+
+  // Active yesterday in IST calendar
+  if (dayDiff === 1) {
     return {
       isOnline: false,
       badgeText: `Last seen yesterday at ${exactTimeIST}`,
@@ -224,7 +233,18 @@ export function formatLastOnline(lastActiveIso, isOnline = false) {
     };
   }
 
-  // Older than 2 days
+  // Active within the past 7 days
+  if (dayDiff <= 7) {
+    return {
+      isOnline: false,
+      badgeText: `Last seen ${dayDiff}d ago (${exactDateIST})`,
+      statusColor: "slate",
+      detail: `Last seen on ${exactDateIST} at ${exactTimeIST}`,
+      short: `${dayDiff}d ago`,
+    };
+  }
+
+  // Older than 7 days
   return {
     isOnline: false,
     badgeText: `Last seen ${exactDateIST}, ${exactTimeIST}`,
@@ -232,4 +252,29 @@ export function formatLastOnline(lastActiveIso, isOnline = false) {
     detail: `Last seen on ${exactDateIST} at ${exactTimeIST}`,
     short: exactDateIST,
   };
+}
+
+/**
+ * Returns a human-friendly countdown to a target ISO timestamp (e.g. season reset):
+ * e.g. "6d 16h left" or "4h 30m left"
+ */
+export function formatTimeRemaining(targetIso) {
+  const d = parseDate(targetIso);
+  if (!d) return null;
+  const now = new Date();
+  const diffMs = d.getTime() - now.getTime();
+  if (diffMs <= 0) return "Resetting soon...";
+
+  const diffSec = Math.floor(diffMs / 1000);
+  const days = Math.floor(diffSec / 86400);
+  const hours = Math.floor((diffSec % 86400) / 3600);
+  const mins = Math.floor((diffSec % 3600) / 60);
+
+  if (days > 0) {
+    return `${days}d ${hours}h left`;
+  }
+  if (hours > 0) {
+    return `${hours}h ${mins}m left`;
+  }
+  return `${Math.max(1, mins)}m left`;
 }

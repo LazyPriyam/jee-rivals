@@ -80,10 +80,10 @@ def calculate_division(rank: int, total_users: int) -> str:
 def get_next_sunday_utc() -> str:
     now = datetime.datetime.utcnow()
     # 6 is Sunday in weekday() (Monday is 0)
-    days_ahead = 6 - now.weekday()
-    if days_ahead <= 0:
-        days_ahead += 7
+    days_ahead = (6 - now.weekday()) % 7
     target = (now + datetime.timedelta(days=days_ahead)).replace(hour=23, minute=59, second=59, microsecond=0)
+    if target <= now:
+        target += datetime.timedelta(days=7)
     return target.isoformat() + "Z"
 
 

@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { api } from '../utils/api';
 import { Trophy, Shield, Clock, Flame, Crown, RefreshCw, Zap, Users, UserPlus, HelpCircle, Sparkles, ArrowUpRight } from 'lucide-react';
 import DivisionGuideModal from './DivisionGuideModal';
-import { formatLastOnline } from '../utils/dateUtils';
+import { formatLastOnline, formatTimeRemaining } from '../utils/dateUtils';
 
 export const getDivisionBaseTier = (div) => {
   if (!div) return 'BRONZE';
@@ -333,11 +333,18 @@ export default function LeaderboardsView({ user, onViewProfile, onNavigateTab, i
                 <Clock className="w-5 h-5" />
               </div>
               <div>
-                <span className="text-xs uppercase font-bold tracking-wider text-slate-400">
-                  Current Division Season
-                </span>
+                <div className="flex items-center gap-2 flex-wrap mb-0.5">
+                  <span className="text-xs uppercase font-bold tracking-wider text-slate-400">
+                    Current Division Season
+                  </span>
+                  {weeklyData?.reset_at && formatTimeRemaining(weeklyData.reset_at) && (
+                    <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-md bg-orange-500/20 text-orange-400 border border-orange-500/40">
+                      Resets in {formatTimeRemaining(weeklyData.reset_at)}
+                    </span>
+                  )}
+                </div>
                 <h4 className="text-sm font-extrabold text-white">
-                  Every Monday 05:29 AM IST (Weekly Promotion & Reset)
+                  Every Monday at 05:30 AM IST (Weekly Promotion & Reset)
                 </h4>
               </div>
             </div>

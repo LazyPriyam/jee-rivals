@@ -406,7 +406,8 @@ def restore_users_from_backup(conn: Optional[sqlite3.Connection] = None) -> int:
                 curr_c_elo = max(float(curr.get("chemistry_elo") or 1200.0), float(u.get("chemistry_elo") or 1200.0))
                 curr_m_elo = max(float(curr.get("math_elo") or 1200.0), float(u.get("math_elo") or 1200.0))
 
-                curr_rp = max(int(curr.get("weekly_rp") or 0), int(u.get("weekly_rp") or 0))
+                # weekly_rp is sprint-based and resets to 0 upon weekly rollover; never high-watermark weekly_rp!
+                curr_rp = int(curr.get("weekly_rp") or 0)
                 curr_solved = max(int(curr.get("total_solved") or 0), int(u.get("total_solved") or 0))
                 curr_correct = max(int(curr.get("total_correct") or 0), int(u.get("total_correct") or 0))
                 curr_longest_streak = max(int(curr.get("longest_streak") or 0), int(u.get("longest_streak") or 0))
@@ -434,8 +435,7 @@ def restore_users_from_backup(conn: Optional[sqlite3.Connection] = None) -> int:
                     media_or_profile_updated = True
 
                 if (high_elo > curr_elo or curr_solved > int(curr.get("total_solved") or 0) or
-                    curr_rp > int(curr.get("weekly_rp") or 0) or learnt_needs_update or
-                    media_or_profile_updated):
+                    learnt_needs_update or media_or_profile_updated):
                     c.execute("""
                         UPDATE users SET
                             overall_elo = ?,
