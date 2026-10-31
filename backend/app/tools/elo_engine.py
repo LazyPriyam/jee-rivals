@@ -665,12 +665,20 @@ def apply_match_elo_to_user(
 
     # Compute new AIR and log into user_rank_history
     new_overall = max(100.0, cur_overall + overall_delta)
+    final_p = p_elo
+    final_c = c_elo
+    final_m = m_elo
+    for col, d in subj_updates:
+        if col == "physics_elo": final_p = max(100.0, p_elo + d)
+        elif col == "chemistry_elo": final_c = max(100.0, c_elo + d)
+        elif col == "math_elo": final_m = max(100.0, m_elo + d)
+
     cov = get_user_syllabus_coverage(cursor, user_id)
     air_bracket, gate, _ = compute_two_factor_air_bracket(
         new_overall, cov["active_count"], cov["active_subjects_count"], cov["total_chapters"],
-        physics_elo=p_elo + (raw_delta if any("phys" in s.lower() for s in (subjs or [])) else 0),
-        chemistry_elo=c_elo + (raw_delta if any("chem" in s.lower() for s in (subjs or [])) else 0),
-        math_elo=m_elo + (raw_delta if any("math" in s.lower() for s in (subjs or [])) else 0)
+        physics_elo=final_p,
+        chemistry_elo=final_c,
+        math_elo=final_m
     )
 
     cursor.execute("""
@@ -706,11 +714,11 @@ def record_chapter_attempt(
     row = cursor.fetchone()
 
     if row:
-        cur_elo = float(row["elo"] or 1200.0)
+        cur_elo = float(row["elo"] or 1250.0)
         attempts = int(row["attempts"] or 0) + 1
         correct = int(row["correct"] or 0) + (1 if is_correct else 0)
     else:
-        cur_elo = 1200.0
+        cur_elo = 1250.0
         attempts = 1
         correct = 1 if is_correct else 0
 
@@ -747,6 +755,12 @@ def record_chapter_attempt(
             correct = excluded.correct,
             last_updated = excluded.last_updated
     """, (user_id, subject, canonical_chapter, round(new_elo, 1), attempts, correct, now_iso))
+
+    try:
+        from backend.app.tools.adaptive_engine import invalidate_adaptive_chapter_elo_cache
+        invalidate_adaptive_chapter_elo_cache(user_id)
+    except Exception:
+        pass
 
     return new_elo
 

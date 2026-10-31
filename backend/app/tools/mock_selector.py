@@ -262,8 +262,10 @@ def get_effective_chapter_elos(
         if ch in chap_ratings and chap_ratings[ch]:
             effective_elos[ch] = round(statistics.median(chap_ratings[ch]), 1)
         else:
-            subj = get_chapter_subject(ch)
-            effective_elos[ch] = round(subj_medians.get(subj, overall_median), 1)
+            # Cold-start chapter (never attempted by user):
+            # Guard against throwing high-difficulty questions at a student in an unpracticed chapter.
+            # Start at Foundation / Stage 1 baseline (1250.0) instead of inheriting peak overall Elo.
+            effective_elos[ch] = 1250.0
 
     return effective_elos
 
@@ -282,6 +284,7 @@ def _pick_from_chapters_weighted(
     target_exam: str = "MAIN",
     tier_counts: Optional[Dict[str, int]] = None,
     tier_targets: Optional[Dict[str, int]] = None,
+    is_authentic_mock: bool = True,
 ) -> List[dict]:
     """
     Selects up to `quota` questions from `candidates`, guided by `ch_quotas` and `weights_map`.
@@ -289,8 +292,13 @@ def _pick_from_chapters_weighted(
     Preserves comprehension passage groups atomically.
     Soft-forces unseen questions (seen_count == 0 across participants) before smoothly falling back
     to questions seen by the fewest participants if unseen bank supply is exhausted.
-    Calibrates question difficulty dynamically against the student's chapter Elo to satisfy the
-    30/50/20 cognitive mix (Anchor, Frontier, Peak).
+    
+    Difficulty Architecture:
+      - Pillar A (Authentic Exam Mocks): Enforces fixed NTA (JEE Main) and IIT (JEE Advanced) canonical
+        bell curve distributions (Anchor, Frontier, Peak) calibrated to real exam difficulty, with zero
+        dynamic Elo distortion so students never lose touch with genuine exam standards.
+      - Pillar B (Adaptive Scaffolding): When used in adaptive practice, calibrates dynamically with
+        difficulty floor protection so mistakes don't collapse questions below the exam threshold.
     """
     if quota <= 0 or not candidates:
         return []
@@ -308,9 +316,54 @@ def _pick_from_chapters_weighted(
         return seen_counts.get(q["id"], 0)
 
     def _get_q_tier_and_dist(q: dict) -> Tuple[str, float]:
-        ch = normalize_chapter_name(q.get("chapter") or "")
-        base_e = target_chapter_elos.get(ch, 1200.0) if target_chapter_elos else 1200.0
         qe = float(q.get("elo_rating") or 1500.0)
+
+        if is_authentic_mock:
+            # Pillar A: Authentic National Exam Distribution (Zero Dynamic Elo Distortion)
+            # Enforces official NTA (JEE Main) and IIT (JEE Advanced) bell curves:
+            if is_adv:
+                # JEE Advanced Canonical Distribution:
+                # ANCHOR (Accessible Stepping Stones, ~25%): 1500 - 1749 (Target: 1650.0)
+                # FRONTIER (Core IIT Standard, ~50%):       1750 - 2049 (Target: 1900.0)
+                # PEAK (AIR < 500 Apex Deciders, ~25%):      2050 - 2500+ (Target: 2200.0)
+                if qe < 1750.0:
+                    tier = "ANCHOR"
+                    target_e = 1650.0
+                elif qe < 2050.0:
+                    tier = "FRONTIER"
+                    target_e = 1900.0
+                else:
+                    tier = "PEAK"
+                    target_e = 2200.0
+            else:
+                # JEE Main Canonical Distribution:
+                # ANCHOR (Speed / Recall / Foundation, ~40%): 1200 - 1449 (Target: 1350.0)
+                # FRONTIER (Standard Competitive Main, ~45%): 1450 - 1699 (Target: 1550.0)
+                # PEAK (Apex / Calculative Hard, ~15%):       1700 - 1950+ (Target: 1750.0)
+                if qe < 1450.0:
+                    tier = "ANCHOR"
+                    target_e = 1350.0
+                elif qe < 1700.0:
+                    tier = "FRONTIER"
+                    target_e = 1550.0
+                else:
+                    tier = "PEAK"
+                    target_e = 1750.0
+            dist = abs(qe - target_e)
+            return tier, dist
+
+        # Pillar B: Dynamic Adaptive Scaffolding (Used when mode == "ADAPTIVE")
+        ch = normalize_chapter_name(q.get("chapter") or "")
+        base_e = target_chapter_elos.get(ch, 1250.0) if target_chapter_elos else 1250.0
+
+        # Enforce Difficulty Floor Protection:
+        if is_adv:
+            base_e = max(1650.0, base_e)
+        elif base_e >= 1400.0:
+            base_e = max(1350.0, base_e)
+        else:
+            base_e = max(1150.0, base_e)
+
         d = qe - base_e
 
         if is_adv:
@@ -372,9 +425,6 @@ def _pick_from_chapters_weighted(
         shuffled.sort(key=_sort_key)
         return shuffled
 
-    for ch_k in by_chapter:
-        by_chapter[ch_k] = _sort_chapter_cands(by_chapter[ch_k])
-
     def _try_add_question(q: dict, max_total: int) -> int:
         if q["id"] in seen_ids:
             return 0
@@ -423,7 +473,9 @@ def _pick_from_chapters_weighted(
         if ch_rem <= 0:
             continue
         added_in_ch = 0
-        for q in by_chapter[ch]:
+        # Dynamically sort chapter candidates according to live tier deficits
+        live_cands = _sort_chapter_cands(by_chapter[ch])
+        for q in live_cands:
             if len(picked) >= quota or added_in_ch >= ch_rem:
                 break
             # In Pass 1A, only draw questions unseen by all participants
@@ -444,7 +496,8 @@ def _pick_from_chapters_weighted(
         for ch in unseen_chapters:
             if len(picked) >= quota:
                 break
-            for q in by_chapter[ch]:
+            live_cands = _sort_chapter_cands(by_chapter[ch])
+            for q in live_cands:
                 if len(picked) >= quota:
                     break
                 if _get_q_seen(q) > 0:
@@ -467,7 +520,8 @@ def _pick_from_chapters_weighted(
         for ch in fallback_chapters:
             if len(picked) >= quota:
                 break
-            for q in by_chapter[ch]:
+            live_cands = _sort_chapter_cands(by_chapter[ch])
+            for q in live_cands:
                 if len(picked) >= quota:
                     break
                 added = _try_add_question(q, quota)
@@ -729,12 +783,15 @@ def select_mock_and_room_questions(
             working_pool = s_pool
 
         subj_selected: List[dict] = []
+        is_authentic_mock = (mode not in ("ADAPTIVE", "ADAPTIVE_PRACTICE"))
 
-        # Cognitive Tier Targets for this subject (Aptitude Engine 30/50/20 & 40/45/15)
+        # Cognitive Tier Targets for this subject (Authentic NTA / IIT Bell Curves):
+        # JEE Main: 40% Speed/Recall Anchor + 45% Core Competitive Frontier + 15% Apex Differentiator
+        # JEE Advanced: 25% Accessible Stepping Anchor + 50% Core IIT Frontier + 25% Apex AIR 500 Peak
         tier_counts: Dict[str, int] = {"ANCHOR": 0, "FRONTIER": 0, "PEAK": 0}
         if is_jee_advanced:
             t_frontier = max(1, round(s_target * 0.50))
-            t_peak = max(1, round(s_target * 0.30))
+            t_peak = max(1, round(s_target * 0.25))
             t_anchor = max(1, s_target - (t_frontier + t_peak))
         else:
             t_frontier = max(1, round(s_target * 0.45))
@@ -789,6 +846,7 @@ def select_mock_and_room_questions(
                 target_exam=target_exam,
                 tier_counts=tier_counts,
                 tier_targets=tier_targets,
+                is_authentic_mock=is_authentic_mock,
             )
 
             # Backfill any NVQ shortfall into Section A (Single Choice)
@@ -810,6 +868,7 @@ def select_mock_and_room_questions(
                 target_exam=target_exam,
                 tier_counts=tier_counts,
                 tier_targets=tier_targets,
+                is_authentic_mock=is_authentic_mock,
             )
 
             subj_selected.extend(picked_scq)
@@ -833,6 +892,7 @@ def select_mock_and_room_questions(
                     target_exam=target_exam,
                     tier_counts=tier_counts,
                     tier_targets=tier_targets,
+                    is_authentic_mock=is_authentic_mock,
                 )
                 subj_selected.extend(extra)
 
@@ -870,6 +930,7 @@ def select_mock_and_room_questions(
                     target_exam=target_exam,
                     tier_counts=tier_counts,
                     tier_targets=tier_targets,
+                    is_authentic_mock=is_authentic_mock,
                 )
                 subj_selected.extend(picked_custom)
             else:
@@ -899,6 +960,7 @@ def select_mock_and_room_questions(
                     target_exam=target_exam,
                     tier_counts=tier_counts,
                     tier_targets=tier_targets,
+                    is_authentic_mock=is_authentic_mock,
                 )
                 subj_selected.extend(picked_comp)
 
@@ -917,6 +979,7 @@ def select_mock_and_room_questions(
                     target_exam=target_exam,
                     tier_counts=tier_counts,
                     tier_targets=tier_targets,
+                    is_authentic_mock=is_authentic_mock,
                 )
                 subj_selected.extend(picked_multi)
 
@@ -935,6 +998,7 @@ def select_mock_and_room_questions(
                     target_exam=target_exam,
                     tier_counts=tier_counts,
                     tier_targets=tier_targets,
+                    is_authentic_mock=is_authentic_mock,
                 )
                 subj_selected.extend(picked_mat)
 
@@ -956,6 +1020,7 @@ def select_mock_and_room_questions(
                     target_exam=target_exam,
                     tier_counts=tier_counts,
                     tier_targets=tier_targets,
+                    is_authentic_mock=is_authentic_mock,
                 )
                 subj_selected.extend(picked_num)
 
@@ -978,6 +1043,7 @@ def select_mock_and_room_questions(
                     target_exam=target_exam,
                     tier_counts=tier_counts,
                     tier_targets=tier_targets,
+                    is_authentic_mock=is_authentic_mock,
                 )
                 subj_selected.extend(picked_adv_rem)
 
@@ -998,6 +1064,7 @@ def select_mock_and_room_questions(
                     target_exam=target_exam,
                     tier_counts=tier_counts,
                     tier_targets=tier_targets,
+                    is_authentic_mock=is_authentic_mock,
                 )
                 subj_selected.extend(picked_scq_adv)
 
@@ -1017,6 +1084,7 @@ def select_mock_and_room_questions(
                     target_exam=target_exam,
                     tier_counts=tier_counts,
                     tier_targets=tier_targets,
+                    is_authentic_mock=is_authentic_mock,
                 )
                 subj_selected.extend(picked_fb)
 

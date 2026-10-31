@@ -70,8 +70,8 @@ def get_user_chapter_elo_map(cursor, user_id: str) -> Dict[str, float]:
     return chap_map
 
 
-def get_user_chapter_elo(cursor, user_id: str, chapter: Optional[str], fallback_elo: float = 1200.0) -> float:
-    """Returns the user's Chapter Elo for the specified chapter (defaulting to 1200.0 for untouched chapters)."""
+def get_user_chapter_elo(cursor, user_id: str, chapter: Optional[str], fallback_elo: float = 1250.0) -> float:
+    """Returns the user's Chapter Elo for the specified chapter (defaulting to 1250.0 Foundation baseline for untouched chapters)."""
     if not chapter:
         return fallback_elo
     from backend.app.tools.jee_syllabus import normalize_chapter_name
@@ -81,7 +81,7 @@ def get_user_chapter_elo(cursor, user_id: str, chapter: Optional[str], fallback_
         return float(chap_map[norm_c])
     if chapter in chap_map:
         return float(chap_map[chapter])
-    return 1200.0
+    return fallback_elo
 
 
 def update_cached_chapter_elo(user_id: str, chapter: Optional[str], new_elo: float):
@@ -122,13 +122,13 @@ def get_initial_adaptive_elo(
 ) -> float:
     """
     Seeds the initial adaptive Elo from the user's Chapter Elo(s) in user_chapter_elo:
-    - Single chapter: exact Chapter Elo of that chapter (1200.0 if untouched).
+    - Single chapter: exact Chapter Elo of that chapter (1250.0 if untouched).
     - Multiple allowed/learnt chapters: average Chapter Elo across those chapters.
-    - Full syllabus / subject: average Chapter Elo of attempted chapters in that subject (or 1200.0 baseline).
+    - Full syllabus / subject: average Chapter Elo of attempted chapters in that subject (or 1250.0 baseline).
     """
     user_id = str(user["id"])
     if target_chapter:
-        return round(get_user_chapter_elo(cursor, user_id, target_chapter, 1200.0), 1)
+        return round(get_user_chapter_elo(cursor, user_id, target_chapter, 1250.0), 1)
 
     chap_map = get_user_chapter_elo_map(cursor, user_id)
     from backend.app.tools.jee_syllabus import normalize_chapter_name, JEE_SYLLABUS
@@ -136,7 +136,7 @@ def get_initial_adaptive_elo(
     if allowed_chapters and len(allowed_chapters) > 0:
         norm_set = {normalize_chapter_name(c) for c in allowed_chapters if c}
         if norm_set:
-            vals = [chap_map.get(c, 1200.0) for c in norm_set]
+            vals = [chap_map.get(c, 1250.0) for c in norm_set]
             return round(sum(vals) / len(vals), 1)
 
     # Filter canonical chapters by subject if a single subject was selected
@@ -152,7 +152,7 @@ def get_initial_adaptive_elo(
 
     if subj_chaps:
         return round(sum(subj_chaps) / len(subj_chaps), 1)
-    return 1200.0
+    return 1250.0
 
 
 def get_user_weak_chapters(cursor, user_id: str, subject: Optional[str] = None) -> List[str]:
@@ -346,7 +346,7 @@ def select_next_adaptive_question(
                 due_q = None
 
         if due_q and due_q.get("id") not in seen:
-            due_ch_elo = get_user_chapter_elo(cursor, user_id, due_q.get("chapter"), 1200.0)
+            due_ch_elo = get_user_chapter_elo(cursor, user_id, due_q.get("chapter"), 1250.0)
             metadata = {
                 "target_elo": round(float(due_q.get("elo_rating") or 1500), 1),
                 "chapter_elo": round(due_ch_elo, 1),
@@ -419,10 +419,21 @@ def select_next_adaptive_question(
         q_elo = float(q.get("elo_rating") or 1500)
         q_ch_raw = q.get("chapter") or ""
         q_ch_norm = normalize_chapter_name(q_ch_raw) if q_ch_raw else ""
-        user_ch_elo = float(chapter_elo_map.get(q_ch_norm, chapter_elo_map.get(q_ch_raw, 1200.0)))
+        user_ch_elo = float(chapter_elo_map.get(q_ch_norm, chapter_elo_map.get(q_ch_raw, 1250.0)))
+
+        # Enforce Difficulty Floor Protection:
+        # Prevents questions from collapsing below competitive exam standards
+        te_up = str(target_exam or "").upper().strip()
+        is_adv = "ADV" in te_up
+        if is_adv:
+            floor_elo = 1650.0
+        elif user_ch_elo >= 1400.0:
+            floor_elo = 1350.0
+        else:
+            floor_elo = 1150.0
 
         # Chapter-specific target Elo = User's Chapter Elo + In-Session Momentum Step
-        q_target_elo = max(1000.0, min(2500.0, user_ch_elo + step_offset))
+        q_target_elo = max(floor_elo, min(2500.0, user_ch_elo + step_offset))
 
         # Elo Proximity bell curve (standard dev = 220) relative to THIS chapter's target Elo
         diff = abs(q_elo - q_target_elo)
@@ -456,7 +467,7 @@ def select_next_adaptive_question(
     best_q = None
     is_q_revenge = False
     is_q_remed = False
-    best_ch_elo = 1200.0
+    best_ch_elo = 1250.0
     best_target_elo = current_session_elo
 
     for score, cand_q, rev, rem, ch_elo_val, q_targ_val in scored:
