@@ -130,7 +130,8 @@ const DEFAULT_SYLLABUS = {
       unit: 'Algebra',
       chapters: [
         'Sets, Relations and Functions',
-        'Complex Numbers and Quadratic Equations',
+        'Complex Numbers',
+        'Quadratic Equations',
         'Matrices and Determinants',
         'Permutations and Combinations',
         'Mathematical Induction & Binomial Theorem',

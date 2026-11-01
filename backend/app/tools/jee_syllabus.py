@@ -122,7 +122,8 @@ JEE_SYLLABUS = {
             "unit": "Algebra",
             "chapters": [
                 "Sets, Relations and Functions",
-                "Complex Numbers and Quadratic Equations",
+                "Complex Numbers",
+                "Quadratic Equations",
                 "Matrices and Determinants",
                 "Permutations and Combinations",
                 "Mathematical Induction & Binomial Theorem",
@@ -308,9 +309,13 @@ CHAPTER_NORMALIZER = {
     "fundamentals of mathematics": "Sets, Relations and Functions",
     "sets, relations and functions": "Sets, Relations and Functions",
     "sets and relations": "Sets, Relations and Functions",
-    "complex numbers": "Complex Numbers and Quadratic Equations",
-    "quadratic equations": "Complex Numbers and Quadratic Equations",
-    "complex numbers and quadratic equations": "Complex Numbers and Quadratic Equations",
+    "complex numbers": "Complex Numbers",
+    "complex number": "Complex Numbers",
+    "quadratic equations": "Quadratic Equations",
+    "quadratic equation": "Quadratic Equations",
+    "quadratic expressions": "Quadratic Equations",
+    "theory of equations": "Quadratic Equations",
+    "complex numbers and quadratic equations": "Complex Numbers",
     "matrices and determinants": "Matrices and Determinants",
     "matrices": "Matrices and Determinants",
     "determinants": "Matrices and Determinants",
@@ -375,6 +380,7 @@ UMBRELLA_CHAPTER_EXPANSION = {
     "trigonometry & inverse trigonometric functions": ["Inverse Trigonometric Functions", "Trigonometric Equations", "Trigonometric Ratios and Identities"],
     "trigonometry": ["Inverse Trigonometric Functions", "Trigonometric Equations", "Trigonometric Ratios and Identities"],
     "statistics and probability": ["Statistics", "Probability"],
+    "complex numbers and quadratic equations": ["Complex Numbers", "Quadratic Equations"],
     "binomial theorem": ["Mathematical Induction & Binomial Theorem"]
 }
 
@@ -712,9 +718,10 @@ DEFAULT_CHAPTER_WEIGHTAGE: Dict[str, float] = {
     "Chemistry in Everyday Life": 1.0,
     "Practical Organic Chemistry": 2.0,
 
-    # --- Mathematics (25 Chapters) ---
+    # --- Mathematics (26 Chapters) ---
     "Sets, Relations and Functions": 3.0,
-    "Complex Numbers and Quadratic Equations": 4.0,
+    "Complex Numbers": 2.5,
+    "Quadratic Equations": 2.5,
     "Matrices and Determinants": 5.0,
     "Permutations and Combinations": 3.0,
     "Mathematical Induction & Binomial Theorem": 3.0,
@@ -839,7 +846,7 @@ HIGH_YIELD_CHAPTERS_SET = {
     "Definite Integration and Area Under Curves", "Indefinite Integration",
     "Limits, Continuity and Differentiability", "Differentiation and Applications of Derivatives",
     "Vector Algebra", "Three Dimensional Geometry",
-    "Matrices and Determinants", "Complex Numbers and Quadratic Equations",
+    "Matrices and Determinants", "Complex Numbers", "Quadratic Equations",
     "Straight Lines and Pair of Straight Lines", "Circles", "Parabola", "Ellipse",
     "Probability", "Sequences and Series", "Mathematical Induction & Binomial Theorem"
 }

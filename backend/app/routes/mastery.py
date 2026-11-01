@@ -40,7 +40,7 @@ HIGH_YIELD_CHAPTERS = {
     "Definite Integration and Area Under Curves", "Indefinite Integration",
     "Limits, Continuity and Differentiability", "Differentiation and Applications of Derivatives",
     "Vector Algebra", "Three Dimensional Geometry",
-    "Matrices and Determinants", "Complex Numbers and Quadratic Equations",
+    "Matrices and Determinants", "Complex Numbers", "Quadratic Equations",
     "Straight Lines and Pair of Straight Lines", "Circles", "Parabola", "Ellipse",
     "Probability", "Sequences and Series", "Mathematical Induction & Binomial Theorem"
 }

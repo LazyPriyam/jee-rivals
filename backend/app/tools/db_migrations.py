@@ -666,6 +666,138 @@ def migration_011_daily_assignments(conn: sqlite3.Connection):
     c.execute("CREATE INDEX IF NOT EXISTS idx_assignment_reflections_question ON assignment_reflections(question_id);")
 
 
+def migration_012_split_complex_and_quadratic(conn: sqlite3.Connection):
+    """
+    Splits the combined legacy chapter 'Complex Numbers and Quadratic Equations'
+    into two distinct canonical chapters: 'Complex Numbers' and 'Quadratic Equations'.
+    """
+    import re
+    c = conn.cursor()
+    c.execute("SELECT id, text, solution_text FROM questions WHERE chapter = 'Complex Numbers and Quadratic Equations'")
+    rows = c.fetchall()
+    if rows:
+        def classify_q(text, sol):
+            full_str = f"{text or ''} {sol or ''}"
+            c_score = 0
+            q_score = 0
+
+            # Complex patterns:
+            if re.search(r'complex\s+number', full_str, re.I): c_score += 20
+            if re.search(r'argand', full_str, re.I): c_score += 15
+            if re.search(r'imaginary\s+(part|axis|unit|root|number|quantity)', full_str, re.I): c_score += 12
+            if re.search(r'purely\s+imaginary|purely\s+real', full_str, re.I): c_score += 15
+            if re.search(r'real\s+part', full_str, re.I): c_score += 10
+            if re.search(r'roots?\s+of\s+unity', full_str, re.I): c_score += 20
+            if re.search(r'cube\s+roots?\s+of\s+unity', full_str, re.I): c_score += 20
+            if re.search(r'\|\s*[zwt]\s*\|\s*=\s*[0-9a-zA-Z]', full_str): c_score += 15
+            if re.search(r'\|\s*z\s*[\+\-\*\/]', full_str): c_score += 15
+            if re.search(r'\|\s*z\s*\|', full_str): c_score += 15
+            if re.search(r'\|\s*z_?[0-9]*\s*\|', full_str): c_score += 15
+            if re.search(r'\\bar\{\s*[zwt]', full_str): c_score += 15
+            if re.search(r'\\bar\s+[zwt]', full_str): c_score += 15
+            if re.search(r'\\arg\b|arg\s*\(', full_str, re.I): c_score += 12
+            if re.search(r'\\operatorname\{Re\}|\\operatorname\{Im\}', full_str): c_score += 15
+            if re.search(r'\bRe\s*\(|\bIm\s*\(', full_str): c_score += 15
+            if re.search(r'e\^\{\s*i', full_str): c_score += 15
+            if re.search(r'cis\s*\(', full_str, re.I): c_score += 15
+            if re.search(r'de\s+moivre', full_str, re.I): c_score += 20
+            if re.search(r'\\omega\^', full_str): c_score += 10
+            if re.search(r'1\s*\+\s*\\omega\s*\+\s*\\omega\^2', full_str): c_score += 20
+            if re.search(r'\bi\s*=\s*\\sqrt\{\s*-\s*1\s*\}', full_str): c_score += 15
+            if re.search(r'\\sqrt\{\s*-\s*1\s*\}', full_str): c_score += 8
+            if re.search(r'\b(z_1|z_2|z_3|z_0)\b', full_str): c_score += 10
+            if re.search(r'modulus\s+and\s+amplitude|amplitude\s+of', full_str, re.I): c_score += 15
+            if re.search(r'\bz\s*\\in\s*\\mathbb\{C\}|\bz\s*\\in\s*C\b', full_str): c_score += 20
+            if re.search(r'unimodular', full_str, re.I): c_score += 15
+            if re.search(r'conjugate', full_str, re.I): c_score += 10
+            if re.search(r'\bz\^\{?[0-9]+\}?', full_str): c_score += 8
+            if re.search(r'iz\b|iz\^', full_str): c_score += 10
+            if re.search(r'roots?.*lie\s+(on|in|inside|outside)', full_str, re.I) and re.search(r'(\\omega|[zi])', full_str): c_score += 15
+
+            z_matches = len(re.findall(r'\b[zZ]\b|\b[zZ]_[0-9]\b', full_str))
+            if z_matches >= 2:
+                c_score += min(15, z_matches * 3)
+            elif z_matches == 1 and not re.search(r'\b[xy]\b', full_str):
+                c_score += 5
+
+            # Quadratic patterns:
+            if re.search(r'quadratic\s+(equation|expression|polynomial|formula)', full_str, re.I): q_score += 20
+            if re.search(r'discriminant', full_str, re.I): q_score += 15
+            if re.search(r'b\^2\s*-\s*4ac', full_str, re.I): q_score += 15
+            if re.search(r'common\s+root', full_str, re.I): q_score += 15
+            if re.search(r'location\s+of\s+roots', full_str, re.I): q_score += 15
+            if re.search(r'sum\s+of\s+(the\s+)?roots|product\s+of\s+(the\s+)?roots', full_str, re.I): q_score += 15
+            if re.search(r'difference\s+of\s+(the\s+)?roots', full_str, re.I): q_score += 15
+            if re.search(r'roots?\s+of\s+(the\s+)?equation', full_str, re.I): q_score += 10
+            if re.search(r'real\s+and\s+(distinct|equal|unequal)\s+roots', full_str, re.I): q_score += 15
+            if re.search(r'number\s+of\s+real\s+roots', full_str, re.I): q_score += 15
+            if re.search(r'both\s+roots\s+are', full_str, re.I): q_score += 15
+            if re.search(r'one\s+root\s+is\s+greater', full_str, re.I): q_score += 15
+            if re.search(r'\\alpha\b|\b\alpha\b', full_str): q_score += 4
+            if re.search(r'\\beta\b|\b\beta\b', full_str): q_score += 4
+            if re.search(r'\\alpha\s*[\+\*]\s*\\beta', full_str): q_score += 10
+            if re.search(r'\\alpha\^2\s*\+\s*\\beta\^2', full_str): q_score += 10
+            if re.search(r'ax\^2\s*\+\s*bx\s*\+\s*c', full_str): q_score += 15
+            if re.search(r'x\^2\s*[\+\-]', full_str): q_score += 4
+            if re.search(r'polynomial\s+equation', full_str, re.I): q_score += 10
+            if re.search(r'maximum\s+value\s+of.*x\^2|minimum\s+value\s+of.*x\^2', full_str, re.I): q_score += 10
+
+            if c_score > q_score:
+                return "Complex Numbers"
+            elif q_score > c_score:
+                return "Quadratic Equations"
+            else:
+                full = f"{text or ''} {sol or ''}"
+                if any(k in full.lower() for k in ["complex", "iota", "imaginary", "argand", "modulus", "unity", "\\omega"]) or " z " in full:
+                    return "Complex Numbers"
+                else:
+                    return "Quadratic Equations"
+
+        updates = []
+        for r in rows:
+            target_ch = classify_q(r["text"], r["solution_text"])
+            updates.append((target_ch, r["id"]))
+
+        c.executemany("UPDATE questions SET chapter = ? WHERE id = ?", updates)
+
+    # Migrate user_chapter_elo if old chapter exists
+    try:
+        c.execute("SELECT * FROM user_chapter_elo WHERE chapter = 'Complex Numbers and Quadratic Equations'")
+        old_ratings = c.fetchall()
+        for r in old_ratings:
+            uid = r["user_id"]
+            subj = r["subject"]
+            elo = r["elo"]
+            att = r["attempts"]
+            corr = r["correct"]
+            lu = r["last_updated"]
+            for ch in ["Complex Numbers", "Quadratic Equations"]:
+                c.execute("""
+                    INSERT OR IGNORE INTO user_chapter_elo (user_id, subject, chapter, elo, attempts, correct, last_updated)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                """, (uid, subj, ch, elo, att, corr, lu))
+        c.execute("DELETE FROM user_chapter_elo WHERE chapter = 'Complex Numbers and Quadratic Equations'")
+    except Exception:
+        pass
+
+    # Migrate activity_log if old chapter exists
+    try:
+        c.execute("""
+            UPDATE activity_log
+            SET chapter = 'Complex Numbers'
+            WHERE chapter = 'Complex Numbers and Quadratic Equations'
+        """)
+    except Exception:
+        pass
+
+    # Invalidate cache so in-memory question banks reload fresh chapters
+    try:
+        from backend.app.tools.question_cache import invalidate_question_cache
+        invalidate_question_cache()
+    except Exception:
+        pass
+
+
 # Master migration registry (ordered sequentially)
 MIGRATIONS: List[Dict[str, Any]] = [
     {
@@ -722,6 +854,11 @@ MIGRATIONS: List[Dict[str, Any]] = [
         "version": 11,
         "name": "daily_assignments",
         "func": migration_011_daily_assignments,
+    },
+    {
+        "version": 12,
+        "name": "split_complex_and_quadratic",
+        "func": migration_012_split_complex_and_quadratic,
     },
 ]
 
