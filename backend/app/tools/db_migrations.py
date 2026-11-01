@@ -673,11 +673,11 @@ def migration_012_split_complex_and_quadratic(conn: sqlite3.Connection):
     """
     import re
     c = conn.cursor()
-    c.execute("SELECT id, text, solution_text FROM questions WHERE chapter = 'Complex Numbers and Quadratic Equations'")
+    c.execute("SELECT id, text, options, solution_text FROM questions WHERE chapter = 'Complex Numbers and Quadratic Equations'")
     rows = c.fetchall()
     if rows:
-        def classify_q(text, sol):
-            full_str = f"{text or ''} {sol or ''}"
+        def classify_q(text, opts, sol):
+            full_str = f"{text or ''} {opts or ''} {sol or ''}"
             c_score = 0
             q_score = 0
 
@@ -713,6 +713,12 @@ def migration_012_split_complex_and_quadratic(conn: sqlite3.Connection):
             if re.search(r'\bz\^\{?[0-9]+\}?', full_str): c_score += 8
             if re.search(r'iz\b|iz\^', full_str): c_score += 10
             if re.search(r'roots?.*lie\s+(on|in|inside|outside)', full_str, re.I) and re.search(r'(\\omega|[zi])', full_str): c_score += 15
+            if re.search(r'\\sqrt\{\s*a\s*\}\s*\\sqrt\{\s*b\s*\}', full_str) and re.search(r'a\s*<\s*0', full_str): c_score += 20
+            if re.search(r'\(-i\)\^\{\s*1/3\s*\}|\\sqrt\[3\]\{\s*-\s*1\s*\}', full_str): c_score += 20
+            if re.search(r'\\left\(\s*\\frac\{\s*1\s*\+\s*i\s*\}\{\s*1\s*-\s*i\s*\}\s*\\right\)', full_str): c_score += 20
+            if re.search(r'1\s*\+\s*\\sin.*i\s*\\cos', full_str): c_score += 20
+            if re.search(r'\\frac\{\s*3\s*\+\s*i\\sin', full_str): c_score += 20
+            if re.search(r'\bi\b|\bi\s*[\$\+\-\*\/\\,]|[\$\+\-\*\/\\(]i\b', full_str): c_score += 8
 
             z_matches = len(re.findall(r'\b[zZ]\b|\b[zZ]_[0-9]\b', full_str))
             if z_matches >= 2:
@@ -747,15 +753,15 @@ def migration_012_split_complex_and_quadratic(conn: sqlite3.Connection):
             elif q_score > c_score:
                 return "Quadratic Equations"
             else:
-                full = f"{text or ''} {sol or ''}"
-                if any(k in full.lower() for k in ["complex", "iota", "imaginary", "argand", "modulus", "unity", "\\omega"]) or " z " in full:
+                full = f"{text or ''} {opts or ''} {sol or ''}"
+                if any(k in full.lower() for k in ["complex", "iota", "imaginary", "argand", "modulus", "unity", "\\omega"]) or " z " in full or " i " in full:
                     return "Complex Numbers"
                 else:
                     return "Quadratic Equations"
 
         updates = []
         for r in rows:
-            target_ch = classify_q(r["text"], r["solution_text"])
+            target_ch = classify_q(r["text"], r["options"], r["solution_text"])
             updates.append((target_ch, r["id"]))
 
         c.executemany("UPDATE questions SET chapter = ? WHERE id = ?", updates)
