@@ -52,7 +52,7 @@ def normalize_answer(ans: Any) -> str:
         lead = m.group(1).upper()
         mapping = {"1": "A", "2": "B", "3": "C", "4": "D"}
         return mapping.get(lead, lead)
-    s_clean = s.upper().strip("()., []'"")
+    s_clean = s.upper().strip("()., []'\"")
     mapping = {"1": "A", "2": "B", "3": "C", "4": "D"}
     return mapping.get(s_clean, s_clean)
 
