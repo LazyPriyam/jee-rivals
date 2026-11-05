@@ -1230,9 +1230,19 @@ export default function AdaptivePracticeView({ user, onOpenAuth, onNavigateTab, 
             )}
 
             {/* Question Text */}
-            <div className="text-sm sm:text-base text-slate-100 font-medium leading-relaxed">
-              <MathRenderer content={question.text} />
-            </div>
+            {(() => {
+              let displayStem = question?.text || '';
+              const optRegex = /(?:^|[\s\t\n]+)(?:\(([a-dA-D1-4])\)|([a-dA-D1-4])[\.:\)])\s+/;
+              const m = displayStem.match(optRegex);
+              if (m && m.index > 10) {
+                displayStem = displayStem.substring(0, m.index).trim();
+              }
+              return (
+                <div className="text-sm sm:text-base text-slate-100 font-medium leading-relaxed">
+                  <MathRenderer content={displayStem} />
+                </div>
+              );
+            })()}
 
             {/* Diagrams if any */}
             {Boolean(question.has_diagram || question.diagram_urls) && (() => {
@@ -1278,6 +1288,22 @@ export default function AdaptivePracticeView({ user, onOpenAuth, onNavigateTab, 
               }
               if (!Array.isArray(rawOpts)) {
                 rawOpts = [];
+              }
+              if (rawOpts.length === 0 && question?.text) {
+                const optRegex = /(?:^|[\s\t\n]+)(?:\(([a-dA-D1-4])\)|([a-dA-D1-4])[\.:\)])\s+/g;
+                const mList = [...question.text.matchAll(optRegex)];
+                if (mList.length >= 2) {
+                  const numToLet = { '1': 'A', '2': 'B', '3': 'C', '4': 'D' };
+                  rawOpts = [];
+                  for (let j = 0; j < mList.length; j++) {
+                    const om = mList[j];
+                    const kRaw = (om[1] || om[2]).toUpperCase();
+                    const k = numToLet[kRaw] || kRaw;
+                    const sPos = om.index + om[0].length;
+                    const ePos = (j + 1 < mList.length) ? mList[j + 1].index : question.text.length;
+                    rawOpts.push({ key: k, text: question.text.substring(sPos, ePos).trim().replace(/\s+/g, ' ') });
+                  }
+                }
               }
               const normalizedOptions = rawOpts.map((opt, oIdx) => {
                 if (typeof opt === 'string') {

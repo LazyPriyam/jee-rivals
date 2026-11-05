@@ -8,11 +8,50 @@
  */
 
 
+
+export function extractOptionsFromStem(stem) {
+  if (!stem) return { text: stem, options: [] };
+  const optRegex = /(?:^|[\s\t\n]+)(?:\(([a-dA-D1-4])\)|([a-dA-D1-4])[\.:\)])\s+/g;
+  const matches = [...stem.matchAll(optRegex)];
+  if (matches.length < 2) return { text: stem, options: [] };
+
+  const keys = matches.map(m => (m[1] || m[2]).toUpperCase());
+  const hasA = keys.includes('A') || keys.includes('1');
+  const hasB = keys.includes('B') || keys.includes('2');
+  if (!hasA || !hasB) return { text: stem, options: [] };
+
+  const cleanStem = stem.substring(0, matches[0].index).trim();
+  const numToLet = { '1': 'A', '2': 'B', '3': 'C', '4': 'D' };
+  const options = [];
+
+  for (let j = 0; j < matches.length; j++) {
+    const om = matches[j];
+    const keyRaw = (om[1] || om[2]).toUpperCase();
+    const key = numToLet[keyRaw] || keyRaw;
+    const startPos = om.index + om[0].length;
+    const endPos = (j + 1 < matches.length) ? matches[j + 1].index : stem.length;
+    const optText = stem.substring(startPos, endPos).trim().replace(/\s+/g, ' ');
+    options.push({ key, text: optText });
+  }
+
+  return { text: cleanStem, options };
+}
+
 export function parseInlineComprehension(q) {
   if (!q || !q.text) return [q];
 
-  // If already parsed with passage_text, return as-is
+  // If already parsed with passage_text, ensure options are extracted from stem
   if (q.passage_text && q.passage_text.trim().length > 0) {
+    let curOpts = q.options;
+    if (typeof curOpts === 'string') {
+      try { curOpts = JSON.parse(curOpts); } catch (_) { curOpts = []; }
+    }
+    if (!curOpts || curOpts.length === 0) {
+      const { text: cleanStem, options } = extractOptionsFromStem(q.text);
+      if (options && options.length >= 2) {
+        return [{ ...q, text: cleanStem, options }];
+      }
+    }
     return [q];
   }
 
@@ -25,8 +64,8 @@ export function parseInlineComprehension(q) {
     return [q];
   }
 
-  // Regex to detect numbered subquestions: "\n1.", "\n2.", "\n35.", "\n(1)"
-  const qSplitRegex = /(?:\n+|^)\s*(?:(?:Question\s*)?(\d{1,2})\.|\((\d{1,2})\))\s+/gi;
+  // Regex to detect numbered subquestions: "\n1.", "\n2.", "\n35.", "\nQuestion 1."
+  const qSplitRegex = /(?:\n+|^)\s*(?:(?:Question\s*|Q\.\s*|Q\s*)?(\d{1,2})\.|\bQ(?:uestion)?\s*(\d{1,2})[\.:])\s+/gi;
   const matches = [...text.matchAll(qSplitRegex)];
 
   if (matches.length === 1 && (isCompType || startsWithPassage)) {

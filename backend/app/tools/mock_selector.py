@@ -909,7 +909,7 @@ def select_mock_and_room_questions(
             # ─────────────────────────────────────────────────────────────
             multi_pool = [q for q in working_pool if _normalize_qtype(q.get("question_type")) == "MULTIPLE_CHOICE"]
             num_pool = [q for q in working_pool if _normalize_qtype(q.get("question_type")) == "NUMERICAL"]
-            comp_pool = [q for q in working_pool if _normalize_qtype(q.get("question_type")) == "COMPREHENSION" or q.get("passage_id")]
+            comp_pool = [q for q in working_pool if (_normalize_qtype(q.get("question_type")) == "COMPREHENSION" or q.get("passage_id")) and (q.get("options") and q.get("options") not in ("[]", "", "null"))]
             mat_pool = [q for q in working_pool if _normalize_qtype(q.get("question_type")) == "MATRIX_MATCH" and (q.get("options") and q.get("options") not in ("[]", "", "null"))]
             scq_adv_pool = [q for q in working_pool if _normalize_qtype(q.get("question_type")) == "SINGLE_CHOICE"]
 
