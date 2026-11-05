@@ -663,6 +663,16 @@ export default function MockTestView({ room, user, onMatchComplete, onExitToDash
                       )}
                     </div>
                   )}
+                {currentQ.question_type === 'MATRIX_MATCH' &&
+                  currentQ.options &&
+                  currentQ.options.length > 0 && (
+                    <div className="px-3 py-1.5 rounded-lg bg-sky-50 border border-sky-200 text-[11px] font-bold text-sky-900 flex items-center justify-between">
+                      <span>JEE Advanced Matching List: Select the correct code combination from the options below.</span>
+                      {answers[currentQ.id] && (
+                        <span className="font-mono text-sky-800">Selected: ({answers[currentQ.id]})</span>
+                      )}
+                    </div>
+                  )}
                 {currentQ.options && currentQ.options.length > 0 ? (
                   currentQ.options.map((opt) => {
                     const qType = (currentQ.question_type || '').toUpperCase();
@@ -696,10 +706,18 @@ export default function MockTestView({ room, user, onMatchComplete, onExitToDash
                   })
                 ) : (
                   <div className="p-4 bg-slate-50 border border-slate-200 rounded-lg">
-                    <span className="text-xs font-bold text-slate-600 block mb-2">Numerical Answer:</span>
+                    <span className="text-xs font-bold text-slate-600 block mb-2">
+                      {currentQ.question_type === 'MATRIX_MATCH'
+                        ? 'Matrix Match Answer (Options Pending Reconciliation):'
+                        : 'Numerical Answer:'}
+                    </span>
                     <input
                       type="text"
-                      placeholder="Enter numerical value..."
+                      placeholder={
+                        currentQ.question_type === 'MATRIX_MATCH'
+                          ? 'Enter matching string or option key...'
+                          : 'Enter numerical value...'
+                      }
                       value={answers[currentQ.id] || ''}
                       onChange={(e) => handleSelectOption(e.target.value)}
                       className="px-4 py-2 border border-slate-300 rounded font-mono text-sm w-48 focus:outline-none focus:border-orange-500"

@@ -4,8 +4,9 @@ Contains exact canonical chapters matching jee/models/syllabus.py and the questi
 Provides helper functions to calculate 5-tier RPG chapter masteries and skill tree progression.
 """
 
-from typing import Dict, List, Any, Optional, Tuple, Set
+from typing import Dict, List, Any, Optional, Tuple, Set, Iterable
 import re
+import json
 
 # Authoritative 2026 Canonical JEE Syllabus (89 Chapters organized across Units & Subjects)
 JEE_SYLLABUS = {
@@ -438,6 +439,114 @@ def expand_allowed_chapters(chapters: List[str]) -> List[str]:
             expanded.add(c_clean)
 
     return sorted(list(expanded))
+
+
+def parse_linked_chapters(raw: Any) -> List[str]:
+    """
+    Parses linked_chapters from whatever format it arrives in (JSON list string, python list,
+    comma-separated string, or None). Returns a clean list of canonical non-empty chapter names.
+    If an umbrella/legacy name is present (like 'Complex Numbers and Quadratic Equations'),
+    it expands to the constituent canonical chapters.
+    """
+    if not raw:
+        return []
+    items: List[str] = []
+    if isinstance(raw, list):
+        items = [str(x).strip() for x in raw if str(x).strip()]
+    elif isinstance(raw, str):
+        s = raw.strip()
+        if not s or s in ("[]", "null", "None", '""'):
+            return []
+        try:
+            parsed = json.loads(s)
+            if isinstance(parsed, list):
+                items = [str(x).strip() for x in parsed if str(x).strip()]
+            elif isinstance(parsed, str):
+                items = [parsed.strip()]
+        except Exception:
+            items = [x.strip() for x in s.split(",") if x.strip()]
+
+    result: List[str] = []
+    for it in items:
+        if not it:
+            continue
+        low = it.strip().lower()
+        if low in UMBRELLA_CHAPTER_EXPANSION:
+            for sub in UMBRELLA_CHAPTER_EXPANSION[low]:
+                if sub not in result:
+                    result.append(sub)
+        else:
+            norm = normalize_chapter_name(it)
+            val = norm if norm else it
+            if val not in result:
+                result.append(val)
+    return result
+
+
+def build_selected_chapters_set(chapters: Optional[Any]) -> Set[str]:
+    """
+    Builds a normalized lowercase lookup set from an iterable or list of chapter names,
+    containing canonical normalized forms, expanded umbrella forms, and raw forms.
+    Returns empty set if chapters is None or empty.
+    """
+    if not chapters:
+        return set()
+    s: Set[str] = set()
+    items = [chapters] if isinstance(chapters, str) else list(chapters)
+    for ch in items:
+        if not ch:
+            continue
+        str_ch = str(ch).strip()
+        if not str_ch or str_ch.lower() in ("all", "any", "mixed", "full syllabus"):
+            continue
+        low = str_ch.lower()
+        s.add(low)
+        norm = normalize_chapter_name(str_ch)
+        if norm:
+            s.add(norm.lower())
+        if low in UMBRELLA_CHAPTER_EXPANSION:
+            for sub in UMBRELLA_CHAPTER_EXPANSION[low]:
+                s.add(sub.lower())
+                norm_sub = normalize_chapter_name(sub)
+                if norm_sub:
+                    s.add(norm_sub.lower())
+    return s
+
+
+def question_matches_selected_chapters(
+    question: dict,
+    selected_chapters_set: Optional[Set[str]],
+    raw_chapter: Optional[str] = None
+) -> bool:
+    """
+    Evaluates whether a question is eligible given a user's selected chapters for a custom test.
+    Rule:
+    If selected_chapters_set is provided and non-empty:
+      Both the main chapter AND all linked chapters must belong to the selected chapters.
+      {main_chapter} U {linked_chapters} subset of selected_chapters.
+    If selected_chapters_set is None or empty:
+      Full-syllabus / unconstrained test -> returns True.
+    """
+    if not selected_chapters_set:
+        return True
+
+    ch_main = raw_chapter or question.get("chapter") or ""
+    ch_main_norm = normalize_chapter_name(ch_main).lower()
+    ch_main_raw = str(ch_main).strip().lower()
+
+    # 1. Main chapter must be in selected chapters
+    if ch_main_norm not in selected_chapters_set and ch_main_raw not in selected_chapters_set:
+        return False
+
+    # 2. All linked chapters must also be in selected chapters
+    linked = parse_linked_chapters(question.get("linked_chapters"))
+    for lk in linked:
+        lk_norm = normalize_chapter_name(lk).lower()
+        lk_raw = str(lk).strip().lower()
+        if lk_norm not in selected_chapters_set and lk_raw not in selected_chapters_set:
+            return False
+
+    return True
 
 
 def calculate_mastery_tier(total_attempts: int, correct: int, avg_time: float = 0.0) -> Dict[str, Any]:

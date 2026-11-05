@@ -804,6 +804,20 @@ def migration_012_split_complex_and_quadratic(conn: sqlite3.Connection):
         pass
 
 
+def migration_013_linked_chapters_column(conn: sqlite3.Connection):
+    """Ensures questions table has linked_chapters column."""
+    c = conn.cursor()
+    c.execute("PRAGMA table_info(questions)")
+    existing_cols = {row[1] for row in c.fetchall()}
+    if "linked_chapters" not in existing_cols:
+        c.execute("ALTER TABLE questions ADD COLUMN linked_chapters TEXT DEFAULT '[]'")
+    try:
+        from backend.app.tools.question_cache import invalidate_question_cache
+        invalidate_question_cache()
+    except Exception:
+        pass
+
+
 # Master migration registry (ordered sequentially)
 MIGRATIONS: List[Dict[str, Any]] = [
     {
@@ -865,6 +879,11 @@ MIGRATIONS: List[Dict[str, Any]] = [
         "version": 12,
         "name": "split_complex_and_quadratic",
         "func": migration_012_split_complex_and_quadratic,
+    },
+    {
+        "version": 13,
+        "name": "linked_chapters_column",
+        "func": migration_013_linked_chapters_column,
     },
 ]
 

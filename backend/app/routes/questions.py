@@ -210,16 +210,18 @@ def get_random_questions(
     count: int = Query(5, ge=1, le=50)
 ):
     from backend.app.tools.question_cache import get_all_questions_cached
+    from backend.app.tools.jee_syllabus import build_selected_chapters_set, question_matches_selected_chapters
     all_qs = get_all_questions_cached()
 
     subj_f = subject.strip().lower() if subject and subject.lower() not in ("all", "any") else None
     chap_f = chapter.strip().lower() if chapter and chapter.lower() not in ("all", "any") else None
     diff_f = difficulty.strip().upper() if difficulty and difficulty.upper() not in ("ALL", "MIXED") else None
+    chap_set = build_selected_chapters_set([chapter]) if (chap_f and chap_f not in ("all", "any")) else None
 
     candidates = [
         q for q in all_qs
         if (not subj_f or (q.get("subject") or "").strip().lower() == subj_f)
-        and (not chap_f or (q.get("chapter") or "").strip().lower() == chap_f)
+        and (not chap_set or question_matches_selected_chapters(q, chap_set))
         and (not diff_f or (q.get("difficulty_tier") or "MEDIUM").strip().upper() == diff_f)
     ]
 

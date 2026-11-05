@@ -41,13 +41,20 @@ def normalize_answer(ans: Any) -> str:
     Normalizes option strings across formats:
     '1' -> 'A', '2' -> 'B', '3' -> 'C', '4' -> 'D'
     '(B)' -> 'B', ' B ' -> 'B'
+    '(1) a \to p, b \to q...' -> 'A'
     """
     if ans is None:
         return ""
-    s = str(ans).strip().upper()
-    s = s.strip("()., ")
+    s = str(ans).strip()
+    import re
+    m = re.match(r'^\(?\s*([1-4A-Da-d])\s*\)?(?:\s*[\:\.\-–—]|\s+[a-zA-Z\$\\(]|$)', s)
+    if m:
+        lead = m.group(1).upper()
+        mapping = {"1": "A", "2": "B", "3": "C", "4": "D"}
+        return mapping.get(lead, lead)
+    s_clean = s.upper().strip("()., []'"")
     mapping = {"1": "A", "2": "B", "3": "C", "4": "D"}
-    return mapping.get(s, s)
+    return mapping.get(s_clean, s_clean)
 
 def is_answer_correct(user_ans: str, correct_ans: str, q_type: str = "MCQ") -> bool:
     """Robust answer equivalence checker supporting MCQ options, multi-correct sets, and Numerical types."""

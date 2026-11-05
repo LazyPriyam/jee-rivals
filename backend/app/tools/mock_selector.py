@@ -25,6 +25,8 @@ from backend.app.tools.jee_syllabus import (
     get_chapter_subject,
     distribute_counts,
     distribute_weighted_counts,
+    build_selected_chapters_set,
+    question_matches_selected_chapters,
 )
 from backend.app.tools.question_cache import get_all_questions_cached
 from backend.app.tools.question_verifier import audit_and_heal_question
@@ -696,7 +698,7 @@ def select_mock_and_room_questions(
 
     # Pre-group all non-quarantined questions by subject
     by_subject_raw: Dict[str, List[dict]] = {s: [] for s in active_subjects}
-    norm_chapters_set = {c.lower() for c in norm_chapters}
+    norm_chapters_set = build_selected_chapters_set(norm_chapters or filter_chapters)
 
     for q in all_cached:
         if str(q.get("question_type") or "").strip().upper() == "SUBJECTIVE":
@@ -705,9 +707,7 @@ def select_mock_and_room_questions(
         if q_subj not in by_subject_raw:
             continue
         if norm_chapters_set:
-            q_ch_norm = normalize_chapter_name(q.get("chapter") or "").lower()
-            q_ch_raw = (q.get("chapter") or "").strip().lower()
-            if q_ch_norm not in norm_chapters_set and q_ch_raw not in norm_chapters_set:
+            if not question_matches_selected_chapters(q, norm_chapters_set):
                 continue
         by_subject_raw[q_subj].append(q)
 
@@ -910,7 +910,7 @@ def select_mock_and_room_questions(
             multi_pool = [q for q in working_pool if _normalize_qtype(q.get("question_type")) == "MULTIPLE_CHOICE"]
             num_pool = [q for q in working_pool if _normalize_qtype(q.get("question_type")) == "NUMERICAL"]
             comp_pool = [q for q in working_pool if _normalize_qtype(q.get("question_type")) == "COMPREHENSION" or q.get("passage_id")]
-            mat_pool = [q for q in working_pool if _normalize_qtype(q.get("question_type")) == "MATRIX_MATCH"]
+            mat_pool = [q for q in working_pool if _normalize_qtype(q.get("question_type")) == "MATRIX_MATCH" and (q.get("options") and q.get("options") not in ("[]", "", "null"))]
             scq_adv_pool = [q for q in working_pool if _normalize_qtype(q.get("question_type")) == "SINGLE_CHOICE"]
 
             if explicit_types and len(explicit_types) < 5:

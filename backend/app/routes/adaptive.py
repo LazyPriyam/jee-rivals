@@ -154,12 +154,19 @@ def _bg_sync_adaptive_submission(
 
 
 def normalize_answer_token(ans: Any) -> str:
-    """Normalizes option strings across formats: '1' -> 'A', '2' -> 'B', '3' -> 'C', '4' -> 'D', '(B)' -> 'B'."""
+    """Normalizes option strings across formats: '1' -> 'A', '2' -> 'B', '3' -> 'C', '4' -> 'D', '(B)' -> 'B', '(1) a \to p...' -> 'A'."""
     if ans is None:
         return ""
-    s = str(ans).strip().upper().strip("()., []'\"")
+    s = str(ans).strip()
+    import re
+    m = re.match(r'^\(?\s*([1-4A-Da-d])\s*\)?(?:\s*[\:\.\-–—]|\s+[a-zA-Z\$\\(]|$)', s)
+    if m:
+        lead = m.group(1).upper()
+        mapping = {"1": "A", "2": "B", "3": "C", "4": "D"}
+        return mapping.get(lead, lead)
+    s_clean = s.upper().strip("()., []'\"")
     mapping = {"1": "A", "2": "B", "3": "C", "4": "D"}
-    return mapping.get(s, s)
+    return mapping.get(s_clean, s_clean)
 
 
 def evaluate_answer(user_ans: Any, correct_ans: Any, question_type: str = "SINGLE_CHOICE") -> bool:

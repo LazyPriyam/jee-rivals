@@ -325,10 +325,23 @@ def select_next_adaptive_question(
 
     # 2. Select Candidate Questions via Fast Hot-Cache
     target_chapter = chapter or (remediation_chapter if is_remediation else None)
-    from backend.app.tools.jee_syllabus import expand_allowed_chapters, normalize_chapter_name
+    from backend.app.tools.jee_syllabus import (
+        expand_allowed_chapters,
+        normalize_chapter_name,
+        build_selected_chapters_set,
+        question_matches_selected_chapters,
+    )
     from backend.app.tools.question_cache import get_all_questions_cached
     effective_allowed = set(expand_allowed_chapters(allowed_chapters)) if allowed_chapters else None
     norm_ch = normalize_chapter_name(target_chapter) if target_chapter else None
+
+    # Construct active selected chapters set for multi-chapter linked question filtering
+    if effective_allowed:
+        active_selected_set = build_selected_chapters_set(effective_allowed)
+    elif target_chapter:
+        active_selected_set = build_selected_chapters_set([target_chapter])
+    else:
+        active_selected_set = set()
 
     # Check for Due Spaced Repetition questions (interleaving spaced retrieval)
     if len(seen) > 0 and len(seen) % 3 == 0:
@@ -346,17 +359,18 @@ def select_next_adaptive_question(
                 due_q = None
 
         if due_q and due_q.get("id") not in seen:
-            due_ch_elo = get_user_chapter_elo(cursor, user_id, due_q.get("chapter"), 1250.0)
-            metadata = {
-                "target_elo": round(float(due_q.get("elo_rating") or 1500), 1),
-                "chapter_elo": round(due_ch_elo, 1),
-                "question_elo": float(due_q.get("elo_rating") or 1500),
-                "is_revenge": False,
-                "is_remediation": False,
-                "is_fsrs_due": True,
-                "tier_label": "SPACED_MEMORY_REINFORCEMENT"
-            }
-            return due_q, metadata
+            if not active_selected_set or question_matches_selected_chapters(due_q, active_selected_set):
+                due_ch_elo = get_user_chapter_elo(cursor, user_id, due_q.get("chapter"), 1250.0)
+                metadata = {
+                    "target_elo": round(float(due_q.get("elo_rating") or 1500), 1),
+                    "chapter_elo": round(due_ch_elo, 1),
+                    "question_elo": float(due_q.get("elo_rating") or 1500),
+                    "is_revenge": False,
+                    "is_remediation": False,
+                    "is_fsrs_due": True,
+                    "tier_label": "SPACED_MEMORY_REINFORCEMENT"
+                }
+                return due_q, metadata
 
 
     cached_bank = get_all_questions_cached(cursor)
@@ -374,6 +388,13 @@ def select_next_adaptive_question(
         elif eff_allowed:
             if q.get("chapter") not in eff_allowed:
                 return False
+
+        # Multi-chapter linked questions: if specific chapters are selected,
+        # all linked chapters must also belong to the selected chapters.
+        if active_selected_set:
+            if not question_matches_selected_chapters(q, active_selected_set):
+                return False
+
         if t_exam and str(t_exam).upper() not in ("MIXED", "ALL"):
             te_upper = str(t_exam).upper()
             q_exam = str(q.get("target_exam") or "").upper()
@@ -406,9 +427,11 @@ def select_next_adaptive_question(
     # Fallback 2: If entire bank exhausted for current filter, reuse candidates
     pool = unseen_candidates if unseen_candidates else candidates
     if not pool:
-        pool = [q for q in cached_bank if (not effective_allowed or q.get("chapter") in effective_allowed)]
+        pool = [q for q in cached_bank if _matches_adaptive_filters(q, subject, target_chapter, norm_ch, effective_allowed, t_exam=None)]
         if not pool and cached_bank:
-            pool = cached_bank[:30]
+            pool = [q for q in cached_bank if (not active_selected_set or question_matches_selected_chapters(q, active_selected_set))]
+            if not pool:
+                pool = cached_bank[:30]
 
     if not pool:
         return None, {}

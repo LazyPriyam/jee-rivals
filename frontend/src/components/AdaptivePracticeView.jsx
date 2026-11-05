@@ -1346,6 +1346,12 @@ export default function AdaptivePracticeView({ user, onOpenAuth, onNavigateTab, 
                             <span className="font-mono text-amber-300">Selected: {selectedAnswer || 'None'}</span>
                           </div>
                         )}
+                        {question.question_type === 'MATRIX_MATCH' && (
+                          <div className="mb-3 px-3.5 py-2 rounded-xl bg-sky-950/50 border border-sky-500/40 text-xs text-sky-200 font-bold flex items-center justify-between">
+                            <span>Matching List: Select the correct code combination from the options below.</span>
+                            <span className="font-mono text-sky-300">Selected: {selectedAnswer ? `(${selectedAnswer})` : 'None'}</span>
+                          </div>
+                        )}
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                           {normalizedOptions.map((opt) => {
                             const optKeyUpper = String(opt.key).trim().toUpperCase();
