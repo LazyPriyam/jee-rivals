@@ -64,6 +64,24 @@ def _normalize_qtype(qt: Optional[str]) -> str:
     return qtu
 
 
+def is_exam_match(q_target_exam: Optional[str], exam_filter: str) -> bool:
+    """
+    Checks whether a question's target exam matches the requested exam filter:
+    - 'MAIN': strictly matches 'JEE_MAIN', 'MAIN', or foundational 'MIXED' (never 'ADVANCED').
+    - 'ADVANCED': strictly matches 'JEE_ADVANCED', 'ADVANCED', or 'MIXED' (never 'MAIN').
+    - 'MIXED' or 'ALL': matches any exam.
+    """
+    qte = (q_target_exam or "").upper().strip()
+    ef = (exam_filter or "").upper().strip()
+    if ef in ("ALL", "MIXED", ""):
+        return True
+    if ef in ("MAIN", "JEE_MAIN", "JEE-MAIN"):
+        return ("MAIN" in qte) or (qte == "MIXED") or (not qte)
+    if ef in ("ADV", "ADVANCED", "JEE_ADV", "JEE_ADVANCED", "JEE-ADVANCED"):
+        return ("ADV" in qte) or (qte == "MIXED")
+    return True
+
+
 def _get_verified_pool(all_qs: List[dict]) -> List[dict]:
     """Filters and heals candidate pool using fast in-memory verification."""
     verified = []
@@ -418,8 +436,8 @@ def _pick_from_chapters_weighted(
                 exam_rank = 0 if ("MAIN" in e_tag or not e_tag) else (1 if "MIX" in e_tag else 2)
 
             return (
-                seen,
                 exam_rank,
+                seen,
                 -deficit,
                 dist + random.uniform(0, 15.0)
             )
@@ -743,10 +761,38 @@ def select_mock_and_room_questions(
         s_pool_raw = by_subject_raw.get(s, [])
         s_pool = _get_verified_pool(s_pool_raw)
 
+        # Strict Exam Isolation (Quarantine out conflicting exams):
+        # When JEE Main is selected: strictly isolate to MAIN (and foundational MIXED <= 1950 Elo).
+        # When JEE Advanced is selected: strictly isolate to ADVANCED (and MIXED).
+        if is_jee_main and te not in ("MIXED", "ALL", ""):
+            exam_pool = [
+                q for q in s_pool
+                if is_exam_match(q.get("target_exam"), "MAIN") and float(q.get("elo_rating") or 1500.0) <= 1950.0
+            ]
+            if exam_pool:
+                s_pool = exam_pool
+        elif is_jee_advanced:
+            exam_pool = [
+                q for q in s_pool
+                if is_exam_match(q.get("target_exam"), "ADVANCED")
+            ]
+            if exam_pool:
+                s_pool = exam_pool
+
         # If chapter filter was too restrictive and yielded < s_target in this subject, expand to full subject pool as fallback
         if len(s_pool) < s_target and norm_chapters_set:
             full_subj_raw = [q for q in all_cached if _normalize_subject(q.get("subject")) == s]
             s_pool_fallback = _get_verified_pool(full_subj_raw)
+            if is_jee_main and te not in ("MIXED", "ALL", ""):
+                s_pool_fallback = [
+                    q for q in s_pool_fallback
+                    if is_exam_match(q.get("target_exam"), "MAIN") and float(q.get("elo_rating") or 1500.0) <= 1950.0
+                ]
+            elif is_jee_advanced:
+                s_pool_fallback = [
+                    q for q in s_pool_fallback
+                    if is_exam_match(q.get("target_exam"), "ADVANCED")
+                ]
         else:
             s_pool_fallback = []
 
