@@ -106,7 +106,15 @@ export default function AuthModal({ isOpen, onClose, onSuccess }) {
           onSuccess(me);
           if (onClose) onClose();
           return;
-        } catch (_) {
+        } catch (tokErr) {
+          if (tokErr?.status === 404 && (tokErr?.message?.includes("does not exist anymore") || tokErr?.message?.includes("not found"))) {
+            purgeUserSessionArtifacts();
+            if (typeof window !== "undefined") {
+              window.dispatchEvent(new CustomEvent("jee:ghost_404"));
+            }
+            if (onClose) onClose();
+            return;
+          }
           // Token expired, fall through to PIN auto-refresh
         }
       }
@@ -122,6 +130,14 @@ export default function AuthModal({ isOpen, onClose, onSuccess }) {
         return;
       }
     } catch (err) {
+      if (err?.status === 404 && (err?.message?.includes("does not exist anymore") || err?.message?.includes("not found"))) {
+        purgeUserSessionArtifacts();
+        if (typeof window !== "undefined") {
+          window.dispatchEvent(new CustomEvent("jee:ghost_404"));
+        }
+        if (onClose) onClose();
+        return;
+      }
       setError(err.message || 'Auto sign-in failed. Please enter your PIN manually.');
     } finally {
       setLoading(false);
@@ -181,6 +197,14 @@ export default function AuthModal({ isOpen, onClose, onSuccess }) {
       onSuccess(resp.user);
       if (onClose) onClose();
     } catch (err) {
+      if (err?.status === 404 && (err?.message?.includes("does not exist anymore") || err?.message?.includes("not found"))) {
+        purgeUserSessionArtifacts();
+        if (typeof window !== "undefined") {
+          window.dispatchEvent(new CustomEvent("jee:ghost_404"));
+        }
+        if (onClose) onClose();
+        return;
+      }
       setError(err.message || 'Authentication failed. Please verify your callsign and PIN.');
     } finally {
       setLoading(false);

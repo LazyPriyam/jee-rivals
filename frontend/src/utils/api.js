@@ -251,6 +251,12 @@ async function request(path, options = {}) {
     }
     const err = new Error(errorDetail);
     err.status = res.status;
+    if (res.status === 404 && (errorDetail.includes("does not exist anymore") || errorDetail.includes("The requested application does not exist anymore"))) {
+      purgeUserSessionArtifacts();
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent("jee:ghost_404", { detail: errorDetail }));
+      }
+    }
     throw err;
   }
 

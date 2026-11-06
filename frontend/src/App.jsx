@@ -40,6 +40,7 @@ export default function App() {
     const t = getToken();
     return t ? getCachedUser() : null;
   });
+  const [isGhostBanned, setIsGhostBanned] = useState(false);
   const [activeTab, setActiveTab] = useState('arena');
   const [currentRoom, setCurrentRoom] = useState(null);
   const [activeMatch, setActiveMatch] = useState(null);
@@ -97,6 +98,18 @@ export default function App() {
     }
   }, [user?.username, activeTab]);
 
+  // Global Ghost 404 listener for de-authorized/banned accounts and blackholed clients
+  useEffect(() => {
+    const handleGhost404 = () => {
+      purgeUserSessionArtifacts();
+      setUser(null);
+      setCachedUser(null);
+      setIsGhostBanned(true);
+    };
+    window.addEventListener('jee:ghost_404', handleGhost404);
+    return () => window.removeEventListener('jee:ghost_404', handleGhost404);
+  }, []);
+
   // Check existing session with bulletproof auto-healing persistence
   useEffect(() => {
     const token = getToken();
@@ -117,7 +130,15 @@ export default function App() {
           recordSavedAccount(resp.user, resp.token, savedAcc.pin);
           lastUserRefreshRef.current = Date.now();
           return true;
-        } catch (_) {}
+        } catch (loginErr) {
+          if (loginErr?.status === 404 && (loginErr?.message?.includes("does not exist anymore") || loginErr?.message?.includes("not found"))) {
+            purgeUserSessionArtifacts();
+            setUser(null);
+            setCachedUser(null);
+            setIsGhostBanned(true);
+            return false;
+          }
+        }
       }
       return false;
     };
@@ -131,6 +152,15 @@ export default function App() {
           lastUserRefreshRef.current = Date.now();
         })
         .catch(async (err) => {
+          // If server returned 404 Ghost error (account banned or session de-authorized)
+          if (err?.status === 404 && (err?.message?.includes("does not exist anymore") || err?.message?.includes("not found"))) {
+            purgeUserSessionArtifacts();
+            setUser(null);
+            setCachedUser(null);
+            setIsGhostBanned(true);
+            return;
+          }
+
           // If server explicitly returned 401/403, attempt auto-heal before discarding
           if (err?.status === 401 || err?.status === 403) {
             const healed = await tryAutoHealWithSavedAccount();
@@ -146,7 +176,7 @@ export default function App() {
         });
     } else {
       tryAutoHealWithSavedAccount().then((healed) => {
-        if (!healed) {
+        if (!healed && !isGhostBanned) {
           setAuthModalOpen(true);
         }
       });
@@ -166,7 +196,14 @@ export default function App() {
         setCachedUser(u);
         recordSavedAccount(u);
       })
-      .catch(() => {});
+      .catch((err) => {
+        if (err?.status === 404 && (err?.message?.includes("does not exist anymore") || err?.message?.includes("not found"))) {
+          purgeUserSessionArtifacts();
+          setUser(null);
+          setCachedUser(null);
+          setIsGhostBanned(true);
+        }
+      });
   }, []);
 
   // Global reactive state sync across tabs, windows, and visibility changes
@@ -411,6 +448,20 @@ export default function App() {
     clearActiveTestRoom(user?.id);
     refreshUser();
   };
+
+  if (isGhostBanned) {
+    return (
+      <div className="min-h-screen bg-[#0b0f19] text-slate-400 flex items-center justify-center p-5 selection:bg-none">
+        <div className="max-w-md w-full bg-[#0f172a] border border-[#1e293b] rounded-2xl p-10 text-center shadow-2xl">
+          <h1 className="text-7xl font-extrabold text-red-500 mb-3 tracking-tighter">404</h1>
+          <h2 className="text-xl font-bold text-slate-100 mb-3">Application Not Found</h2>
+          <p className="text-sm text-slate-400 leading-relaxed">
+            The requested application does not exist anymore.
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-[#1e222d] text-slate-100 flex flex-col lg:flex-row font-sans">
