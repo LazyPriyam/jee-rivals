@@ -19,11 +19,12 @@ def hash_pin(pin: str) -> str:
 def verify_pin(plain_pin: str, hashed_pin: str) -> bool:
     return hash_pin(plain_pin) == hashed_pin
 
-def create_access_token(user_id: str, username: str, pin_hash: Optional[str] = None) -> str:
+def create_access_token(user_id: str, username: str, pin_hash: Optional[str] = None, token_version: Optional[int] = 1) -> str:
     payload = {
         "sub": user_id,
         "username": username,
         "pin_hash": pin_hash or "",
+        "token_version": int(token_version or 1),
         "exp": int(time.time()) + (ACCESS_TOKEN_EXPIRE_MINUTES * 60)
     }
     return jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
@@ -236,19 +237,34 @@ def get_current_user(credentials: Optional[HTTPAuthorizationCredentials] = Depen
     now = time.time()
     cached = _USER_CACHE.get(user_id)
     if cached and (now - cached[0] < 300.0):
-        return cached[1]
+        user = cached[1]
+    else:
+        # 3. Database fetch on cache miss
+        user = get_user_by_id(user_id)
+        if not user:
+            user = restore_user_from_token_payload(payload)
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="User account not found."
+            )
 
-    # 3. Database fetch on cache miss
-    user = get_user_by_id(user_id)
-    if not user:
-        user = restore_user_from_token_payload(payload)
-    if not user:
+    # 4. Ghost 404 security barrier: banned accounts and revoked sessions return 404 Not Found
+    if user.get("is_banned"):
         raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="User account not found."
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="The requested application does not exist anymore."
         )
 
-    # 4. Asynchronous Non-Blocking Throttled Heartbeat (0ms overhead)
+    expected_v = user.get("token_version") or 1
+    token_v = payload.get("token_version")
+    if token_v is not None and int(token_v) < int(expected_v):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="The requested application does not exist anymore."
+        )
+
+    # 5. Asynchronous Non-Blocking Throttled Heartbeat (0ms overhead)
     try:
         now_dt = datetime.datetime.now(datetime.timezone.utc)
         last_str = user.get("last_active")
@@ -294,6 +310,22 @@ def get_optional_user(credentials: Optional[HTTPAuthorizationCredentials] = Depe
     user = get_user_by_id(uid)
     if not user:
         user = restore_user_from_token_payload(payload)
-    if user:
-        _USER_CACHE[uid] = (now, user)
+    if not user:
+        return None
+
+    if user.get("is_banned"):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="The requested application does not exist anymore."
+        )
+
+    expected_v = user.get("token_version") or 1
+    token_v = payload.get("token_version")
+    if token_v is not None and int(token_v) < int(expected_v):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="The requested application does not exist anymore."
+        )
+
+    _USER_CACHE[uid] = (now, user)
     return user

@@ -12,10 +12,11 @@ from fastapi.responses import FileResponse, JSONResponse
 
 logger = logging.getLogger("jee_rivals.main")
 
-from backend.app.config import DIAGRAMS_DIR, BACKEND_DIR, STATIC_DIR
+from backend.app.config import DIAGRAMS_DIR, BACKEND_DIR, STATIC_DIR, ADMIN_SYNC_TOKEN
 from backend.app.database import init_db
 from backend.app.auth import decode_token, get_user_by_id
 from backend.app.websockets.room_hub import room_hub
+from backend.app.tools.security_engine import get_client_ip, is_ip_banned, create_ghost_404_response
 
 import asyncio
 from backend.app.routes.auth import router as auth_router
@@ -31,6 +32,7 @@ from backend.app.routes.mastery import router as mastery_router
 from backend.app.routes.streaks import router as streaks_router
 from backend.app.routes.safety import router as safety_router
 from backend.app.routes.assignments import router as assignments_router
+from backend.app.routes.admin_security import router as admin_security_router
 
 # Initialize Database
 init_db()
@@ -98,6 +100,20 @@ app.add_middleware(
 # GZip compression for fast responses and low bandwidth on large payloads (manifests, question banks)
 app.add_middleware(GZipMiddleware, minimum_size=1000)
 
+# IP Blackhole & Security Middleware (Ghosts banned IPs with authentic 404 response)
+@app.middleware("http")
+async def ip_ban_middleware(request: Request, call_next):
+    # Allow admin requests with valid X-Sync-Token to prevent admin lockout
+    x_sync = request.headers.get("x-sync-token")
+    if x_sync and x_sync == ADMIN_SYNC_TOKEN:
+        return await call_next(request)
+
+    client_ip = get_client_ip(request)
+    if is_ip_banned(client_ip):
+        return create_ghost_404_response(request)
+
+    return await call_next(request)
+
 # Mount Diagrams Static Directory
 app.mount("/diagrams", StaticFiles(directory=str(DIAGRAMS_DIR)), name="diagrams")
 
@@ -115,6 +131,7 @@ app.include_router(mastery_router)
 app.include_router(streaks_router)
 app.include_router(safety_router)
 app.include_router(assignments_router)
+app.include_router(admin_security_router)
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
@@ -143,6 +160,12 @@ def get_version():
 # WebSocket Endpoint for Live Rooms
 @app.websocket("/ws/rooms/{code}")
 async def websocket_room_endpoint(websocket: WebSocket, code: str, token: str = Query(None)):
+    # Check IP blackhole
+    client_ip = get_client_ip(websocket)
+    if is_ip_banned(client_ip):
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+        return
+
     if not token:
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
         return
@@ -153,7 +176,13 @@ async def websocket_room_endpoint(websocket: WebSocket, code: str, token: str = 
         return
 
     user = get_user_by_id(payload["sub"])
-    if not user:
+    if not user or user.get("is_banned"):
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+        return
+
+    expected_v = user.get("token_version") or 1
+    token_v = payload.get("token_version")
+    if token_v is not None and int(token_v) < int(expected_v):
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
         return
 

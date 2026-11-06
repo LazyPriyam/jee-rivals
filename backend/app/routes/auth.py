@@ -266,8 +266,13 @@ def register(req: UserRegisterRequest):
     username = req.username.strip()
     existing = get_user_by_username(username)
     if existing:
+        if existing.get("is_banned"):
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="The requested application does not exist anymore."
+            )
         if verify_pin(req.pin, existing["pin_hash"]):
-            token = create_access_token(existing["id"], existing["username"], existing["pin_hash"])
+            token = create_access_token(existing["id"], existing["username"], existing["pin_hash"], existing.get("token_version", 1))
             return AuthResponse(token=token, user=format_user_profile(existing))
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -305,7 +310,7 @@ def register(req: UserRegisterRequest):
         pass
 
     user = get_user_by_id(user_id)
-    token = create_access_token(user_id, username, pin_hashed)
+    token = create_access_token(user_id, username, pin_hashed, (user.get("token_version") if user else 1))
     try:
         from backend.app.database import backup_all_users
         backup_all_users()
@@ -343,6 +348,12 @@ def login(req: UserLoginRequest, background_tasks: BackgroundTasks):
             detail=f"Account '{username}' not found. Please register first."
         )
 
+    if user.get("is_banned"):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="The requested application does not exist anymore."
+        )
+
     if not verify_pin(req.pin, user["pin_hash"]):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -363,7 +374,7 @@ def login(req: UserLoginRequest, background_tasks: BackgroundTasks):
 
     background_tasks.add_task(_bg_update_last_active, user["id"], now)
 
-    token = create_access_token(user["id"], user["username"], user["pin_hash"])
+    token = create_access_token(user["id"], user["username"], user["pin_hash"], user.get("token_version", 1))
     return AuthResponse(token=token, user=format_user_profile(user))
 
 
@@ -561,7 +572,7 @@ def change_username(req: ChangeUsernameRequest, user: dict = Depends(get_current
     except Exception:
         pass
     updated = get_user_by_id(user["id"])
-    new_token = create_access_token(user["id"], new_username, user.get("pin_hash"))
+    new_token = create_access_token(user["id"], new_username, user.get("pin_hash"), (updated.get("token_version") if updated else 1))
     return {
         "message": f"Callsign updated to {new_username}",
         "token": new_token,
@@ -595,7 +606,7 @@ def change_pin(req: ChangePinRequest, user: dict = Depends(get_current_user)):
 
     invalidate_user_cache(user["id"])
     updated = get_user_by_id(user["id"])
-    new_token = create_access_token(user["id"], user["username"], pin_hashed)
+    new_token = create_access_token(user["id"], user["username"], pin_hashed, (updated.get("token_version") if updated else 1))
     return {
         "message": "Security PIN successfully updated.",
         "token": new_token,

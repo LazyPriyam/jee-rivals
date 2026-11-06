@@ -18,7 +18,7 @@
     "bronze_medals": 0,
     "chapter_stats": "{\"Work, Energy and Power\": {\"attempts\": 4, \"correct\": 2, \"subject\": \"Physics\"}}",
     "created_at": "2026-10-10T03:07:12.631328",
-    "last_active": "2026-11-05T05:31:15.588486+00:00",
+    "last_active": "2026-11-05T06:06:16.847774+00:00",
     "target_college": "IIT Bombay Computer Science and Engineering",
     "target_exam_date": "JEE Advanced 2027",
     "bio": "कर्मण्येवाधिकारस्ते मा फलेषु कदाचन।\nमा कर्मफलहेतुर्भूर्मा ते सङ्गोऽस्त्वकर्मणि॥",
@@ -36,7 +36,10 @@
     "banner_image_url": null,
     "daily_question_goal": 60,
     "daily_goal_solved": 0,
-    "daily_goal_date": null
+    "daily_goal_date": null,
+    "is_banned": 0,
+    "ban_reason": null,
+    "token_version": 1
   },
   {
     "id": "b16b5ae7-a7e1-4578-a774-e203bed53dc0",
@@ -75,7 +78,10 @@
     "banner_image_url": null,
     "daily_question_goal": 60,
     "daily_goal_solved": 0,
-    "daily_goal_date": null
+    "daily_goal_date": null,
+    "is_banned": 0,
+    "ban_reason": null,
+    "token_version": 1
   },
   {
     "id": "624ae0d6-9f48-4889-b0e2-409ce751c55a",
@@ -114,7 +120,10 @@
     "banner_image_url": null,
     "daily_question_goal": 60,
     "daily_goal_solved": 0,
-    "daily_goal_date": null
+    "daily_goal_date": null,
+    "is_banned": 0,
+    "ban_reason": null,
+    "token_version": 1
   },
   {
     "id": "7da6d4da-7e47-400d-9eee-ca1520658269",
@@ -153,7 +162,10 @@
     "banner_image_url": null,
     "daily_question_goal": 60,
     "daily_goal_solved": 0,
-    "daily_goal_date": null
+    "daily_goal_date": null,
+    "is_banned": 0,
+    "ban_reason": null,
+    "token_version": 1
   },
   {
     "id": "480b2aea-f85f-4775-8352-58a849bc4d54",
@@ -192,7 +204,10 @@
     "banner_image_url": null,
     "daily_question_goal": 60,
     "daily_goal_solved": 0,
-    "daily_goal_date": null
+    "daily_goal_date": null,
+    "is_banned": 0,
+    "ban_reason": null,
+    "token_version": 1
   },
   {
     "id": "aa446a43-905f-4b5f-81cd-80197c329d07",
@@ -231,7 +246,10 @@
     "banner_image_url": null,
     "daily_question_goal": 60,
     "daily_goal_solved": 0,
-    "daily_goal_date": null
+    "daily_goal_date": null,
+    "is_banned": 0,
+    "ban_reason": null,
+    "token_version": 1
   },
   {
     "id": "12646c14-ea02-4e00-b287-2f1993329949",
@@ -270,6 +288,51 @@
     "banner_image_url": null,
     "daily_question_goal": 60,
     "daily_goal_solved": 0,
-    "daily_goal_date": null
+    "daily_goal_date": null,
+    "is_banned": 0,
+    "ban_reason": null,
+    "token_version": 1
+  },
+  {
+    "id": "118c5780-5f1d-4b0d-ae96-ae8dbfc43b42",
+    "username": "Priyam123Dummy",
+    "pin_hash": "721cde635d716201fe1383edc3addece8c4531795e81b3ad7d98bc02f9a4c33a",
+    "avatar_id": "default",
+    "title": "JEE Aspirant",
+    "overall_elo": 1200.0,
+    "physics_elo": 1200.0,
+    "chemistry_elo": 1200.0,
+    "math_elo": 1200.0,
+    "current_division": "Bronze III",
+    "weekly_rp": 0,
+    "total_solved": 0,
+    "total_correct": 0,
+    "gold_medals": 0,
+    "silver_medals": 0,
+    "bronze_medals": 0,
+    "chapter_stats": "{}",
+    "created_at": "2026-10-10T08:11:50.841425",
+    "last_active": "2026-10-10T08:17:10.496576+00:00",
+    "target_college": "IIT Bombay (Computer Science)dgrssr",
+    "target_exam_date": "JEE Main Jan 2026",
+    "bio": "Aicvbbbbbeeawdfhutschuming for Top 500 AIR. PvP Aspirant.",
+    "banner_theme": "orange_cyber",
+    "pinned_badges": "[\"elo_bronze\", \"first_blood\"]",
+    "learnt_chapters": "[]",
+    "chat_settings": "{}",
+    "target_exam": "MIXED",
+    "current_streak": 0,
+    "longest_streak": 0,
+    "last_active_date": null,
+    "streak_freezes": 1,
+    "streak_history": "[]",
+    "avatar_image_url": null,
+    "banner_image_url": null,
+    "daily_question_goal": 60,
+    "daily_goal_solved": 0,
+    "daily_goal_date": null,
+    "is_banned": 0,
+    "ban_reason": null,
+    "token_version": 1
   }
 ]

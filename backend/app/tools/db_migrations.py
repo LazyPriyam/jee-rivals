@@ -818,6 +818,31 @@ def migration_013_linked_chapters_column(conn: sqlite3.Connection):
         pass
 
 
+def migration_014_account_and_ip_bans(conn: sqlite3.Connection):
+    """
+    Creates banned_ips table and extends users table with is_banned, ban_reason, and token_version.
+    Enables selective account de-authorization, force logout, and IP address blackholing.
+    """
+    c = conn.cursor()
+    c.execute("""
+    CREATE TABLE IF NOT EXISTS banned_ips (
+        ip TEXT PRIMARY KEY,
+        reason TEXT DEFAULT 'administrative_ban',
+        banned_at TEXT NOT NULL
+    );
+    """)
+
+    c.execute("PRAGMA table_info(users)")
+    existing_cols = {row[1] for row in c.fetchall()}
+
+    if "is_banned" not in existing_cols:
+        c.execute("ALTER TABLE users ADD COLUMN is_banned INTEGER DEFAULT 0")
+    if "ban_reason" not in existing_cols:
+        c.execute("ALTER TABLE users ADD COLUMN ban_reason TEXT")
+    if "token_version" not in existing_cols:
+        c.execute("ALTER TABLE users ADD COLUMN token_version INTEGER DEFAULT 1")
+
+
 # Master migration registry (ordered sequentially)
 MIGRATIONS: List[Dict[str, Any]] = [
     {
@@ -884,6 +909,11 @@ MIGRATIONS: List[Dict[str, Any]] = [
         "version": 13,
         "name": "linked_chapters_column",
         "func": migration_013_linked_chapters_column,
+    },
+    {
+        "version": 14,
+        "name": "account_and_ip_bans",
+        "func": migration_014_account_and_ip_bans,
     },
 ]
 
