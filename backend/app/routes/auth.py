@@ -722,8 +722,14 @@ def delete_account(req: DeleteAccountRequest, user: dict = Depends(get_current_u
     finally:
         conn.close()
 
+    # Clear all in-memory caches immediately
     invalidate_tombstones_cache()
-    invalidate_user_cache(user_id)
+    invalidate_user_cache(user_id, user["username"])
+    try:
+        from backend.app.routes.leaderboards import invalidate_leaderboard_caches
+        invalidate_leaderboard_caches(user["username"])
+    except Exception as e:
+        print(f"[DELETE] Note invalidating leaderboard caches: {e}")
 
     # 8. Immediately purge from persistent JSON vaults
     try:

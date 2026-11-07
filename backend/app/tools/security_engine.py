@@ -347,3 +347,106 @@ def list_banned_users() -> List[Dict[str, Any]]:
     rows = [dict(r) for r in c.fetchall()]
     conn.close()
     return rows
+
+
+def purge_user_account(user_id_or_username: str, reason: str = "administrative_purge") -> Dict[str, Any]:
+    """
+    Permanently purges an aspirant account and all related records, telemetry,
+    friendships, messages, sessions, and ratings across the database and persistent vaults.
+    Records a tombstone in deleted_accounts so the user can never be resurrected.
+    """
+    target = str(user_id_or_username).strip()
+    if not target:
+        raise ValueError("User identifier cannot be empty.")
+
+    conn = get_connection()
+    c = conn.cursor()
+
+    c.execute("SELECT id, username FROM users WHERE id = ? OR LOWER(username) = LOWER(?);", (target, target))
+    user_row = c.fetchone()
+
+    if not user_row:
+        # Check if already tombstoned
+        c.execute("SELECT id, username FROM deleted_accounts WHERE id = ? OR LOWER(username) = LOWER(?);", (target, target))
+        del_row = c.fetchone()
+        conn.close()
+        if del_row:
+            return {
+                "success": True,
+                "message": f"Account '{target}' was already purged.",
+                "user_id": del_row["id"],
+                "username": del_row["username"]
+            }
+        raise ValueError(f"User '{target}' not found.")
+
+    uid = user_row["id"]
+    uname = user_row["username"]
+
+    try:
+        # 1. Activity logs and sessions
+        c.execute("DELETE FROM activity_log WHERE user_id = ?", (uid,))
+        c.execute("DELETE FROM adaptive_sessions WHERE user_id = ?", (uid,))
+        c.execute("DELETE FROM user_rank_history WHERE user_id = ?", (uid,))
+
+        # 2. Mastery and FSRS memory
+        c.execute("DELETE FROM user_chapter_elo WHERE user_id = ?", (uid,))
+        c.execute("DELETE FROM user_fsrs_states WHERE user_id = ?", (uid,))
+        c.execute("DELETE FROM question_bookmarks WHERE user_id = ?", (uid,))
+
+        # 3. Multiplayer rooms & tournaments
+        c.execute("DELETE FROM room_participants WHERE user_id = ?", (uid,))
+        c.execute("DELETE FROM tournament_participants WHERE user_id = ?", (uid,))
+
+        # 4. Social graph: friendships, challenges, messages
+        c.execute("DELETE FROM friends WHERE user_id = ? OR friend_id = ?", (uid, uid))
+        c.execute("DELETE FROM direct_challenges WHERE sender_id = ? OR receiver_id = ?", (uid, uid))
+        c.execute("DELETE FROM direct_messages WHERE sender_id = ? OR receiver_id = ?", (uid, uid))
+
+        # 5. Notifications and update tracking
+        c.execute("DELETE FROM user_notifications WHERE user_id = ?", (uid,))
+        c.execute("DELETE FROM user_update_reads WHERE user_id = ?", (uid,))
+
+        # 6. Primary user record
+        c.execute("DELETE FROM users WHERE id = ?", (uid,))
+
+        # 7. Record in deleted_accounts tombstone registry
+        now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        c.execute("""
+            INSERT OR REPLACE INTO deleted_accounts (id, username, deleted_at, reason)
+            VALUES (?, ?, ?, ?)
+        """, (uid, uname, now_iso, reason.strip() if reason else "administrative_purge"))
+
+        conn.commit()
+    finally:
+        conn.close()
+
+    # Clear all in-memory caches immediately
+    try:
+        from backend.app.auth import invalidate_user_cache, invalidate_tombstones_cache
+        invalidate_tombstones_cache()
+        invalidate_user_cache(user_id=uid, username=uname)
+    except Exception:
+        pass
+
+    try:
+        from backend.app.routes.leaderboards import invalidate_leaderboard_caches
+        invalidate_leaderboard_caches(uname)
+    except Exception:
+        pass
+
+    # Purge from persistent JSON vaults
+    try:
+        from backend.app.database import purge_user_from_vaults, backup_all_users
+        purge_user_from_vaults(uid, uname)
+        backup_all_users()
+    except Exception as e:
+        logger.warning(f"[PURGE] Note purging vaults: {e}")
+
+    logger.info(f"[SECURITY] User '{uname}' ({uid}) completely purged and tombstoned.")
+    return {
+        "success": True,
+        "user_id": uid,
+        "username": uname,
+        "purged_at": now_iso
+    }
+

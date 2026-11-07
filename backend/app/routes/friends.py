@@ -133,6 +133,9 @@ def get_friends_leaderboard(sort_by: str = "elo", user: dict = Depends(get_curre
                bronze_medals, last_active
         FROM users
         WHERE id IN ({placeholders})
+          AND (is_banned IS NULL OR is_banned = 0)
+          AND id NOT IN (SELECT id FROM deleted_accounts)
+          AND LOWER(username) NOT IN (SELECT LOWER(username) FROM deleted_accounts)
         ORDER BY {order_clause}
     """, all_group_ids)
 
@@ -484,7 +487,11 @@ def search_users(q: str, user: dict = Depends(get_current_user)):
     c.execute("""
         SELECT id, username, avatar_id, avatar_image_url, title, overall_elo, current_division, last_active
         FROM users
-        WHERE LOWER(username) LIKE ? AND id != ?
+        WHERE LOWER(username) LIKE ?
+          AND id != ?
+          AND (is_banned IS NULL OR is_banned = 0)
+          AND id NOT IN (SELECT id FROM deleted_accounts)
+          AND LOWER(username) NOT IN (SELECT LOWER(username) FROM deleted_accounts)
         LIMIT 10
     """, (f"%{query.lower()}%", user["id"]))
     rows = [dict(r) for r in c.fetchall()]

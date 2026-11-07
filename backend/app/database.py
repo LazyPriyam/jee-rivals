@@ -309,7 +309,7 @@ def backup_all_users(conn: Optional[sqlite3.Connection] = None) -> int:
         c.execute("SELECT name FROM sqlite_master WHERE type='table'")
         tables = {r[0] for r in c.fetchall()}
 
-        for tbl in ["user_chapter_elo", "user_fsrs_states", "user_rank_history", "adaptive_sessions"]:
+        for tbl in ["user_chapter_elo", "user_fsrs_states", "user_rank_history", "adaptive_sessions", "deleted_accounts"]:
             if tbl in tables:
                 c.execute(f"SELECT * FROM [{tbl}]")
                 vault[tbl] = [dict(r) for r in c.fetchall()]
@@ -367,16 +367,38 @@ def restore_users_from_backup(conn: Optional[sqlite3.Connection] = None) -> int:
         c.execute("SELECT * FROM users")
         existing_users = {row["id"]: dict(row) for row in c.fetchall()}
 
+        # 0. Restore tombstones from vault first
+        if isinstance(vault_data, dict) and "deleted_accounts" in vault_data and isinstance(vault_data["deleted_accounts"], list):
+            for da in vault_data["deleted_accounts"]:
+                da_id = da.get("id")
+                da_uname = da.get("username")
+                da_time = da.get("deleted_at") or datetime.datetime.now(datetime.timezone.utc).isoformat()
+                da_reason = da.get("reason") or "persisted_tombstone"
+                if da_id and da_uname:
+                    c.execute("""
+                        INSERT OR REPLACE INTO deleted_accounts (id, username, deleted_at, reason)
+                        VALUES (?, ?, ?, ?)
+                    """, (da_id, da_uname, da_time, da_reason))
+            conn.commit()
+
         # Load tombstones so deleted accounts are NEVER auto-resurrected
         deleted_ids = set()
         deleted_names = set()
         try:
             c.execute("SELECT id, username FROM deleted_accounts")
             for r in c.fetchall():
-                if r[0]: deleted_ids.add(r[0])
-                if r[1]: deleted_names.add(r[1].lower())
+                if r[0]: deleted_ids.add(str(r[0]))
+                if r[1]: deleted_names.add(str(r[1]).strip().lower())
         except Exception:
             pass
+
+        # Strictly purge any ghost resurrected accounts existing in users table
+        if deleted_ids or deleted_names:
+            for d_id in deleted_ids:
+                c.execute("DELETE FROM users WHERE id = ?", (d_id,))
+            for d_name in deleted_names:
+                c.execute("DELETE FROM users WHERE LOWER(username) = ?", (d_name,))
+            conn.commit()
 
         c.execute("PRAGMA table_info(users)")
         valid_cols = {row["name"] for row in c.fetchall()}
@@ -502,15 +524,18 @@ def restore_users_from_backup(conn: Optional[sqlite3.Connection] = None) -> int:
 
 def purge_user_from_vaults(user_id: str, username: str):
     """
-    Permanently purges a deleted user from persistent JSON backup files.
+    Permanently purges a deleted user from persistent JSON backup files
+    and registers their tombstone in aspirants_master_vault.json.
     """
     clean_uname = username.strip().lower()
+    clean_uid = str(user_id).strip()
+
     if BACKUP_JSON_PATH.exists():
         try:
             with open(BACKUP_JSON_PATH, "r", encoding="utf-8") as f:
                 backup_users = json.load(f)
             if isinstance(backup_users, list):
-                filtered = [u for u in backup_users if u.get("id") != user_id and (u.get("username") or "").strip().lower() != clean_uname]
+                filtered = [u for u in backup_users if str(u.get("id")) != clean_uid and (u.get("username") or "").strip().lower() != clean_uname]
                 with open(BACKUP_JSON_PATH, "w", encoding="utf-8") as f:
                     json.dump(filtered, f, indent=2, ensure_ascii=False)
         except Exception as e:
@@ -522,12 +547,25 @@ def purge_user_from_vaults(user_id: str, username: str):
                 vault_data = json.load(f)
             if isinstance(vault_data, dict):
                 if "users" in vault_data and isinstance(vault_data["users"], list):
-                    vault_data["users"] = [u for u in vault_data["users"] if u.get("id") != user_id and (u.get("username") or "").strip().lower() != clean_uname]
+                    vault_data["users"] = [u for u in vault_data["users"] if str(u.get("id")) != clean_uid and (u.get("username") or "").strip().lower() != clean_uname]
+                for aux in ["user_chapter_elo", "user_fsrs_states", "user_rank_history", "adaptive_sessions"]:
+                    if aux in vault_data and isinstance(vault_data[aux], list):
+                        vault_data[aux] = [row for row in vault_data[aux] if str(row.get("user_id")) != clean_uid]
+                if "deleted_accounts" not in vault_data or not isinstance(vault_data["deleted_accounts"], list):
+                    vault_data["deleted_accounts"] = []
+                existing_tombstones = {str(d.get("id")) for d in vault_data["deleted_accounts"]}
+                existing_tombstone_names = {(d.get("username") or "").strip().lower() for d in vault_data["deleted_accounts"]}
+                if clean_uid not in existing_tombstones and clean_uname not in existing_tombstone_names:
+                    vault_data["deleted_accounts"].append({
+                        "id": clean_uid,
+                        "username": username.strip(),
+                        "deleted_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                        "reason": "vault_purge"
+                    })
                 with open(MASTER_VAULT_PATH, "w", encoding="utf-8") as f:
                     json.dump(vault_data, f, indent=2, ensure_ascii=False)
         except Exception as e:
             print(f"[PURGE] Error updating master vault: {e}")
-
 
 def init_db():
     conn = get_connection()

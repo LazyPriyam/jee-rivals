@@ -436,6 +436,7 @@ export default function SettingsView({
       }
       setToken('', false);
       setDeleteModalOpen(false);
+      window.dispatchEvent(new CustomEvent('jee_user_deleted'));
       if (onLogout) {
         onLogout();
       } else {

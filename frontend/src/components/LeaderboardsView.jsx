@@ -63,7 +63,11 @@ export default function LeaderboardsView({ user, onViewProfile, onNavigateTab, i
       }
     };
     window.addEventListener('jee_user_updated', handleUserUpdated);
-    return () => window.removeEventListener('jee_user_updated', handleUserUpdated);
+    window.addEventListener('jee_user_deleted', handleUserUpdated);
+    return () => {
+      window.removeEventListener('jee_user_updated', handleUserUpdated);
+      window.removeEventListener('jee_user_deleted', handleUserUpdated);
+    };
   }, [activeTab, eloSubject, friendsSort, isActive]);
 
   const fetchData = async () => {

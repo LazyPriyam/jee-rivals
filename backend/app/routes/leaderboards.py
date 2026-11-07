@@ -101,11 +101,22 @@ def get_my_division_details(current_user: dict = Depends(get_current_user)):
 
     conn = get_connection()
     c = conn.cursor()
-    c.execute("SELECT COUNT(*) as higher FROM users WHERE weekly_rp > ?", (current_user.get("weekly_rp", 0),))
+    c.execute("""
+        SELECT COUNT(*) as higher FROM users
+        WHERE weekly_rp > ?
+          AND (is_banned IS NULL OR is_banned = 0)
+          AND id NOT IN (SELECT id FROM deleted_accounts)
+          AND LOWER(username) NOT IN (SELECT LOWER(username) FROM deleted_accounts)
+    """, (current_user.get("weekly_rp", 0),))
     higher_count = c.fetchone()["higher"]
     my_rank = higher_count + 1
 
-    c.execute("SELECT COUNT(*) as total FROM users")
+    c.execute("""
+        SELECT COUNT(*) as total FROM users
+        WHERE (is_banned IS NULL OR is_banned = 0)
+          AND id NOT IN (SELECT id FROM deleted_accounts)
+          AND LOWER(username) NOT IN (SELECT LOWER(username) FROM deleted_accounts)
+    """)
     total_users = c.fetchone()["total"]
     conn.close()
 
@@ -153,12 +164,20 @@ def get_weekly_leaderboard(limit: int = Query(50, ge=1, le=100)):
                physics_elo, chemistry_elo, math_elo, gold_medals, silver_medals, bronze_medals, current_streak,
                last_active
         FROM users
+        WHERE (is_banned IS NULL OR is_banned = 0)
+          AND id NOT IN (SELECT id FROM deleted_accounts)
+          AND LOWER(username) NOT IN (SELECT LOWER(username) FROM deleted_accounts)
         ORDER BY weekly_rp DESC, overall_elo DESC
         LIMIT ?
     """, (limit,))
     rows = [dict(r) for r in c.fetchall()]
 
-    c.execute("SELECT COUNT(*) as total FROM users")
+    c.execute("""
+        SELECT COUNT(*) as total FROM users
+        WHERE (is_banned IS NULL OR is_banned = 0)
+          AND id NOT IN (SELECT id FROM deleted_accounts)
+          AND LOWER(username) NOT IN (SELECT LOWER(username) FROM deleted_accounts)
+    """)
     total_users = c.fetchone()["total"]
     conn.close()
 
@@ -244,6 +263,9 @@ def get_elo_leaderboard(subject: str = Query("overall"), limit: int = Query(50, 
         SELECT id, username, avatar_id, avatar_image_url, title, {elo_col} as elo, overall_elo, physics_elo, chemistry_elo, math_elo,
                total_solved, total_correct, gold_medals, silver_medals, bronze_medals, last_active
         FROM users
+        WHERE (is_banned IS NULL OR is_banned = 0)
+          AND id NOT IN (SELECT id FROM deleted_accounts)
+          AND LOWER(username) NOT IN (SELECT LOWER(username) FROM deleted_accounts)
         ORDER BY {elo_col} DESC
         LIMIT ?
     """, (limit,))
@@ -358,13 +380,18 @@ def get_public_profile(username: str, force: bool = False):
     uname_key = uname_clean.lower()
     now = time.time()
 
+    from backend.app.auth import get_cached_tombstones
+    tombstones = get_cached_tombstones()
+    if uname_key in tombstones:
+        raise HTTPException(status_code=404, detail=f"User '{username}' not found or account has been permanently deleted.")
+
     if not force:
         cached_pub = _PUBLIC_PROFILE_CACHE.get(uname_key)
         if cached_pub and (now - cached_pub[0] < 20.0):
             return cached_pub[1]
 
     user = get_user_by_username(uname_clean)
-    if not user:
+    if not user or user.get("is_banned") or str(user.get("id")) in tombstones:
         raise HTTPException(status_code=404, detail=f"User '{username}' not found.")
 
     conn = get_connection()

@@ -345,11 +345,17 @@ export const api = {
       request("/api/auth/reset-data", {
         method: "POST",
       }),
-    deleteAccount: (pin, confirmation = "DELETE") =>
-      request("/api/auth/delete-account", {
+    deleteAccount: async (pin, confirmation = "DELETE") => {
+      const res = await request("/api/auth/delete-account", {
         method: "POST",
         body: JSON.stringify({ pin, confirmation }),
-      }),
+      });
+      invalidateCachedProfile();
+      try {
+        sessionStorage.clear();
+      } catch (_) {}
+      return res;
+    },
   },
   questions: {
     getChapters: () => request("/api/questions/chapters"),

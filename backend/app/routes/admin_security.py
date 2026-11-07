@@ -16,7 +16,8 @@ from backend.app.tools.security_engine import (
     unban_user,
     revoke_user_sessions,
     list_banned_users,
-    is_ip_banned
+    is_ip_banned,
+    purge_user_account
 )
 
 
@@ -51,6 +52,11 @@ class BanUserRequest(BaseModel):
 
 class UserActionRequest(BaseModel):
     user: str  # username or user_id
+
+
+class PurgeAccountRequest(BaseModel):
+    user: str  # username or user_id
+    reason: Optional[str] = "administrative_purge"
 
 
 @router.post("/ban-ip")
@@ -93,6 +99,20 @@ def api_unban_user(req: UserActionRequest):
 def api_revoke_sessions(req: UserActionRequest):
     try:
         return revoke_user_sessions(req.user)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/purge-account")
+def api_purge_account(req: PurgeAccountRequest):
+    """
+    Permanently purges an account from the database, vaults, and caches.
+    Tombstones the account so it can never be resurrected.
+    """
+    try:
+        return purge_user_account(req.user, req.reason or "administrative_purge")
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
