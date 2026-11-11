@@ -47,7 +47,7 @@ def normalize_answer(ans: Any) -> str:
         return ""
     s = str(ans).strip()
     import re
-    m = re.match(r'^\(?\s*([1-4A-Da-d])\s*\)?(?:\s*[\:\.\-–—]|\s+[a-zA-Z\$\\(]|$)', s)
+    m = re.match(r'^\(?\s*([1-4A-Da-d])\s*\)?(?:\s*[\:\-–—]|\.(?!\d)|\s+[a-zA-Z\$\\(]|$)', s)
     if m:
         lead = m.group(1).upper()
         mapping = {"1": "A", "2": "B", "3": "C", "4": "D"}
@@ -61,29 +61,43 @@ def is_answer_correct(user_ans: str, correct_ans: str, q_type: str = "MCQ") -> b
     if user_ans is None or correct_ans is None:
         return False
 
+    q_type_upper = str(q_type or "").upper().strip()
+
+    # 1. Numerical / Integer questions: Prioritize numerical evaluation
+    if q_type_upper in ("NUMERICAL", "INTEGER", "NVQ", "SUBJECTIVE"):
+        try:
+            u_clean = str(user_ans).strip().replace(',', '')
+            c_clean = str(correct_ans).strip().replace(',', '')
+            u_val = float(u_clean)
+            c_val = float(c_clean)
+            return abs(u_val - c_val) <= 0.05
+        except (ValueError, TypeError):
+            return str(user_ans).strip().lower() == str(correct_ans).strip().lower()
+
+    # 2. Option normalization for MCQs ('1' -> 'A', '2' -> 'B', '(C)' -> 'C', etc.)
     u_norm = normalize_answer(user_ans)
     c_norm = normalize_answer(correct_ans)
-    if u_norm == c_norm:
+    if u_norm == c_norm and u_norm != "":
         return True
 
-    # Multi-correct sets (e.g., "A, B" vs "B, A" or "1, 2" vs "A, B")
+    # 3. Multi-correct sets (e.g., "A, B" vs "B, A" or "1, 2" vs "A, B")
     u_str = str(user_ans).strip()
     c_str = str(correct_ans).strip()
-    if "," in u_str or "," in c_str or ";" in u_str or ";" in c_str or q_type in ("MULTIPLE_CHOICE", "MULTI_CORRECT"):
+    if "," in u_str or "," in c_str or ";" in u_str or ";" in c_str or q_type_upper in ("MULTIPLE_CHOICE", "MULTI_CORRECT"):
         import re
         u_parts = {normalize_answer(p) for p in re.split(r'[,;\s]+', u_str) if p}
         c_parts = {normalize_answer(p) for p in re.split(r'[,;\s]+', c_str) if p}
         if u_parts and u_parts == c_parts:
             return True
 
-    # If numerical, check float tolerance
-    if q_type in ("NUMERICAL", "INTEGER", "SUBJECTIVE") or (user_ans and user_ans.replace('.', '', 1).isdigit()):
-        try:
-            u_val = float(str(user_ans).strip())
-            c_val = float(str(correct_ans).strip())
+    # 4. Fallback float tolerance if question was not tagged NUMERICAL but answers are numeric floats
+    try:
+        u_val = float(str(user_ans).strip())
+        c_val = float(str(correct_ans).strip())
+        if q_type_upper not in ("SINGLE_CHOICE", "MCQ", "MULTIPLE_CHOICE", "COMPREHENSION"):
             return abs(u_val - c_val) <= 0.05
-        except Exception:
-            pass
+    except Exception:
+        pass
 
     return False
 
@@ -1963,6 +1977,26 @@ def get_room_results(code: str, user: Optional[dict] = Depends(get_optional_user
                 part_rows = [dict(r) for r in c.fetchall()]
             except Exception:
                 part_rows = []
+
+        if room.get("status") == "LOBBY":
+            if conn:
+                conn.close()
+            raise HTTPException(status_code=400, detail="Match has not started yet.")
+
+        if room.get("status") == "IN_PROGRESS":
+            if user:
+                my_p = next((p for p in part_rows if p["user_id"] == user["id"]), None)
+                if my_p and not my_p.get("is_finished"):
+                    if conn:
+                        conn.close()
+                    raise HTTPException(
+                        status_code=403,
+                        detail="Cannot view solutions and results while your test is still in progress. Please submit your paper first."
+                    )
+            else:
+                if conn:
+                    conn.close()
+                raise HTTPException(status_code=403, detail="Examination is currently in progress.")
 
         q_ids = _safe_parse_list_or_json(room.get("question_ids"))
         questions_data = []

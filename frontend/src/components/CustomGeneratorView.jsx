@@ -342,8 +342,8 @@ export default function CustomGeneratorView({ user, onRoomCreated, onOpenAuth })
         } : null,
       });
 
-      if ((isMock || startInstantly) && room?.code) {
-        // Start immediately for official CBT Mock tests
+      if (startInstantly && room?.code) {
+        // Start immediately for solo tests
         try {
           const startedRoom = await api.rooms.start(room.code);
           onRoomCreated(startedRoom);

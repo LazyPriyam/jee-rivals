@@ -116,6 +116,7 @@ async def ip_ban_middleware(request: Request, call_next):
 
 # Mount Diagrams Static Directory
 app.mount("/diagrams", StaticFiles(directory=str(DIAGRAMS_DIR)), name="diagrams")
+app.mount("/static/diagrams", StaticFiles(directory=str(DIAGRAMS_DIR)), name="static_diagrams")
 
 # Register API Routers
 app.include_router(auth_router)

@@ -517,7 +517,16 @@ export default function TestAnalysisView({
         // Dynamically re-evaluate correctness against the updated answer key (in case moderation/admin fixed the key)
         const activeKey = String(sol?.correct_answer || q?.correct_answer || '').trim().toUpperCase();
         const selKey = String(userSelected || '').trim().toUpperCase();
-        const keyMatched = Boolean(isAttempted && activeKey && selKey && selKey === activeKey);
+        const isNumericalType = ['NUMERICAL', 'INTEGER', 'NVQ', 'SUBJECTIVE'].includes((q?.question_type || '').toUpperCase());
+        let numMatched = false;
+        if (isNumericalType && isAttempted && activeKey && selKey) {
+          const uF = parseFloat(selKey.replace(/,/g, ''));
+          const kF = parseFloat(activeKey.replace(/,/g, ''));
+          if (!isNaN(uF) && !isNaN(kF) && Math.abs(uF - kF) <= 0.05) {
+            numMatched = true;
+          }
+        }
+        const keyMatched = Boolean(isAttempted && activeKey && selKey && (selKey === activeKey || numMatched));
 
         isCorrect = Boolean(userSubmission.correct) || keyMatched;
         markDelta = keyMatched && !userSubmission.correct

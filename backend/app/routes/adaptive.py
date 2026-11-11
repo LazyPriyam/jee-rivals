@@ -159,7 +159,7 @@ def normalize_answer_token(ans: Any) -> str:
         return ""
     s = str(ans).strip()
     import re
-    m = re.match(r'^\(?\s*([1-4A-Da-d])\s*\)?(?:\s*[\:\.\-–—]|\s+[a-zA-Z\$\\(]|$)', s)
+    m = re.match(r'^\(?\s*([1-4A-Da-d])\s*\)?(?:\s*[\:\-–—]|\.(?!\d)|\s+[a-zA-Z\$\\(]|$)', s)
     if m:
         lead = m.group(1).upper()
         mapping = {"1": "A", "2": "B", "3": "C", "4": "D"}
@@ -174,9 +174,23 @@ def evaluate_answer(user_ans: Any, correct_ans: Any, question_type: str = "SINGL
     if user_ans is None or correct_ans is None:
         return False
 
+    q_type_upper = str(question_type or "").upper().strip()
+
+    # 1. Numerical / Integer questions: Prioritize numerical evaluation
+    if q_type_upper in ("NUMERICAL", "INTEGER", "NVQ", "SUBJECTIVE"):
+        try:
+            u_clean = str(user_ans).strip().replace(',', '')
+            c_clean = str(correct_ans).strip().replace(',', '')
+            u_val = float(u_clean)
+            c_val = float(c_clean)
+            return abs(u_val - c_val) <= 0.05
+        except (ValueError, TypeError):
+            return str(user_ans).strip().lower() == str(correct_ans).strip().lower()
+
+    # 2. Option normalization for MCQs ('1' -> 'A', '2' -> 'B', etc.)
     u_norm = normalize_answer_token(user_ans)
     c_norm = normalize_answer_token(correct_ans)
-    if u_norm == c_norm:
+    if u_norm == c_norm and u_norm != "":
         return True
 
     u_str = str(user_ans).strip()
@@ -185,18 +199,19 @@ def evaluate_answer(user_ans: Any, correct_ans: Any, question_type: str = "SINGL
     if u_str.upper() == c_str.upper():
         return True
 
-    # Multi-correct handling (e.g. "A, B" vs "A,B" or "1, 2" vs "A, B")
-    if "," in c_str or question_type in ("MULTIPLE_CHOICE", "MULTI_CORRECT"):
+    # 3. Multi-correct handling (e.g. "A, B" vs "A,B" or "1, 2" vs "A, B")
+    if "," in c_str or q_type_upper in ("MULTIPLE_CHOICE", "MULTI_CORRECT"):
         c_set = {normalize_answer_token(x) for x in c_str.split(",") if x.strip()}
         u_set = {normalize_answer_token(x) for x in u_str.split(",") if x.strip()}
         if c_set == u_set:
             return True
 
-    # Numerical float tolerance check
+    # 4. Fallback float tolerance
     try:
         u_val = float(u_str)
         c_val = float(c_str)
-        return abs(u_val - c_val) <= 0.05
+        if q_type_upper not in ("SINGLE_CHOICE", "MCQ", "MULTIPLE_CHOICE", "COMPREHENSION"):
+            return abs(u_val - c_val) <= 0.05
     except Exception:
         pass
 
