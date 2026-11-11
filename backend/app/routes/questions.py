@@ -1156,14 +1156,20 @@ def quarantine_question(question_id: str, admin: bool = Depends(verify_admin_syn
     conn = get_connection()
     c = conn.cursor()
     c.execute("SELECT id FROM questions WHERE id = ?", (question_id,))
-    if not c.fetchone():
+    q_exists = bool(c.fetchone())
+
+    c.execute("SELECT id FROM question_reports WHERE question_id = ?", (question_id,))
+    r_exists = bool(c.fetchone())
+
+    if not q_exists and not r_exists:
         conn.close()
         raise HTTPException(status_code=404, detail="Question not found.")
 
     now = datetime.datetime.utcnow().isoformat()
     resolver = "Admin (GUI)"
 
-    c.execute("UPDATE questions SET validation_status = 'QUARANTINED' WHERE id = ?", (question_id,))
+    if q_exists:
+        c.execute("UPDATE questions SET validation_status = 'QUARANTINED' WHERE id = ?", (question_id,))
     c.execute("""
         UPDATE question_reports 
         SET status = 'QUARANTINED', resolved_at = ?, resolved_by = ? 
