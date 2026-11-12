@@ -86,37 +86,61 @@ export default function TestAnalysisView({
   const [chapterEloSortBy, setChapterEloSortBy] = useState('QUESTIONS_DESC');
 
   const fetchRoomReports = () => {
-    if (!roomCode) return;
-    const cleanCode = roomCode.trim().toUpperCase();
-    api.questions.getRoomReports(cleanCode)
-      .then((res) => {
-        const rawReports = res?.reports || res?.reports_list || res;
-        const repMap = {};
-        const reportedIds = [];
-        const reasonsMap = {};
-        if (Array.isArray(rawReports)) {
-          rawReports.forEach((r) => {
-            if (r?.question_id) {
-              repMap[r.question_id] = r;
-              reportedIds.push(r.question_id);
-              if (r.reason) reasonsMap[r.question_id] = r.reason;
+    const promises = [];
+    if (roomCode) {
+      const cleanCode = roomCode.trim().toUpperCase();
+      promises.push(api.questions.getRoomReports(cleanCode).catch(() => null));
+    }
+    // Also fetch the user's filed reports so that resolution (APPROVED, DISMISSED, etc.)
+    // is immediately reflected on test analysis even for solo/custom tests:
+    promises.push(api.questions.getReports().catch(() => null));
+
+    Promise.all(promises).then(([roomRes, userRes]) => {
+      const repMap = {};
+      const reportedIds = [];
+      const reasonsMap = {};
+
+      const ingestReport = (r) => {
+        if (!r) return;
+        const qid = r.question_id || r.id;
+        if (!qid) return;
+        const normStatus = (r.status || r.report_status || 'PENDING').toUpperCase();
+        repMap[qid] = {
+          ...repMap[qid],
+          ...r,
+          question_id: qid,
+          status: normStatus
+        };
+        reportedIds.push(qid);
+        if (r.reason) reasonsMap[qid] = r.reason;
+
+        // If report is approved, dismissed, or quarantined, purge stale localStorage flags:
+        if (normStatus === 'APPROVED' || normStatus === 'DISMISSED' || normStatus === 'QUARANTINED') {
+          try {
+            localStorage.removeItem(`jee_reported_${qid}`);
+            localStorage.removeItem(`jee_reported_dispute_${qid}`);
+            if (roomCode) {
+              localStorage.removeItem(`jee_reported_room_${roomCode.trim().toUpperCase()}_${qid}`);
             }
-          });
-        } else if (rawReports && typeof rawReports === 'object') {
-          Object.entries(rawReports).forEach(([qid, r]) => {
-            const rObj = typeof r === 'object' ? { ...r, question_id: r.question_id || qid } : { question_id: qid };
-            repMap[qid] = rObj;
-            reportedIds.push(qid);
-            if (rObj?.reason) reasonsMap[qid] = rObj.reason;
-          });
+          } catch (_) {}
         }
-        setRoomReports(repMap);
-        if (Object.keys(reasonsMap).length > 0) {
-          setReportedReasons((prev) => ({ ...prev, ...reasonsMap }));
-        }
-        setReportedQuestionIds((prev) => new Set([...prev, ...reportedIds]));
-      })
-      .catch(() => {});
+      };
+
+      const processList = (raw) => {
+        if (!raw) return;
+        const list = raw.reports || raw.reports_list || (Array.isArray(raw) ? raw : []);
+        list.forEach(ingestReport);
+      };
+
+      if (roomRes) processList(roomRes);
+      if (userRes) processList(userRes);
+
+      setRoomReports(repMap);
+      if (Object.keys(reasonsMap).length > 0) {
+        setReportedReasons((prev) => ({ ...prev, ...reasonsMap }));
+      }
+      setReportedQuestionIds((prev) => new Set([...prev, ...reportedIds]));
+    }).catch(() => {});
   };
 
   // Load existing user reports and persistent local storage to badge flagged questions automatically
@@ -2146,12 +2170,12 @@ export default function TestAnalysisView({
                           <span className="text-xs font-black px-2.5 py-0.5 rounded-full flex items-center gap-1.5 animate-pulse border bg-emerald-500/20 text-emerald-300 border-emerald-500/40">
                             <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
                             <span>
-                              {roomReport?.reason === 'OUT_OF_TEST_SYLLABUS' || reportedReasons[q.id] === 'OUT_OF_TEST_SYLLABUS'
+                              {roomReport?.status === 'APPROVED' || roomReport?.reason === 'OUT_OF_TEST_SYLLABUS' || reportedReasons[q.id] === 'OUT_OF_TEST_SYLLABUS'
                                 ? '+4.0 MARKS (OUT OF SYLLABUS • EXCLUDED FROM SCORING)'
                                 : '+4.0 MARKS (DEFECT CONFIRMED • NTA BONUS)'}
                             </span>
                           </span>
-                        ) : item.isPending || reportedQuestionIds.has(q.id) || roomReport ? (
+                        ) : !item.isDropped && (item.isPending || (roomReport && roomReport.status === 'PENDING')) ? (
                           <span className={`text-xs font-black px-2.5 py-0.5 rounded-full flex items-center gap-1.5 animate-pulse border ${
                             roomReport?.consensus_status === 'CONSENSUS_REJECTED'
                               ? 'bg-slate-800 text-slate-300 border-white/20'

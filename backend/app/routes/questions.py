@@ -872,11 +872,27 @@ def get_room_reports(room_code: str, user: Optional[dict] = Depends(get_optional
     conn = get_connection()
     c = conn.cursor()
 
-    c.execute("""
-        SELECT * FROM question_reports
-        WHERE room_code = ?
-        ORDER BY created_at ASC
-    """, (code,))
+    # Look up room question_ids to ensure reports filed with or without room_code are found
+    c.execute("SELECT id, question_ids FROM rooms WHERE code = ?", (code,))
+    r_row = c.fetchone()
+    q_ids = []
+    if r_row and r_row["question_ids"]:
+        try:
+            raw_qids = json.loads(r_row["question_ids"]) if isinstance(r_row["question_ids"], str) else r_row["question_ids"]
+            q_ids = [qid for qid in raw_qids if qid]
+        except Exception:
+            q_ids = []
+
+    where_clauses = ["room_code = ?"]
+    params = [code]
+
+    if q_ids:
+        placeholders = ",".join("?" for _ in q_ids)
+        where_clauses.append(f"question_id IN ({placeholders})")
+        params.extend(q_ids)
+
+    query = f"SELECT * FROM question_reports WHERE {' OR '.join(where_clauses)} ORDER BY created_at ASC"
+    c.execute(query, tuple(params))
     rows = [dict(r) for r in c.fetchall()]
 
     result = {}
@@ -1337,13 +1353,68 @@ def approve_question_report(question_id: str, admin: bool = Depends(verify_admin
                 VALUES (?, ?, 'REPORT_APPROVED', ?, ?, ?, 0, ?)
             """, (notif_id, uid, notif_title, notif_msg, details_json, now))
 
+    # 4. Reconcile test sheets in room_participants so student scorecards in DB receive +4.0 marks
+    c.execute("SELECT id, code, question_ids FROM rooms WHERE question_ids LIKE ?", (f"%{question_id}%",))
+    affected_rooms = [dict(r) for r in c.fetchall()]
+    for rm in affected_rooms:
+        try:
+            raw_qids = json.loads(rm["question_ids"]) if isinstance(rm["question_ids"], str) else (rm["question_ids"] or [])
+        except Exception:
+            raw_qids = []
+        if question_id not in raw_qids:
+            continue
+        
+        # Link room_code on reports if missing
+        if rm.get("code"):
+            c.execute("UPDATE question_reports SET room_code = ? WHERE question_id = ? AND room_code IS NULL", (rm["code"], question_id))
+
+        c.execute("SELECT user_id, answers, score, marks FROM room_participants WHERE room_id = ?", (rm["id"],))
+        for p in c.fetchall():
+            p_uid = p["user_id"]
+            raw_ans = p["answers"] or "{}"
+            try:
+                p_answers = json.loads(raw_ans) if isinstance(raw_ans, str) else (raw_ans or {})
+            except Exception:
+                p_answers = {}
+
+            user_ans = p_answers.get(question_id)
+            if isinstance(user_ans, dict):
+                user_ans["correct"] = True
+                user_ans["is_dropped"] = True
+                user_ans["delta_marks"] = 4.0
+                p_answers[question_id] = user_ans
+            else:
+                p_answers[question_id] = {
+                    "selected": user_ans if user_ans else "SKIPPED",
+                    "correct": True,
+                    "is_dropped": True,
+                    "delta_marks": 4.0
+                }
+            auth_marks = 0.0
+            for a_v in p_answers.values():
+                if isinstance(a_v, dict):
+                    dm = a_v.get("delta_marks")
+                    if dm is not None:
+                        auth_marks += float(dm)
+                    elif a_v.get("correct") or a_v.get("is_dropped"):
+                        auth_marks += 4.0
+                    elif a_v.get("selected") not in ("NONE", "SKIPPED", "", None):
+                        auth_marks -= 1.0
+
+            c.execute("""
+                UPDATE room_participants
+                SET score = score + 4, marks = ?, answers = ?
+                WHERE room_id = ? AND user_id = ?
+            """, (auth_marks, json.dumps(p_answers), rm["id"], p_uid))
+
     conn.commit()
     conn.close()
 
     return {
         "success": True,
         "message": f"Report for question {question_id} approved as out of syllabus (question bank unchanged).",
-        "approved_count": len(pending_reports)
+        "approved_count": len(pending_reports),
+        "reconciled_rooms": len(affected_rooms)
     }
 
 
