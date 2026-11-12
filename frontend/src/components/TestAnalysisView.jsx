@@ -586,16 +586,18 @@ export default function TestAnalysisView({
 
     // Check if question has a report pending or confirmed dropped under official NTA rules:
     const roomReport = roomReports[q.id];
-    const isReportPending = reportedQuestionIds.has(q.id) ||
+    const isReportApproved = roomReport?.status === 'APPROVED';
+    const isReportPending = !isReportApproved && (reportedQuestionIds.has(q.id) ||
       Boolean(localStorage.getItem(`jee_reported_${q.id}`)) ||
       Boolean(localStorage.getItem(`jee_reported_dispute_${q.id}`)) ||
       (roomCode ? Boolean(localStorage.getItem(`jee_reported_room_${roomCode.trim().toUpperCase()}_${q.id}`)) : false) ||
-      (roomReport && roomReport.status === 'PENDING' && roomReport.consensus_status !== 'CONSENSUS_AGREED');
+      (roomReport && roomReport.status === 'PENDING' && roomReport.consensus_status !== 'CONSENSUS_AGREED'));
 
-    // Official NTA Dropped Questions are ONLY those verified and quarantined by moderation or consensus:
+    // Official NTA Dropped Questions are ONLY those verified and quarantined by moderation or consensus, OR approved out-of-syllabus:
     const isDroppedQuestion = (q.validation_status || '').toUpperCase() === 'QUARANTINED' ||
       Boolean(userSubmission?.is_dropped) ||
       roomReport?.status === 'QUARANTINED' ||
+      isReportApproved ||
       roomReport?.consensus_status === 'CONSENSUS_AGREED' ||
       q.id === 'eff5b1bc-a730-4423-b9c3-34423a407bbc';
 
@@ -2471,8 +2473,8 @@ export default function TestAnalysisView({
                         <div className="text-xs font-mono text-emerald-400 flex items-center gap-1.5 font-bold">
                           <CheckCircle2 className="w-3.5 h-3.5" />
                           <span>
-                            {roomReport?.reason === 'OUT_OF_TEST_SYLLABUS' || reportedReasons[q.id] === 'OUT_OF_TEST_SYLLABUS'
-                              ? 'Out of Syllabus Verified • Bonus Credited'
+                            {roomReport?.status === 'APPROVED' || roomReport?.reason === 'OUT_OF_TEST_SYLLABUS' || reportedReasons[q.id] === 'OUT_OF_TEST_SYLLABUS'
+                              ? 'Out of Syllabus Approved • Credit Finalized'
                               : 'Defect Verified • Bonus Credited'}
                           </span>
                         </div>

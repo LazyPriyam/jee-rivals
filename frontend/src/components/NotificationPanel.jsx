@@ -620,7 +620,7 @@ export default function NotificationPanel({
                           }
 
                           const isProvisional = m.type === 'PROVISIONAL_ELO_RESTORED' || m.type === 'QUESTION_PROVISIONAL_CREDIT';
-                          const isReportResolved = m.type === 'REPORT_RESOLVED' || m.type === 'REPORT_ACCEPTED';
+                          const isReportResolved = m.type === 'REPORT_RESOLVED' || m.type === 'REPORT_ACCEPTED' || m.type === 'REPORT_APPROVED';
                           const isDismissed = m.type === 'REPORT_DISMISSED';
                           const isSeasonPodium = m.type === 'SEASON_PODIUM';
                           const isSeasonPromotion = m.type === 'SEASON_PROMOTION';

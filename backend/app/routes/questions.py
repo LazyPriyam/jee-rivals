@@ -1280,6 +1280,73 @@ def dismiss_reports(question_id: str, admin: bool = Depends(verify_admin_sync)):
     }
 
 
+@router.post("/{question_id}/approve")
+def approve_question_report(question_id: str, admin: bool = Depends(verify_admin_sync)):
+    """
+    Approves a question report (e.g. Out of Syllabus for a custom test session)
+    WITHOUT altering anything about the question itself.
+    - Questions table remains untouched (validation status, key, options, chapter remain intact).
+    - Question reports status is marked 'APPROVED'.
+    - Provisional student Elo credit is permanently finalized (no clawback).
+    - Dispatches confirmation notification to affected student(s).
+    """
+    conn = get_connection()
+    c = conn.cursor()
+    now = datetime.datetime.utcnow().isoformat()
+    resolver = "Admin (GUI)"
+
+    # Fetch pending reports for this question
+    c.execute("""
+        SELECT id, reporter_id, reporter_username, reason, provisional_elo_refunded, provisional_subject
+        FROM question_reports
+        WHERE question_id = ? AND status = 'PENDING'
+    """, (question_id,))
+    pending_reports = [dict(r) for r in c.fetchall()]
+
+    # 1. Update question_reports status to 'APPROVED'
+    c.execute("""
+        UPDATE question_reports 
+        SET status = 'APPROVED', resolved_at = ?, resolved_by = ? 
+        WHERE question_id = ? AND status = 'PENDING'
+    """, (now, resolver, question_id))
+
+    # 2. DO NOT change anything in the questions table (question bank remains completely untouched).
+
+    # 3. Finalize student safeguard & send approval notification
+    for rep in pending_reports:
+        uid = rep["reporter_id"]
+        val = float(rep["provisional_elo_refunded"] or 0.0)
+        rep_reason = rep.get("reason") or "OUT_OF_TEST_SYLLABUS"
+        
+        if uid and uid != "guest":
+            notif_id = f"notif_{uuid.uuid4().hex[:12]}"
+            notif_title = f"✅ Report Approved: Question #{question_id[:8]}"
+            reason_label = "Out of Syllabus for Test" if "SYLLABUS" in str(rep_reason).upper() else "Issue Verified"
+            notif_msg = (
+                f"Your report for Question #{question_id[:8]} ({reason_label}) "
+                f"has been approved by moderators. The question has been marked out-of-syllabus for your test, "
+                f"and your score/rating safeguard is finalized."
+            )
+            details_json = json.dumps({
+                "question_id": question_id,
+                "action": "APPROVED_OUT_OF_SYLLABUS",
+                "finalized_elo": val
+            })
+            c.execute("""
+                INSERT INTO user_notifications (id, user_id, type, title, message, details, is_read, created_at)
+                VALUES (?, ?, 'REPORT_APPROVED', ?, ?, ?, 0, ?)
+            """, (notif_id, uid, notif_title, notif_msg, details_json, now))
+
+    conn.commit()
+    conn.close()
+
+    return {
+        "success": True,
+        "message": f"Report for question {question_id} approved as out of syllabus (question bank unchanged).",
+        "approved_count": len(pending_reports)
+    }
+
+
 @router.post("/{question_id}/restore")
 def restore_question(question_id: str, admin: bool = Depends(verify_admin_sync)):
     conn = get_connection()
