@@ -68,7 +68,6 @@ export default function TestAnalysisView({
   const [expandedSolutions, setExpandedSolutions] = useState({});
   const [reportTarget, setReportTarget] = useState(null);
   const [reportedQuestionIds, setReportedQuestionIds] = useState(new Set());
-  const [reportedReasons, setReportedReasons] = useState({});
   const [provisionalAlert, setProvisionalAlert] = useState(null);
   const [launchingDrill, setLaunchingDrill] = useState(false);
   const [roomReports, setRoomReports] = useState({});
@@ -93,13 +92,11 @@ export default function TestAnalysisView({
         const rawReports = res?.reports || res?.reports_list || res;
         const repMap = {};
         const reportedIds = [];
-        const reasonsMap = {};
         if (Array.isArray(rawReports)) {
           rawReports.forEach((r) => {
             if (r?.question_id) {
               repMap[r.question_id] = r;
               reportedIds.push(r.question_id);
-              if (r.reason) reasonsMap[r.question_id] = r.reason;
             }
           });
         } else if (rawReports && typeof rawReports === 'object') {
@@ -107,13 +104,9 @@ export default function TestAnalysisView({
             const rObj = typeof r === 'object' ? { ...r, question_id: r.question_id || qid } : { question_id: qid };
             repMap[qid] = rObj;
             reportedIds.push(qid);
-            if (rObj?.reason) reasonsMap[qid] = rObj.reason;
           });
         }
         setRoomReports(repMap);
-        if (Object.keys(reasonsMap).length > 0) {
-          setReportedReasons((prev) => ({ ...prev, ...reasonsMap }));
-        }
         setReportedQuestionIds((prev) => new Set([...prev, ...reportedIds]));
       })
       .catch(() => {});
@@ -123,26 +116,16 @@ export default function TestAnalysisView({
   useEffect(() => {
     try {
       const localReported = [];
-      const localReasons = {};
       for (let i = 0; i < localStorage.length; i++) {
         const k = localStorage.key(i);
         if (k && (k.startsWith('jee_reported_') || k.startsWith('jee_dispute_'))) {
           const parts = k.split('_');
           const qId = parts[parts.length - 1];
-          if (qId && qId.length > 10) {
-            localReported.push(qId);
-            const val = localStorage.getItem(k);
-            if (val && val !== 'true') {
-              localReasons[qId] = val;
-            }
-          }
+          if (qId && qId.length > 10) localReported.push(qId);
         }
       }
       if (localReported.length > 0) {
         setReportedQuestionIds((prev) => new Set([...prev, ...localReported]));
-      }
-      if (Object.keys(localReasons).length > 0) {
-        setReportedReasons((prev) => ({ ...prev, ...localReasons }));
       }
     } catch (_) {}
 
@@ -151,15 +134,6 @@ export default function TestAnalysisView({
         .then((reps) => {
           if (Array.isArray(reps)) {
             const repIds = reps.map((r) => r.question_id).filter(Boolean);
-            const reasonsMap = {};
-            reps.forEach((r) => {
-              if (r.question_id && r.reason) {
-                reasonsMap[r.question_id] = r.reason;
-              }
-            });
-            if (Object.keys(reasonsMap).length > 0) {
-              setReportedReasons((prev) => ({ ...prev, ...reasonsMap }));
-            }
             setReportedQuestionIds((prev) => new Set([...prev, ...repIds]));
           }
         })
@@ -187,19 +161,15 @@ export default function TestAnalysisView({
 
   const handleReportSuccess = (reportInfo) => {
     const qId = reportInfo?.questionId;
-    const reason = reportInfo?.reason;
     const cleanCode = (roomCode || '').trim().toUpperCase();
     const refund = Number(reportInfo?.provisional_elo_refunded || 0);
     const bonus = Number(reportInfo?.bonus_marks_awarded || 0);
     if (qId) {
       try {
-        localStorage.setItem(`jee_reported_${qId}`, reason || 'true');
-        if (cleanCode) localStorage.setItem(`jee_reported_room_${cleanCode}_${qId}`, reason || 'true');
+        localStorage.setItem(`jee_reported_${qId}`, 'true');
+        if (cleanCode) localStorage.setItem(`jee_reported_room_${cleanCode}_${qId}`, 'true');
       } catch (_) {}
       setReportedQuestionIds((prev) => new Set(prev).add(qId));
-      if (reason) {
-        setReportedReasons((prev) => ({ ...prev, [qId]: reason }));
-      }
     }
     try {
       if (cleanCode) sessionStorage.removeItem(`jee_analysis_data_${cleanCode}`);
@@ -2127,11 +2097,7 @@ export default function TestAnalysisView({
                         {item.isDropped || roomReport?.consensus_status === 'CONSENSUS_AGREED' ? (
                           <span className="text-xs font-black px-2.5 py-0.5 rounded-full flex items-center gap-1.5 animate-pulse border bg-emerald-500/20 text-emerald-300 border-emerald-500/40">
                             <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
-                            <span>
-                              {roomReport?.reason === 'OUT_OF_SYLLABUS' || reportedReasons[q.id] === 'OUT_OF_SYLLABUS'
-                                ? '+4.0 MARKS (OUT OF SYLLABUS • NTA BONUS)'
-                                : '+4.0 MARKS (DEFECT CONFIRMED • NTA BONUS)'}
-                            </span>
+                            <span>+4.0 MARKS (DEFECT CONFIRMED • NTA BONUS)</span>
                           </span>
                         ) : item.isPending || reportedQuestionIds.has(q.id) || roomReport ? (
                           <span className={`text-xs font-black px-2.5 py-0.5 rounded-full flex items-center gap-1.5 animate-pulse border ${
@@ -2142,16 +2108,10 @@ export default function TestAnalysisView({
                             <Shield className="w-3 h-3 text-amber-400" />
                             <span>
                               {roomReport?.consensus_status === 'CONSENSUS_REJECTED'
-                                ? (roomReport?.reason === 'OUT_OF_SYLLABUS' || reportedReasons[q.id] === 'OUT_OF_SYLLABUS'
-                                    ? 'OUT OF SYLLABUS DISPUTE REJECTED'
-                                    : 'DISPUTE REJECTED BY CONTENDERS')
+                                ? 'DISPUTE REJECTED BY CONTENDERS'
                                 : isMultiplayer
-                                ? (roomReport?.reason === 'OUT_OF_SYLLABUS' || reportedReasons[q.id] === 'OUT_OF_SYLLABUS'
-                                    ? 'OUT OF SYLLABUS VOTING IN PROGRESS'
-                                    : 'CONTENDER VOTING IN PROGRESS')
-                                : (roomReport?.reason === 'OUT_OF_SYLLABUS' || reportedReasons[q.id] === 'OUT_OF_SYLLABUS'
-                                    ? 'OUT OF SYLLABUS • PENDING REVIEW (+15 ELO RESTORED)'
-                                    : 'REPORT LOGGED • PENDING REVIEW (+15 ELO RESTORED)')}
+                                ? 'CONTENDER VOTING IN PROGRESS'
+                                : 'REPORT LOGGED • PENDING REVIEW (+15 ELO RESTORED)'}
                             </span>
                           </span>
                         ) : (
@@ -2355,17 +2315,17 @@ export default function TestAnalysisView({
                             </span>
                             <span className="text-white">
                               {roomReport.consensus_status === 'CONSENSUS_AGREED'
-                                ? (roomReport.reason === 'OUT_OF_SYLLABUS' ? 'Out of Syllabus Verified by Room Contenders' : 'Defect Verified by Room Contenders')
+                                ? 'Defect Verified by Room Contenders'
                                 : roomReport.consensus_status === 'CONSENSUS_REJECTED'
-                                ? (roomReport.reason === 'OUT_OF_SYLLABUS' ? 'Dispute Rejected by Contenders (Question is in Syllabus)' : 'Dispute Rejected by Contenders (Question Valid)')
-                                : (roomReport.reason === 'OUT_OF_SYLLABUS' ? 'Contender Syllabus Review' : 'Contender Consensus Review')}
+                                ? 'Dispute Rejected by Contenders (Question Valid)'
+                                : 'Contender Consensus Review'}
                             </span>
                             <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-black/40 border border-white/10 text-slate-300">
                               {roomReport.agree_count} Agree • {roomReport.disagree_count} Disagree / {roomReport.total_participants} Contenders
                             </span>
                           </div>
                           <div className="text-[11px] font-mono text-slate-400">
-                            Reported by <strong className="text-white">{roomReport.reporter_username || 'Contender'}</strong> ({roomReport.reason === 'OUT_OF_SYLLABUS' ? 'Out of Syllabus' : roomReport.reason})
+                            Reported by <strong className="text-white">{roomReport.reporter_username || 'Contender'}</strong> ({roomReport.reason})
                           </div>
                         </div>
 
@@ -2387,13 +2347,11 @@ export default function TestAnalysisView({
                                       ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
                                       : 'bg-rose-500/20 text-rose-400 border border-rose-500/30'
                                   }`}>
-                                    {roomReport.user_vote === 'AGREE'
-                                      ? (roomReport.reason === 'OUT_OF_SYLLABUS' ? '👍 Agreed (Out of Syllabus)' : '👍 Agreed (Confirmed Defect)')
-                                      : (roomReport.reason === 'OUT_OF_SYLLABUS' ? '👎 Disagreed (In Syllabus)' : '👎 Disagreed (Question is Correct)')}
+                                    {roomReport.user_vote === 'AGREE' ? '👍 Agreed (Confirmed Defect)' : '👎 Disagreed (Question is Correct)'}
                                   </span>
                                 </span>
                               ) : (
-                                <span>{roomReport.reason === 'OUT_OF_SYLLABUS' ? 'Vote on whether this question is out of the official syllabus:' : 'Vote on whether you encountered an error with this question:'}</span>
+                                <span>Vote on whether you encountered an error with this question:</span>
                               )}
                             </div>
 
@@ -2411,7 +2369,7 @@ export default function TestAnalysisView({
                                 }`}
                               >
                                 <ThumbsUp className="w-3.5 h-3.5" />
-                                <span>{roomReport.reason === 'OUT_OF_SYLLABUS' ? 'Agree (Out of Syllabus)' : 'Agree (Defect)'}</span>
+                                <span>Agree (Defect)</span>
                                 <span className="font-mono text-[10px] bg-black/40 px-1.5 py-0.2 rounded font-black">
                                   {roomReport.agree_count}
                                 </span>
@@ -2430,7 +2388,7 @@ export default function TestAnalysisView({
                                 }`}
                               >
                                 <ThumbsDown className="w-3.5 h-3.5" />
-                                <span>{roomReport.reason === 'OUT_OF_SYLLABUS' ? 'Disagree (In Syllabus)' : 'Disagree (Valid)'}</span>
+                                <span>Disagree (Valid)</span>
                                 <span className="font-mono text-[10px] bg-black/40 px-1.5 py-0.2 rounded font-black">
                                   {roomReport.disagree_count}
                                 </span>
@@ -2454,54 +2412,28 @@ export default function TestAnalysisView({
                       {item.isDropped ? (
                         <div className="text-xs font-mono text-emerald-400 flex items-center gap-1.5 font-bold">
                           <CheckCircle2 className="w-3.5 h-3.5" />
-                          <span>
-                            {roomReport?.reason === 'OUT_OF_SYLLABUS' || reportedReasons[q.id] === 'OUT_OF_SYLLABUS'
-                              ? 'Out of Syllabus Verified • Bonus Credited'
-                              : 'Defect Verified • Bonus Credited'}
-                          </span>
+                          <span>Defect Verified • Bonus Credited</span>
                         </div>
                       ) : roomReport || item.isPending || reportedQuestionIds.has(q.id) ? (
-                        <div className="text-xs font-mono flex items-center gap-1.5 text-amber-400 font-medium">
+                        <div className="text-xs font-mono flex items-center gap-1.5 text-amber-400">
                           <Shield className="w-3.5 h-3.5 text-amber-400" />
                           <span>
                             {roomReport?.consensus_status === 'CONSENSUS_AGREED'
-                              ? (roomReport?.reason === 'OUT_OF_SYLLABUS' || reportedReasons[q.id] === 'OUT_OF_SYLLABUS'
-                                  ? 'Out of Syllabus Confirmed'
-                                  : 'Defect Confirmed')
+                              ? 'Defect Confirmed'
                               : roomReport?.consensus_status === 'CONSENSUS_REJECTED'
                               ? 'Dispute Rejected'
-                              : (roomReport?.reason === 'OUT_OF_SYLLABUS' || reportedReasons[q.id] === 'OUT_OF_SYLLABUS'
-                                  ? 'Out of Syllabus in Review'
-                                  : 'Dispute in Review')}
+                              : 'Dispute in Review'}
                           </span>
                         </div>
                       ) : (
-                        <div className="flex items-center gap-2">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              sound.click();
-                              setReportTarget({ id: q.id, text: q.text, initialReason: 'OUT_OF_SYLLABUS' });
-                            }}
-                            className="text-xs font-mono transition flex items-center gap-1.5 cursor-pointer text-amber-400 hover:text-amber-300 bg-amber-500/10 hover:bg-amber-500/20 px-2.5 py-1 rounded-xl border border-amber-500/30 font-medium"
-                            title="Mark this question as out of the official JEE Main syllabus"
-                          >
-                            <AlertTriangle className="w-3 h-3 text-amber-400" />
-                            <span>Out of Syllabus</span>
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              sound.click();
-                              setReportTarget({ id: q.id, text: q.text, initialReason: 'WRONG_ANSWER' });
-                            }}
-                            className="text-xs font-mono transition flex items-center gap-1.5 cursor-pointer text-slate-400 hover:text-slate-200 bg-white/5 hover:bg-white/10 px-2.5 py-1 rounded-xl border border-white/10"
-                            title="Report answer error, missing figure, or broken formatting"
-                          >
-                            <Flag className="w-3 h-3" />
-                            <span>Report Question</span>
-                          </button>
-                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setReportTarget({ id: q.id, text: q.text })}
+                          className="text-xs font-mono transition flex items-center gap-1.5 cursor-pointer text-slate-500 hover:text-slate-400"
+                        >
+                          <Flag className="w-3 h-3" />
+                          <span>Report Question</span>
+                        </button>
                       )}
                     </div>
 
@@ -2528,7 +2460,7 @@ export default function TestAnalysisView({
                               initialSolution={sol}
                               onReportClick={() => {
                                 sound.click();
-                                setReportTarget({ ...q, initialReason: 'WRONG_ANSWER' });
+                                setReportTarget(q);
                               }}
                             />
                           </div>
@@ -2972,7 +2904,6 @@ export default function TestAnalysisView({
       {reportTarget && (
         <ReportQuestionModal
           question={reportTarget}
-          initialReason={reportTarget?.initialReason || 'WRONG_ANSWER'}
           user={user}
           mode="test_analysis"
           canSkip={false}
