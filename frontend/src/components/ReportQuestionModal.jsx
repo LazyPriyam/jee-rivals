@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { Flag, X, AlertTriangle, CheckCircle, Send, Loader2, Shield, Users } from 'lucide-react';
 import { api } from '../utils/api';
@@ -6,6 +6,7 @@ import sound from '../utils/sound';
 
 const REPORT_REASONS = [
   { id: 'WRONG_ANSWER', label: 'Wrong Answer Key / Solution', desc: 'The recorded correct answer or solution explanation is wrong.' },
+  { id: 'OUT_OF_TEST_SYLLABUS', label: 'Out of Syllabus for this Test (Wrong Chapter / Ingestion Error)', desc: 'This question does not belong to the chapter(s) chosen for this custom test, or was ingested under the wrong chapter.' },
   { id: 'BROKEN_FORMATTING', label: 'Broken KaTeX / LaTeX Formatting', desc: 'Formulas, equations, or special symbols are unrendered or corrupted.' },
   { id: 'MISSING_DIAGRAM', label: 'Missing Diagram / Table / Figure', desc: 'The question mentions a figure, graph, or matrix table that is not displayed.' },
   { id: 'AMBIGUOUS_QUESTION', label: 'Ambiguous or Incomplete Statement', desc: 'Text has cut-off sentences, missing variables, or unclear question intent.' },
@@ -18,6 +19,7 @@ export default function ReportQuestionModal({
   questionId,
   questionText,
   question,
+  initialReason = 'WRONG_ANSWER',
   mode = 'general', // 'adaptive' | 'mock_test' | 'arena' | 'general'
   canSkip = false,
   onSkip = null,
@@ -28,8 +30,9 @@ export default function ReportQuestionModal({
   const activeQuestionId = questionId || question?.id;
   const activeQuestionText = questionText || question?.text;
   const isModalOpen = isOpen !== undefined ? isOpen : Boolean(question);
+  const effectiveInitialReason = question?.initialReason || initialReason || 'WRONG_ANSWER';
 
-  const [selectedReason, setSelectedReason] = useState('WRONG_ANSWER');
+  const [selectedReason, setSelectedReason] = useState(effectiveInitialReason);
   const [notes, setNotes] = useState('');
   const [skipQuestion, setSkipQuestion] = useState(canSkip);
   const [submitting, setSubmitting] = useState(false);
@@ -37,6 +40,12 @@ export default function ReportQuestionModal({
   const [wasSkipped, setWasSkipped] = useState(false);
   const [provisionalRefund, setProvisionalRefund] = useState(0);
   const [error, setError] = useState('');
+
+  useEffect(() => {
+    if (isModalOpen) {
+      setSelectedReason(effectiveInitialReason);
+    }
+  }, [isModalOpen, effectiveInitialReason, activeQuestionId]);
 
   if (!isModalOpen || !activeQuestionId) return null;
 
@@ -88,7 +97,7 @@ export default function ReportQuestionModal({
         setWasSkipped(false);
         setProvisionalRefund(0);
         setNotes('');
-        setSelectedReason('WRONG_ANSWER');
+        setSelectedReason(effectiveInitialReason);
         onClose();
       }, refunded > 0 ? 2400 : 1600);
     } catch (err) {
@@ -141,6 +150,8 @@ export default function ReportQuestionModal({
                 ? 'Reported & Replaced!'
                 : provisionalRefund > 0
                 ? 'Provisional Elo Restored!'
+                : selectedReason === 'OUT_OF_TEST_SYLLABUS'
+                ? 'Out of Syllabus Flagged!'
                 : 'Report Logged'}
             </h3>
             {provisionalRefund > 0 && (
@@ -164,15 +175,29 @@ export default function ReportQuestionModal({
             <div>
               <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-950/80 border border-amber-500/40 text-amber-400 text-xs font-bold uppercase tracking-wider mb-2">
                 <Flag className="w-3.5 h-3.5" />
-                <span>Flag Defective Question</span>
+                <span>{selectedReason === 'OUT_OF_TEST_SYLLABUS' ? 'Flag Out of Syllabus for this Test' : 'Flag Defective Question'}</span>
               </div>
               <h2 className="text-xl font-black text-white tracking-tight">
-                Report Issue for Human Review
+                {selectedReason === 'OUT_OF_TEST_SYLLABUS' ? 'Report Chapter Ingestion Mismatch' : 'Report Issue for Human Review'}
               </h2>
               <p className="text-xs text-slate-400 mt-1">
                 Question ID: <span className="font-mono text-amber-400 font-bold">{activeQuestionId}</span>
               </p>
             </div>
+
+            {/* Custom Test Scope Callout if available */}
+            {question?.testChapters && question.testChapters.length > 0 && (
+              <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded-2xl text-[11px] text-amber-200 flex items-start gap-2.5">
+                <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                <div className="leading-relaxed">
+                  <strong className="text-white block font-bold mb-0.5">Custom Test Syllabus Scope:</strong>
+                  This test was generated for <span className="font-bold text-amber-300">{question.testChapters.join(', ')}</span>.
+                  {question.chapter && (
+                    <span> Ingestion tagged as: <span className="font-mono text-white font-bold">{question.chapter}</span>.</span>
+                  )}
+                </div>
+              </div>
+            )}
 
             {/* Multiplayer Contender Review Notice */}
             {isMultiplayer && (
@@ -260,7 +285,11 @@ export default function ReportQuestionModal({
               <textarea
                 value={notes}
                 onChange={(e) => setNotes(e.target.value)}
-                placeholder="e.g. Option B should be 4 m/s instead of 2 m/s, or Figure 2 is cut off..."
+                placeholder={
+                  selectedReason === 'OUT_OF_TEST_SYLLABUS'
+                    ? 'e.g. This custom test is for Quadratic Equations, but this problem requires Complex Numbers / iota which was ingested under the wrong chapter...'
+                    : 'e.g. Option B should be 4 m/s instead of 2 m/s, or Figure 2 is cut off...'
+                }
                 rows={3}
                 className="w-full px-3.5 py-2.5 bg-[#141824] border border-white/10 rounded-2xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-amber-500 transition resize-none"
               />
@@ -325,7 +354,7 @@ export default function ReportQuestionModal({
                 ) : (
                   <>
                     <Send className="w-3.5 h-3.5" />
-                    <span>Send Report to Hub</span>
+                    <span>{selectedReason === 'OUT_OF_TEST_SYLLABUS' ? 'Submit Out of Syllabus Report' : 'Send Report to Hub'}</span>
                   </>
                 )}
               </button>

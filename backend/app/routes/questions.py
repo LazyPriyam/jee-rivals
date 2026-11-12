@@ -446,7 +446,7 @@ def report_question(question_id: str, report_data: QuestionReportRequest, user: 
                         else:
                             # Question was part of this test
                             provisional_elo = 15.0
-                    elif report_data.reason in ("WRONG_ANSWER", "AMBIGUOUS_QUESTION", "MISSING_DIAGRAM", "BROKEN_FORMATTING", "OTHER"):
+                    elif report_data.reason in ("WRONG_ANSWER", "AMBIGUOUS_QUESTION", "MISSING_DIAGRAM", "BROKEN_FORMATTING", "OUT_OF_TEST_SYLLABUS", "WRONG_CHAPTER", "OTHER"):
                         # General fallback for questions reported with any valid defect reason
                         provisional_elo = 15.0
 
@@ -494,11 +494,12 @@ def report_question(question_id: str, report_data: QuestionReportRequest, user: 
                 """, (uid, question_id, rep_subject, rep_chapter, provisional_elo, now))
 
                 # In-App Notification
+                reason_clean = "Out of Syllabus for this Test" if report_data.reason in ("OUT_OF_TEST_SYLLABUS", "WRONG_CHAPTER") else report_data.reason.replace("_", " ").title()
                 notif_id = f"notif_{uuid.uuid4().hex[:12]}"
                 notif_title = f"🛡️ Provisional Elo Restored (+{provisional_elo:.1f} Elo)"
                 notif_msg = (
-                    f"You flagged Question #{question_id[:8]} ({rep_chapter}) for {report_data.reason}. "
-                    f"As a provisional safeguard, +{provisional_elo:.1f} Elo has been credited to your rating pending human review. "
+                    f"You flagged Question #{question_id[:8]} ({rep_chapter}) for {reason_clean}. "
+                    f"As a provisional safeguard, +{provisional_elo:.1f} Elo has been credited to your rating pending review. "
                     f"If the defect is confirmed, your rating is locked in permanently with a bounty. "
                     f"If the report is dismissed, this provisional credit will be reverted."
                 )
@@ -626,13 +627,14 @@ def report_question(question_id: str, report_data: QuestionReportRequest, user: 
         consensus_status = "VOTING_IN_PROGRESS"
 
         # Dispatch vote request notification to all other contenders
+        reason_clean = "Out of Syllabus for this Test" if report_data.reason in ("OUT_OF_TEST_SYLLABUS", "WRONG_CHAPTER") else report_data.reason.replace("_", " ").title()
         for other_uid in participant_ids:
             if other_uid != reporter_id:
                 notif_id = f"notif_{uuid.uuid4().hex[:12]}"
                 notif_title = f"🗳️ Question Dispute Vote: Room #{room_code}"
                 notif_msg = (
-                    f"{reporter_name} reported Question #{question_id[:8]} ({report_data.reason}) in Room #{room_code}. "
-                    f"As a fellow contender, your vote is required in Test Analysis to confirm or dispute this report."
+                    f"{reporter_name} reported Question #{question_id[:8]} as Out of Syllabus for this test in Room #{room_code}. "
+                    f"As a fellow contender, your vote is required in Test Analysis to confirm whether this question belongs to this test's syllabus."
                 )
                 details_json = json.dumps({
                     "report_id": report_id,
@@ -668,10 +670,11 @@ def report_question(question_id: str, report_data: QuestionReportRequest, user: 
                 VALUES (?, ?, 'REPORT_RESOLVED', ?, ?, ?, 0, ?)
             """, (notif_id, uid, notif_title, notif_msg, details_json, now))
         else:
+            reason_clean = "Out of Syllabus for this Test" if report_data.reason in ("OUT_OF_TEST_SYLLABUS", "WRONG_CHAPTER") else report_data.reason.replace("_", " ").title()
             notif_title = f"🛡️ Report Registered: Question #{question_id[:8]}"
             notif_msg = (
-                f"You reported Question #{question_id[:8]} ({rep_chapter}) for {report_data.reason}. "
-                f"Your dispute has been registered for defect review. Rating safeguard (+{provisional_elo:.1f} Elo) "
+                f"You reported Question #{question_id[:8]} ({rep_chapter}) for {reason_clean}. "
+                f"Your dispute has been registered for review. Rating safeguard (+{provisional_elo:.1f} Elo) "
                 f"has been provisionally credited to your profile. Once verified defective by moderators or contender consensus, "
                 f"full bonus marks (+4.0 marks) will be officially awarded to your scorecard under NTA Dropped Question rules."
             )
