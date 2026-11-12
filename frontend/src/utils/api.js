@@ -260,7 +260,20 @@ async function request(path, options = {}) {
     throw err;
   }
 
-  return res.json();
+  const contentType = (res.headers.get("content-type") || "").toLowerCase();
+  if (contentType.includes("application/json")) {
+    return res.json();
+  }
+
+  const rawBody = await res.text();
+  if (rawBody.trim().startsWith("<")) {
+    throw new Error(`Server returned HTML instead of JSON for '${path}'. The service may be restarting or the endpoint was not found.`);
+  }
+  try {
+    return JSON.parse(rawBody);
+  } catch (_) {
+    return rawBody;
+  }
 }
 
 const _CLIENT_PROFILE_CACHE = new Map();

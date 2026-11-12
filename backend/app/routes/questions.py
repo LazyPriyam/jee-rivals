@@ -239,6 +239,452 @@ def get_random_questions(
     return verified_questions
 
 
+@router.post("/reports/{report_id}/vote")
+def vote_on_report(
+    report_id: str,
+    payload: QuestionReportVoteRequest,
+    user: dict = Depends(get_current_user)
+):
+    """
+    Submits a contender vote (AGREE / DISAGREE) on a question reported in a multiplayer test.
+    When consensus is reached among contenders, updates consensus_status and notifies participants.
+    """
+    vote_val = payload.vote.strip().upper()
+    if vote_val not in ("AGREE", "DISAGREE"):
+        raise HTTPException(status_code=400, detail="Vote must be 'AGREE' or 'DISAGREE'.")
+
+    conn = get_connection()
+    c = conn.cursor()
+
+    c.execute("SELECT * FROM question_reports WHERE id = ?", (report_id,))
+    rep_row = c.fetchone()
+    if not rep_row:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Question report not found.")
+
+    rep = dict(rep_row)
+    now = datetime.datetime.utcnow().isoformat()
+    uid = user["id"]
+    username = user.get("username", "Contender")
+
+    raw_parts = rep.get("participant_ids") or "[]"
+    try:
+        parts = json.loads(raw_parts) if isinstance(raw_parts, str) else raw_parts
+    except Exception:
+        parts = []
+
+    if parts and uid not in parts:
+        conn.close()
+        raise HTTPException(status_code=403, detail="Only contenders who took this test can vote on this report.")
+
+    raw_votes = rep.get("votes") or "{}"
+    try:
+        votes = json.loads(raw_votes) if isinstance(raw_votes, str) else raw_votes
+    except Exception:
+        votes = {}
+
+    votes[uid] = {
+        "vote": vote_val,
+        "username": username,
+        "voted_at": now
+    }
+
+    total_participants = len(parts) if parts else max(2, len(votes))
+    agree_votes = sum(1 for v in votes.values() if (v.get("vote") if isinstance(v, dict) else v) == "AGREE")
+    disagree_votes = sum(1 for v in votes.values() if (v.get("vote") if isinstance(v, dict) else v) == "DISAGREE")
+
+    # Determine consensus:
+    # 2 participants: both must agree for defect to be confirmed. If 1 disagrees, rejected.
+    # >2 participants: majority threshold (> 50%) decides consensus.
+    old_consensus = rep.get("consensus_status") or "VOTING_IN_PROGRESS"
+    if total_participants == 2:
+        if agree_votes == 2:
+            consensus_status = "CONSENSUS_AGREED"
+        elif disagree_votes >= 1:
+            consensus_status = "CONSENSUS_REJECTED"
+        else:
+            consensus_status = "VOTING_IN_PROGRESS"
+    else:
+        majority_threshold = (total_participants // 2) + 1
+        if agree_votes >= majority_threshold:
+            consensus_status = "CONSENSUS_AGREED"
+        elif disagree_votes >= majority_threshold or (agree_votes + disagree_votes == total_participants and agree_votes <= disagree_votes):
+            consensus_status = "CONSENSUS_REJECTED"
+        else:
+            consensus_status = "VOTING_IN_PROGRESS"
+
+    c.execute("""
+        UPDATE question_reports
+        SET votes = ?, consensus_status = ?
+        WHERE id = ?
+    """, (json.dumps(votes), consensus_status, report_id))
+
+    # Dispatch notification to all participants if consensus was just achieved
+    if consensus_status == "CONSENSUS_AGREED" and old_consensus != "CONSENSUS_AGREED":
+        for p_uid in parts:
+            notif_id = f"notif_{uuid.uuid4().hex[:12]}"
+            notif_title = f"✅ Report Verified by Contenders: Question #{rep['question_id'][:8]}"
+            notif_msg = (
+                f"Contenders in Room #{rep.get('room_code', '')} voted to confirm the defect for Question #{rep['question_id'][:8]}. "
+                f"Consensus reached ({agree_votes}/{total_participants} agreed)."
+            )
+            details_json = json.dumps({
+                "report_id": report_id,
+                "question_id": rep["question_id"],
+                "room_code": rep.get("room_code"),
+                "status": "CONSENSUS_AGREED"
+            })
+            c.execute("""
+                INSERT INTO user_notifications (id, user_id, type, title, message, details, is_read, created_at)
+                VALUES (?, ?, 'REPORT_CONSENSUS_REACHED', ?, ?, ?, 0, ?)
+            """, (notif_id, p_uid, notif_title, notif_msg, details_json, now))
+    elif consensus_status == "CONSENSUS_REJECTED" and old_consensus != "CONSENSUS_REJECTED":
+        # Notify reporter that contenders rejected the dispute
+        notif_id = f"notif_{uuid.uuid4().hex[:12]}"
+        notif_title = f"⚖️ Report Rejected by Contenders: Question #{rep['question_id'][:8]}"
+        notif_msg = (
+            f"Fellow contenders in Room #{rep.get('room_code', '')} reviewed Question #{rep['question_id'][:8]} "
+            f"and voted that the question and answer key are correct ({disagree_votes}/{total_participants} voted correct)."
+        )
+        details_json = json.dumps({
+            "report_id": report_id,
+            "question_id": rep["question_id"],
+            "room_code": rep.get("room_code"),
+            "status": "CONSENSUS_REJECTED"
+        })
+        c.execute("""
+            INSERT INTO user_notifications (id, user_id, type, title, message, details, is_read, created_at)
+            VALUES (?, ?, 'REPORT_CONSENSUS_REJECTED', ?, ?, ?, 0, ?)
+        """, (notif_id, rep["reporter_id"], notif_title, notif_msg, details_json, now))
+
+    conn.commit()
+    conn.close()
+
+    return {
+        "success": True,
+        "report_id": report_id,
+        "vote": vote_val,
+        "votes": votes,
+        "agree_votes": agree_votes,
+        "disagree_votes": disagree_votes,
+        "total_participants": total_participants,
+        "consensus_status": consensus_status
+    }
+
+
+@router.get("/reports/room/{room_code}")
+def get_room_reports(room_code: str, user: Optional[dict] = Depends(get_optional_user)):
+    """
+    Returns all reports and contender voting statuses for questions in a specific room.
+    """
+    code = room_code.strip().upper()
+    conn = get_connection()
+    c = conn.cursor()
+
+    # Look up room question_ids to ensure reports filed with or without room_code are found
+    c.execute("SELECT id, question_ids FROM rooms WHERE code = ?", (code,))
+    r_row = c.fetchone()
+    q_ids = []
+    if r_row and r_row["question_ids"]:
+        try:
+            raw_qids = json.loads(r_row["question_ids"]) if isinstance(r_row["question_ids"], str) else r_row["question_ids"]
+            q_ids = [qid for qid in raw_qids if qid]
+        except Exception:
+            q_ids = []
+
+    where_clauses = ["room_code = ?"]
+    params = [code]
+
+    if q_ids:
+        placeholders = ",".join("?" for _ in q_ids)
+        where_clauses.append(f"question_id IN ({placeholders})")
+        params.extend(q_ids)
+
+    query = f"SELECT * FROM question_reports WHERE {' OR '.join(where_clauses)} ORDER BY created_at ASC"
+    c.execute(query, tuple(params))
+    rows = [dict(r) for r in c.fetchall()]
+
+    result = {}
+    for r in rows:
+        qid = r["question_id"]
+        raw_votes = r.get("votes") or "{}"
+        try:
+            votes = json.loads(raw_votes) if isinstance(raw_votes, str) else raw_votes
+        except Exception:
+            votes = {}
+
+        raw_parts = r.get("participant_ids") or "[]"
+        try:
+            parts = json.loads(raw_parts) if isinstance(raw_parts, str) else raw_parts
+        except Exception:
+            parts = []
+
+        agree_cnt = sum(1 for v in votes.values() if (v.get("vote") if isinstance(v, dict) else v) == "AGREE")
+        disagree_cnt = sum(1 for v in votes.values() if (v.get("vote") if isinstance(v, dict) else v) == "DISAGREE")
+
+        user_vote = None
+        if user and user.get("id"):
+            u_entry = votes.get(user["id"])
+            if u_entry:
+                user_vote = u_entry.get("vote") if isinstance(u_entry, dict) else u_entry
+
+        result[qid] = {
+            "id": r["id"],
+            "question_id": qid,
+            "reporter_id": r.get("reporter_id"),
+            "reporter_username": r.get("reporter_username"),
+            "reason": r.get("reason"),
+            "notes": r.get("notes"),
+            "status": r.get("status"),
+            "consensus_status": r.get("consensus_status") or "PENDING",
+            "votes": votes,
+            "agree_count": agree_cnt,
+            "disagree_count": disagree_cnt,
+            "total_participants": len(parts) if parts else max(2, len(votes)),
+            "user_vote": user_vote,
+            "created_at": r.get("created_at")
+        }
+
+    # Automatically identify quarantined/defective questions in this room
+    try:
+        c.execute("SELECT question_ids FROM rooms WHERE code = ?", (code,))
+        r_row = c.fetchone()
+        if r_row:
+            raw_qids = r_row[0] if isinstance(r_row, (list, tuple)) else r_row["question_ids"]
+            q_ids = json.loads(raw_qids) if isinstance(raw_qids, str) else (raw_qids or [])
+            for qid in q_ids:
+                sqid = str(qid)
+                if sqid not in result:
+                    c.execute("SELECT validation_status FROM questions WHERE id = ?", (sqid,))
+                    v_row = c.fetchone()
+                    v_st = None
+                    if v_row:
+                        v_st = v_row[0] if isinstance(v_row, (list, tuple)) else v_row["validation_status"]
+                    if v_st == "QUARANTINED" or sqid == "eff5b1bc-a730-4423-b9c3-34423a407bbc":
+                        result[sqid] = {
+                            "id": f"quarantined_{sqid}",
+                            "question_id": sqid,
+                            "reporter_id": "system",
+                            "reporter_username": "NTA Quality Safeguard",
+                            "reason": "DEFECTIVE_QUESTION",
+                            "notes": "Question confirmed defective and quarantined under official NTA Dropped Question guidelines.",
+                            "status": "QUARANTINED",
+                            "consensus_status": "CONSENSUS_AGREED",
+                            "votes": {},
+                            "agree_count": 99,
+                            "disagree_count": 0,
+                            "total_participants": 1,
+                            "user_vote": "AGREE",
+                            "created_at": datetime.datetime.utcnow().isoformat()
+                        }
+    except Exception as q_check_err:
+        logger.warning(f"[ROOM_REPORTS] Quarantined check note: {q_check_err}")
+
+    conn.close()
+
+    return {
+        "room_code": code,
+        "reports": result,
+        "reports_list": list(result.values())
+    }
+
+
+@router.get("/reports")
+def get_user_reports(
+    status: Optional[str] = None,
+    reporter_id: Optional[str] = None,
+    user: Optional[dict] = Depends(get_optional_user)
+):
+    """
+    Returns question reports filed by the active user.
+    """
+    conn = get_connection()
+    c = conn.cursor()
+    target_uid = reporter_id or (user.get("id") if user else None)
+    if not target_uid:
+        conn.close()
+        return []
+
+    query = "SELECT * FROM question_reports WHERE reporter_id = ?"
+    params = [target_uid]
+    if status:
+        query += " AND status = ?"
+        params.append(status)
+    query += " ORDER BY created_at DESC"
+    c.execute(query, tuple(params))
+    rows = [dict(r) for r in c.fetchall()]
+    conn.close()
+    return rows
+
+
+@router.get("/reports/summary")
+def get_reports_summary(admin: bool = Depends(verify_admin_sync)):
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute("""
+        SELECT 
+            COUNT(*) as total,
+            SUM(CASE WHEN status = 'PENDING' THEN 1 ELSE 0 END) as pending,
+            SUM(CASE WHEN status = 'QUARANTINED' THEN 1 ELSE 0 END) as quarantined,
+            SUM(CASE WHEN status = 'DISMISSED' THEN 1 ELSE 0 END) as dismissed,
+            SUM(CASE WHEN status = 'FIXED' THEN 1 ELSE 0 END) as fixed
+        FROM question_reports
+    """)
+    row = c.fetchone()
+    conn.close()
+    if not row:
+        return {"total": 0, "pending": 0, "quarantined": 0, "dismissed": 0, "fixed": 0}
+    return {
+        "total": row["total"] or 0,
+        "pending": row["pending"] or 0,
+        "quarantined": row["quarantined"] or 0,
+        "dismissed": row["dismissed"] or 0,
+        "fixed": row["fixed"] or 0
+    }
+
+
+@router.get("/reports/all")
+def get_all_reports(
+    status: Optional[str] = Query(None),
+    reporter_id: Optional[str] = Query(None),
+    limit: int = Query(150, ge=1, le=500),
+    x_sync_token: Optional[str] = Header(None, alias="X-Sync-Token"),
+    current_user: Optional[dict] = Depends(get_optional_user)
+):
+    is_admin = bool(x_sync_token and x_sync_token == ADMIN_SYNC_TOKEN)
+    if not is_admin:
+        if not current_user:
+            raise HTTPException(
+                status_code=401,
+                detail="Authentication required to view reports."
+            )
+        reporter_id = str(current_user.get("id"))
+        is_self = True
+    else:
+        is_self = True
+
+    conn = get_connection()
+    c = conn.cursor()
+
+    query = """
+        SELECT 
+            qr.id as report_id,
+            qr.question_id,
+            qr.reporter_id,
+            qr.reporter_username,
+            qr.reason,
+            qr.notes,
+            qr.status as report_status,
+            qr.created_at as reported_at,
+            qr.resolved_at,
+            qr.resolved_by,
+            COALESCE(q.subject, 'Unknown') as subject,
+            COALESCE(q.unit, '') as unit,
+            COALESCE(q.chapter, 'General') as chapter,
+            COALESCE(q.question_type, 'MCQ') as question_type,
+            COALESCE(q.text, 'Question text unavailable') as question_text,
+            q.options,
+            COALESCE(q.correct_answer, 'N/A') as correct_answer,
+            COALESCE(q.solution_text, '') as solution_text,
+            COALESCE(q.has_diagram, 0) as has_diagram,
+            q.diagram_urls,
+            COALESCE(q.difficulty_tier, 'MEDIUM') as difficulty_tier,
+            COALESCE(q.validation_status, 'UNKNOWN') as validation_status,
+            COALESCE(qr.provisional_elo_refunded, 0.0) as provisional_elo_refunded,
+            COALESCE(qr.provisional_subject, '') as provisional_subject
+        FROM question_reports qr
+        LEFT JOIN questions q ON qr.question_id = q.id
+    """
+    params = []
+    where_clauses = []
+    if status and status.upper() != "ALL":
+        where_clauses.append("qr.status = ?")
+        params.append(status.upper())
+
+    if reporter_id and reporter_id.strip():
+        where_clauses.append("qr.reporter_id = ?")
+        params.append(reporter_id.strip())
+
+    if where_clauses:
+        query += " WHERE " + " AND ".join(where_clauses)
+
+    query += " ORDER BY qr.created_at DESC LIMIT ?"
+    params.append(limit)
+    c.execute(query, params)
+    rows = c.fetchall()
+    conn.close()
+
+    reports = []
+    for r in rows:
+        item = dict(r)
+        try:
+            item["options"] = json.loads(item["options"]) if isinstance(item["options"], str) else (item["options"] or [])
+        except Exception:
+            item["options"] = []
+        try:
+            urls = json.loads(item["diagram_urls"]) if isinstance(item["diagram_urls"], str) else (item["diagram_urls"] or [])
+            from pathlib import Path
+            clean_urls = []
+            for u in urls:
+                if u:
+                    u_str = str(u)
+                    if u_str.startswith("/diagrams/") or u_str.startswith("http://") or u_str.startswith("https://"):
+                        clean_urls.append(u_str)
+                    else:
+                        fn = Path(u_str.replace("\\", "/")).name
+                        clean_urls.append(f"/diagrams/{fn}")
+            item["diagram_urls"] = clean_urls
+        except Exception:
+            item["diagram_urls"] = []
+
+        reports.append(item)
+
+    return reports
+
+
+
+@router.get("/quarantined/all")
+def get_quarantined_questions(admin: bool = Depends(verify_admin_sync)):
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute("""
+        SELECT id, subject, unit, chapter, question_type, text as question_text, options, correct_answer, solution_text, has_diagram, diagram_urls, difficulty_tier, validation_status
+        FROM questions
+        WHERE validation_status = 'QUARANTINED'
+        ORDER BY id DESC
+        LIMIT 100
+    """)
+    rows = c.fetchall()
+    conn.close()
+
+    result = []
+    for r in rows:
+        item = dict(r)
+        try:
+            item["options"] = json.loads(item["options"]) if isinstance(item["options"], str) else (item["options"] or [])
+        except Exception:
+            item["options"] = []
+        try:
+            urls = json.loads(item["diagram_urls"]) if isinstance(item["diagram_urls"], str) else (item["diagram_urls"] or [])
+            from pathlib import Path
+            clean_urls = []
+            for u in urls:
+                if u:
+                    u_str = str(u)
+                    if u_str.startswith("/diagrams/") or u_str.startswith("http://") or u_str.startswith("https://"):
+                        clean_urls.append(u_str)
+                    else:
+                        fn = Path(u_str.replace("\\", "/")).name
+                        clean_urls.append(f"/diagrams/{fn}")
+            item["diagram_urls"] = clean_urls
+        except Exception:
+            item["diagram_urls"] = []
+        result.append(item)
+    return result
+
+
+
+
 @router.get("/{question_id}", response_model=QuestionOut)
 def get_question(question_id: str):
     from backend.app.tools.question_cache import get_question_cached
@@ -728,446 +1174,6 @@ def report_question(question_id: str, report_data: QuestionReportRequest, user: 
         "room_code": room_code,
         "consensus_status": consensus_status
     }
-
-
-@router.post("/reports/{report_id}/vote")
-def vote_on_report(
-    report_id: str,
-    payload: QuestionReportVoteRequest,
-    user: dict = Depends(get_current_user)
-):
-    """
-    Submits a contender vote (AGREE / DISAGREE) on a question reported in a multiplayer test.
-    When consensus is reached among contenders, updates consensus_status and notifies participants.
-    """
-    vote_val = payload.vote.strip().upper()
-    if vote_val not in ("AGREE", "DISAGREE"):
-        raise HTTPException(status_code=400, detail="Vote must be 'AGREE' or 'DISAGREE'.")
-
-    conn = get_connection()
-    c = conn.cursor()
-
-    c.execute("SELECT * FROM question_reports WHERE id = ?", (report_id,))
-    rep_row = c.fetchone()
-    if not rep_row:
-        conn.close()
-        raise HTTPException(status_code=404, detail="Question report not found.")
-
-    rep = dict(rep_row)
-    now = datetime.datetime.utcnow().isoformat()
-    uid = user["id"]
-    username = user.get("username", "Contender")
-
-    raw_parts = rep.get("participant_ids") or "[]"
-    try:
-        parts = json.loads(raw_parts) if isinstance(raw_parts, str) else raw_parts
-    except Exception:
-        parts = []
-
-    if parts and uid not in parts:
-        conn.close()
-        raise HTTPException(status_code=403, detail="Only contenders who took this test can vote on this report.")
-
-    raw_votes = rep.get("votes") or "{}"
-    try:
-        votes = json.loads(raw_votes) if isinstance(raw_votes, str) else raw_votes
-    except Exception:
-        votes = {}
-
-    votes[uid] = {
-        "vote": vote_val,
-        "username": username,
-        "voted_at": now
-    }
-
-    total_participants = len(parts) if parts else max(2, len(votes))
-    agree_votes = sum(1 for v in votes.values() if (v.get("vote") if isinstance(v, dict) else v) == "AGREE")
-    disagree_votes = sum(1 for v in votes.values() if (v.get("vote") if isinstance(v, dict) else v) == "DISAGREE")
-
-    # Determine consensus:
-    # 2 participants: both must agree for defect to be confirmed. If 1 disagrees, rejected.
-    # >2 participants: majority threshold (> 50%) decides consensus.
-    old_consensus = rep.get("consensus_status") or "VOTING_IN_PROGRESS"
-    if total_participants == 2:
-        if agree_votes == 2:
-            consensus_status = "CONSENSUS_AGREED"
-        elif disagree_votes >= 1:
-            consensus_status = "CONSENSUS_REJECTED"
-        else:
-            consensus_status = "VOTING_IN_PROGRESS"
-    else:
-        majority_threshold = (total_participants // 2) + 1
-        if agree_votes >= majority_threshold:
-            consensus_status = "CONSENSUS_AGREED"
-        elif disagree_votes >= majority_threshold or (agree_votes + disagree_votes == total_participants and agree_votes <= disagree_votes):
-            consensus_status = "CONSENSUS_REJECTED"
-        else:
-            consensus_status = "VOTING_IN_PROGRESS"
-
-    c.execute("""
-        UPDATE question_reports
-        SET votes = ?, consensus_status = ?
-        WHERE id = ?
-    """, (json.dumps(votes), consensus_status, report_id))
-
-    # Dispatch notification to all participants if consensus was just achieved
-    if consensus_status == "CONSENSUS_AGREED" and old_consensus != "CONSENSUS_AGREED":
-        for p_uid in parts:
-            notif_id = f"notif_{uuid.uuid4().hex[:12]}"
-            notif_title = f"✅ Report Verified by Contenders: Question #{rep['question_id'][:8]}"
-            notif_msg = (
-                f"Contenders in Room #{rep.get('room_code', '')} voted to confirm the defect for Question #{rep['question_id'][:8]}. "
-                f"Consensus reached ({agree_votes}/{total_participants} agreed)."
-            )
-            details_json = json.dumps({
-                "report_id": report_id,
-                "question_id": rep["question_id"],
-                "room_code": rep.get("room_code"),
-                "status": "CONSENSUS_AGREED"
-            })
-            c.execute("""
-                INSERT INTO user_notifications (id, user_id, type, title, message, details, is_read, created_at)
-                VALUES (?, ?, 'REPORT_CONSENSUS_REACHED', ?, ?, ?, 0, ?)
-            """, (notif_id, p_uid, notif_title, notif_msg, details_json, now))
-    elif consensus_status == "CONSENSUS_REJECTED" and old_consensus != "CONSENSUS_REJECTED":
-        # Notify reporter that contenders rejected the dispute
-        notif_id = f"notif_{uuid.uuid4().hex[:12]}"
-        notif_title = f"⚖️ Report Rejected by Contenders: Question #{rep['question_id'][:8]}"
-        notif_msg = (
-            f"Fellow contenders in Room #{rep.get('room_code', '')} reviewed Question #{rep['question_id'][:8]} "
-            f"and voted that the question and answer key are correct ({disagree_votes}/{total_participants} voted correct)."
-        )
-        details_json = json.dumps({
-            "report_id": report_id,
-            "question_id": rep["question_id"],
-            "room_code": rep.get("room_code"),
-            "status": "CONSENSUS_REJECTED"
-        })
-        c.execute("""
-            INSERT INTO user_notifications (id, user_id, type, title, message, details, is_read, created_at)
-            VALUES (?, ?, 'REPORT_CONSENSUS_REJECTED', ?, ?, ?, 0, ?)
-        """, (notif_id, rep["reporter_id"], notif_title, notif_msg, details_json, now))
-
-    conn.commit()
-    conn.close()
-
-    return {
-        "success": True,
-        "report_id": report_id,
-        "vote": vote_val,
-        "votes": votes,
-        "agree_votes": agree_votes,
-        "disagree_votes": disagree_votes,
-        "total_participants": total_participants,
-        "consensus_status": consensus_status
-    }
-
-
-@router.get("/reports/room/{room_code}")
-def get_room_reports(room_code: str, user: Optional[dict] = Depends(get_optional_user)):
-    """
-    Returns all reports and contender voting statuses for questions in a specific room.
-    """
-    code = room_code.strip().upper()
-    conn = get_connection()
-    c = conn.cursor()
-
-    # Look up room question_ids to ensure reports filed with or without room_code are found
-    c.execute("SELECT id, question_ids FROM rooms WHERE code = ?", (code,))
-    r_row = c.fetchone()
-    q_ids = []
-    if r_row and r_row["question_ids"]:
-        try:
-            raw_qids = json.loads(r_row["question_ids"]) if isinstance(r_row["question_ids"], str) else r_row["question_ids"]
-            q_ids = [qid for qid in raw_qids if qid]
-        except Exception:
-            q_ids = []
-
-    where_clauses = ["room_code = ?"]
-    params = [code]
-
-    if q_ids:
-        placeholders = ",".join("?" for _ in q_ids)
-        where_clauses.append(f"question_id IN ({placeholders})")
-        params.extend(q_ids)
-
-    query = f"SELECT * FROM question_reports WHERE {' OR '.join(where_clauses)} ORDER BY created_at ASC"
-    c.execute(query, tuple(params))
-    rows = [dict(r) for r in c.fetchall()]
-
-    result = {}
-    for r in rows:
-        qid = r["question_id"]
-        raw_votes = r.get("votes") or "{}"
-        try:
-            votes = json.loads(raw_votes) if isinstance(raw_votes, str) else raw_votes
-        except Exception:
-            votes = {}
-
-        raw_parts = r.get("participant_ids") or "[]"
-        try:
-            parts = json.loads(raw_parts) if isinstance(raw_parts, str) else raw_parts
-        except Exception:
-            parts = []
-
-        agree_cnt = sum(1 for v in votes.values() if (v.get("vote") if isinstance(v, dict) else v) == "AGREE")
-        disagree_cnt = sum(1 for v in votes.values() if (v.get("vote") if isinstance(v, dict) else v) == "DISAGREE")
-
-        user_vote = None
-        if user and user.get("id"):
-            u_entry = votes.get(user["id"])
-            if u_entry:
-                user_vote = u_entry.get("vote") if isinstance(u_entry, dict) else u_entry
-
-        result[qid] = {
-            "id": r["id"],
-            "question_id": qid,
-            "reporter_id": r.get("reporter_id"),
-            "reporter_username": r.get("reporter_username"),
-            "reason": r.get("reason"),
-            "notes": r.get("notes"),
-            "status": r.get("status"),
-            "consensus_status": r.get("consensus_status") or "PENDING",
-            "votes": votes,
-            "agree_count": agree_cnt,
-            "disagree_count": disagree_cnt,
-            "total_participants": len(parts) if parts else max(2, len(votes)),
-            "user_vote": user_vote,
-            "created_at": r.get("created_at")
-        }
-
-    # Automatically identify quarantined/defective questions in this room
-    try:
-        c.execute("SELECT question_ids FROM rooms WHERE code = ?", (code,))
-        r_row = c.fetchone()
-        if r_row:
-            raw_qids = r_row[0] if isinstance(r_row, (list, tuple)) else r_row["question_ids"]
-            q_ids = json.loads(raw_qids) if isinstance(raw_qids, str) else (raw_qids or [])
-            for qid in q_ids:
-                sqid = str(qid)
-                if sqid not in result:
-                    c.execute("SELECT validation_status FROM questions WHERE id = ?", (sqid,))
-                    v_row = c.fetchone()
-                    v_st = None
-                    if v_row:
-                        v_st = v_row[0] if isinstance(v_row, (list, tuple)) else v_row["validation_status"]
-                    if v_st == "QUARANTINED" or sqid == "eff5b1bc-a730-4423-b9c3-34423a407bbc":
-                        result[sqid] = {
-                            "id": f"quarantined_{sqid}",
-                            "question_id": sqid,
-                            "reporter_id": "system",
-                            "reporter_username": "NTA Quality Safeguard",
-                            "reason": "DEFECTIVE_QUESTION",
-                            "notes": "Question confirmed defective and quarantined under official NTA Dropped Question guidelines.",
-                            "status": "QUARANTINED",
-                            "consensus_status": "CONSENSUS_AGREED",
-                            "votes": {},
-                            "agree_count": 99,
-                            "disagree_count": 0,
-                            "total_participants": 1,
-                            "user_vote": "AGREE",
-                            "created_at": datetime.datetime.utcnow().isoformat()
-                        }
-    except Exception as q_check_err:
-        logger.warning(f"[ROOM_REPORTS] Quarantined check note: {q_check_err}")
-
-    conn.close()
-
-    return {
-        "room_code": code,
-        "reports": result,
-        "reports_list": list(result.values())
-    }
-
-
-@router.get("/reports")
-def get_user_reports(
-    status: Optional[str] = None,
-    reporter_id: Optional[str] = None,
-    user: Optional[dict] = Depends(get_optional_user)
-):
-    """
-    Returns question reports filed by the active user.
-    """
-    conn = get_connection()
-    c = conn.cursor()
-    target_uid = reporter_id or (user.get("id") if user else None)
-    if not target_uid:
-        conn.close()
-        return []
-
-    query = "SELECT * FROM question_reports WHERE reporter_id = ?"
-    params = [target_uid]
-    if status:
-        query += " AND status = ?"
-        params.append(status)
-    query += " ORDER BY created_at DESC"
-    c.execute(query, tuple(params))
-    rows = [dict(r) for r in c.fetchall()]
-    conn.close()
-    return rows
-
-
-@router.get("/reports/summary")
-def get_reports_summary(admin: bool = Depends(verify_admin_sync)):
-    conn = get_connection()
-    c = conn.cursor()
-    c.execute("""
-        SELECT 
-            COUNT(*) as total,
-            SUM(CASE WHEN status = 'PENDING' THEN 1 ELSE 0 END) as pending,
-            SUM(CASE WHEN status = 'QUARANTINED' THEN 1 ELSE 0 END) as quarantined,
-            SUM(CASE WHEN status = 'DISMISSED' THEN 1 ELSE 0 END) as dismissed,
-            SUM(CASE WHEN status = 'FIXED' THEN 1 ELSE 0 END) as fixed
-        FROM question_reports
-    """)
-    row = c.fetchone()
-    conn.close()
-    if not row:
-        return {"total": 0, "pending": 0, "quarantined": 0, "dismissed": 0, "fixed": 0}
-    return {
-        "total": row["total"] or 0,
-        "pending": row["pending"] or 0,
-        "quarantined": row["quarantined"] or 0,
-        "dismissed": row["dismissed"] or 0,
-        "fixed": row["fixed"] or 0
-    }
-
-
-@router.get("/reports/all")
-def get_all_reports(
-    status: Optional[str] = Query(None),
-    reporter_id: Optional[str] = Query(None),
-    limit: int = Query(150, ge=1, le=500),
-    x_sync_token: Optional[str] = Header(None, alias="X-Sync-Token"),
-    current_user: Optional[dict] = Depends(get_optional_user)
-):
-    is_admin = bool(x_sync_token and x_sync_token == ADMIN_SYNC_TOKEN)
-    is_self = bool(current_user and reporter_id and str(current_user.get("id")) == str(reporter_id))
-    if not is_admin and not is_self:
-        raise HTTPException(
-            status_code=403,
-            detail="Forbidden. Admin privileges or self-ownership required to view reports."
-        )
-
-    conn = get_connection()
-    c = conn.cursor()
-
-    query = """
-        SELECT 
-            qr.id as report_id,
-            qr.question_id,
-            qr.reporter_id,
-            qr.reporter_username,
-            qr.reason,
-            qr.notes,
-            qr.status as report_status,
-            qr.created_at as reported_at,
-            qr.resolved_at,
-            qr.resolved_by,
-            COALESCE(q.subject, 'Unknown') as subject,
-            COALESCE(q.unit, '') as unit,
-            COALESCE(q.chapter, 'General') as chapter,
-            COALESCE(q.question_type, 'MCQ') as question_type,
-            COALESCE(q.text, 'Question text unavailable') as question_text,
-            q.options,
-            COALESCE(q.correct_answer, 'N/A') as correct_answer,
-            COALESCE(q.solution_text, '') as solution_text,
-            COALESCE(q.has_diagram, 0) as has_diagram,
-            q.diagram_urls,
-            COALESCE(q.difficulty_tier, 'MEDIUM') as difficulty_tier,
-            COALESCE(q.validation_status, 'UNKNOWN') as validation_status,
-            COALESCE(qr.provisional_elo_refunded, 0.0) as provisional_elo_refunded,
-            COALESCE(qr.provisional_subject, '') as provisional_subject
-        FROM question_reports qr
-        LEFT JOIN questions q ON qr.question_id = q.id
-    """
-    params = []
-    where_clauses = []
-    if status and status.upper() != "ALL":
-        where_clauses.append("qr.status = ?")
-        params.append(status.upper())
-
-    if reporter_id and reporter_id.strip():
-        where_clauses.append("qr.reporter_id = ?")
-        params.append(reporter_id.strip())
-
-    if where_clauses:
-        query += " WHERE " + " AND ".join(where_clauses)
-
-    query += " ORDER BY qr.created_at DESC LIMIT ?"
-    params.append(limit)
-    c.execute(query, params)
-    rows = c.fetchall()
-    conn.close()
-
-    reports = []
-    for r in rows:
-        item = dict(r)
-        try:
-            item["options"] = json.loads(item["options"]) if isinstance(item["options"], str) else (item["options"] or [])
-        except Exception:
-            item["options"] = []
-        try:
-            urls = json.loads(item["diagram_urls"]) if isinstance(item["diagram_urls"], str) else (item["diagram_urls"] or [])
-            from pathlib import Path
-            clean_urls = []
-            for u in urls:
-                if u:
-                    u_str = str(u)
-                    if u_str.startswith("/diagrams/") or u_str.startswith("http://") or u_str.startswith("https://"):
-                        clean_urls.append(u_str)
-                    else:
-                        fn = Path(u_str.replace("\\", "/")).name
-                        clean_urls.append(f"/diagrams/{fn}")
-            item["diagram_urls"] = clean_urls
-        except Exception:
-            item["diagram_urls"] = []
-
-        reports.append(item)
-
-    return reports
-
-
-
-@router.get("/quarantined/all")
-def get_quarantined_questions(admin: bool = Depends(verify_admin_sync)):
-    conn = get_connection()
-    c = conn.cursor()
-    c.execute("""
-        SELECT id, subject, unit, chapter, question_type, text as question_text, options, correct_answer, solution_text, has_diagram, diagram_urls, difficulty_tier, validation_status
-        FROM questions
-        WHERE validation_status = 'QUARANTINED'
-        ORDER BY id DESC
-        LIMIT 100
-    """)
-    rows = c.fetchall()
-    conn.close()
-
-    result = []
-    for r in rows:
-        item = dict(r)
-        try:
-            item["options"] = json.loads(item["options"]) if isinstance(item["options"], str) else (item["options"] or [])
-        except Exception:
-            item["options"] = []
-        try:
-            urls = json.loads(item["diagram_urls"]) if isinstance(item["diagram_urls"], str) else (item["diagram_urls"] or [])
-            from pathlib import Path
-            clean_urls = []
-            for u in urls:
-                if u:
-                    u_str = str(u)
-                    if u_str.startswith("/diagrams/") or u_str.startswith("http://") or u_str.startswith("https://"):
-                        clean_urls.append(u_str)
-                    else:
-                        fn = Path(u_str.replace("\\", "/")).name
-                        clean_urls.append(f"/diagrams/{fn}")
-            item["diagram_urls"] = clean_urls
-        except Exception:
-            item["diagram_urls"] = []
-        result.append(item)
-    return result
 
 
 @router.post("/{question_id}/quarantine")

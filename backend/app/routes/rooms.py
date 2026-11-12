@@ -2076,16 +2076,21 @@ def get_room_results(code: str, user: Optional[dict] = Depends(get_optional_user
             if (q_info.get("validation_status") or "").upper() == "QUARANTINED":
                 defective_qids.add(qid)
 
-        try:
-            c.execute("SELECT question_id FROM question_reports WHERE room_code = ? AND (status = 'QUARANTINED' OR consensus_status = 'CONSENSUS_AGREED')", (code,))
-            for rep_row in c.fetchall():
-                defective_qids.add(str(rep_row[0] if isinstance(rep_row, (list, tuple)) else rep_row["question_id"]))
-        except Exception:
-            pass
-
         clean_q_ids_str = [str(x) for x in q_ids]
         if "eff5b1bc-a730-4423-b9c3-34423a407bbc" in clean_q_ids_str:
             defective_qids.add("eff5b1bc-a730-4423-b9c3-34423a407bbc")
+
+        try:
+            placeholders = ",".join("?" for _ in clean_q_ids_str) if clean_q_ids_str else "''"
+            c.execute(f"""
+                SELECT question_id FROM question_reports 
+                WHERE (room_code = ? OR question_id IN ({placeholders}))
+                  AND (status IN ('QUARANTINED', 'APPROVED') OR consensus_status = 'CONSENSUS_AGREED')
+            """, (code, *clean_q_ids_str))
+            for rep_row in c.fetchall():
+                defective_qids.add(str(rep_row[0] if isinstance(rep_row, (list, tuple)) else rep_row["question_id"]))
+        except Exception as rep_err:
+            logger.warning(f"[ROOM_RESULTS] Error checking defective/approved questions: {rep_err}")
 
         # Ensure all questions_data have validation_status set to QUARANTINED if in defective_qids
         for q_entry in questions_data:
