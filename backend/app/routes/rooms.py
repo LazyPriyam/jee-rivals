@@ -238,6 +238,7 @@ def get_user_test_history(user: dict = Depends(get_current_user), cursor=None, l
         SELECT r.id, r.code, r.mode, r.preset_name, r.subject, r.subjects,
                r.chapter, r.chapters, r.target_exam, r.total_questions,
                r.total_duration_minutes, r.status, r.created_at, r.completed_at,
+               r.difficulty_tier, r.question_ids,
                p.score, p.marks, p.answers, p.is_finished, p.finished_at,
                (SELECT COUNT(*) FROM room_participants WHERE room_id = r.id) as participant_count
         FROM rooms r
@@ -249,6 +250,44 @@ def get_user_test_history(user: dict = Depends(get_current_user), cursor=None, l
         LIMIT ?
     """, (user["id"], limit))
     rows = [dict(r) for r in c.fetchall()]
+
+    # Collect all question IDs across tests to batch-load question difficulty and Elo ratings
+    all_needed_qids = set()
+    for r in rows:
+        raw_qids = r.get("question_ids")
+        if raw_qids:
+            try:
+                q_list = json.loads(raw_qids) if isinstance(raw_qids, str) else raw_qids
+                for qid in q_list:
+                    if qid: all_needed_qids.add(str(qid))
+            except Exception:
+                pass
+        raw_ans = r.get("answers") or "{}"
+        try:
+            ans_map = json.loads(raw_ans) if isinstance(raw_ans, str) else raw_ans
+            if isinstance(ans_map, dict):
+                for qid in ans_map.keys():
+                    if qid and not str(qid).startswith("__"):
+                        all_needed_qids.add(str(qid))
+        except Exception:
+            pass
+
+    questions_meta = {}
+    if all_needed_qids:
+        try:
+            placeholders = ",".join("?" for _ in all_needed_qids)
+            c.execute(f"SELECT id, elo_rating, difficulty_tier FROM questions WHERE id IN ({placeholders})", tuple(all_needed_qids))
+            for q_row in c.fetchall():
+                qid = str(q_row["id"]) if "id" in q_row else str(q_row[0])
+                elo_val = q_row.get("elo_rating") if hasattr(q_row, "get") else (q_row["elo_rating"] if "elo_rating" in q_row else q_row[1])
+                diff_val = q_row.get("difficulty_tier") if hasattr(q_row, "get") else (q_row["difficulty_tier"] if "difficulty_tier" in q_row else q_row[2])
+                questions_meta[qid] = {
+                    "elo": float(elo_val or 1500.0),
+                    "difficulty_tier": str(diff_val or "MEDIUM").upper()
+                }
+        except Exception as q_err:
+            logger.warning(f"[HISTORY] Error batch-fetching question difficulty metadata: {q_err}")
+
     if close_conn and conn:
         conn.close()
 
@@ -327,6 +366,54 @@ def get_user_test_history(user: dict = Depends(get_current_user), cursor=None, l
         participant_count = r.get("participant_count") or 1
         is_group = participant_count > 1
 
+        # Determine question IDs belonging to this test
+        test_qids = []
+        raw_qids = r.get("question_ids")
+        if raw_qids:
+            try:
+                q_list = json.loads(raw_qids) if isinstance(raw_qids, str) else raw_qids
+                test_qids = [str(x) for x in q_list if x]
+            except Exception:
+                pass
+        if not test_qids and isinstance(ans_map, dict):
+            test_qids = [str(k) for k in ans_map.keys() if k and not str(k).startswith("__")]
+
+        # Difficulty & Elo Analysis for this examination
+        test_elos = [questions_meta[qid]["elo"] for qid in test_qids if qid in questions_meta and questions_meta[qid].get("elo")]
+        avg_q_elo = round(sum(test_elos) / len(test_elos)) if test_elos else 1350
+
+        tier_counts = {"EASY": 0, "MEDIUM": 0, "HARD": 0}
+        tier_attempted = {"EASY": 0, "MEDIUM": 0, "HARD": 0}
+        tier_correct = {"EASY": 0, "MEDIUM": 0, "HARD": 0}
+
+        for qid in test_qids:
+            q_tier = questions_meta.get(qid, {}).get("difficulty_tier", "MEDIUM")
+            if q_tier not in tier_counts:
+                q_tier = "MEDIUM"
+            tier_counts[q_tier] += 1
+
+            sub_item = ans_map.get(qid)
+            if isinstance(sub_item, dict):
+                sel = sub_item.get("selected")
+                if sel not in ("NONE", "SKIPPED", "", None) and sub_item.get("attempted") is not False:
+                    tier_attempted[q_tier] += 1
+                    if sub_item.get("correct") or sub_item.get("is_dropped"):
+                        tier_correct[q_tier] += 1
+
+        tier_accuracy = {
+            "easy": round((tier_correct["EASY"] / tier_attempted["EASY"]) * 100, 1) if tier_attempted["EASY"] > 0 else None,
+            "medium": round((tier_correct["MEDIUM"] / tier_attempted["MEDIUM"]) * 100, 1) if tier_attempted["MEDIUM"] > 0 else None,
+            "hard": round((tier_correct["HARD"] / tier_attempted["HARD"]) * 100, 1) if tier_attempted["HARD"] > 0 else None,
+        }
+
+        # Difficulty Factor & Difficulty-Adjusted Performance Index
+        difficulty_factor = round(avg_q_elo / 1350.0, 3)
+        difficulty_adjusted_score = round(marks_percentage * difficulty_factor, 1)
+
+        # Expected marks percentage for an average aspirant on a paper of this Elo:
+        expected_marks_pct = round(max(15.0, min(85.0, 50.0 - ((avg_q_elo - 1350.0) / 15.0))), 1)
+        performance_vs_expected = round(marks_percentage - expected_marks_pct, 1)
+
         history.append({
             "room_id": r["id"],
             "code": r["code"],
@@ -351,7 +438,15 @@ def get_user_test_history(user: dict = Depends(get_current_user), cursor=None, l
             "accuracy": accuracy,
             "is_finished": bool(r["is_finished"]),
             "participant_count": participant_count,
-            "is_group": is_group
+            "is_group": is_group,
+            "difficulty_tier": r.get("difficulty_tier") or ("HARD" if avg_q_elo >= 1550 else ("MEDIUM" if avg_q_elo >= 1350 else "EASY")),
+            "avg_question_elo": avg_q_elo,
+            "difficulty_factor": difficulty_factor,
+            "difficulty_breakdown": tier_counts,
+            "tier_accuracy": tier_accuracy,
+            "difficulty_adjusted_marks_pct": difficulty_adjusted_score,
+            "expected_marks_pct": expected_marks_pct,
+            "performance_vs_expected": performance_vs_expected
         })
 
     return history

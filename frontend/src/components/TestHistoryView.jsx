@@ -25,7 +25,12 @@ import {
   Activity,
   AlertCircle,
   Zap,
-  Target
+  Target,
+  Gauge,
+  Sparkles,
+  ShieldCheck,
+  Flame,
+  Award
 } from 'lucide-react';
 
 export default function TestHistoryView({ user, inspectUsername, onSelectTest, onResumeTest, onNavigateTab, onOpenAuth, onClearInspect, isActive = true }) {
@@ -39,6 +44,10 @@ export default function TestHistoryView({ user, inspectUsername, onSelectTest, o
   const [graphMetric, setGraphMetric] = useState('marks_percentage'); // 'marks_percentage', 'marks', 'accuracy', 'attempt_rate'
   const [graphExamFilter, setGraphExamFilter] = useState('ALL'); // 'ALL', 'MAIN', 'ADVANCED'
   const [hoveredPoint, setHoveredPoint] = useState(null);
+
+  // Difficulty-Calibrated Analytics Graph States
+  const [diffChartMode, setDiffChartMode] = useState('skill_curve'); // 'skill_curve', 'toughness_matrix', 'tier_mastery'
+  const [hoveredDiffPoint, setHoveredDiffPoint] = useState(null);
 
   // Deletion States
   const [deleteConfirmModal, setDeleteConfirmModal] = useState(null);
@@ -293,6 +302,125 @@ export default function TestHistoryView({ user, inspectUsername, onSelectTest, o
     : '';
 
   const avgY = padT + (1 - Math.max(0, Math.min(1, (avgGraphVal - minPlotVal) / valRange))) * plotH;
+
+  // --- Difficulty-Calibrated Analytics Data Prep ---
+  const diffPoints = chronologicalTests.map((t, idx) => {
+    const maxM = t.max_marks || (t.total_questions * 4) || 300;
+    const mVal = Number(t.marks || 0);
+    const rawScorePct = t.marks_percentage !== undefined
+      ? Number(t.marks_percentage)
+      : (maxM > 0 ? Math.round((mVal / maxM) * 100) : 0);
+
+    const avgElo = t.avg_question_elo
+      ? Number(t.avg_question_elo)
+      : (t.difficulty_tier === 'HARD' ? 1520 : (t.difficulty_tier === 'EASY' ? 1280 : 1380));
+
+    const diffFactor = t.difficulty_factor !== undefined
+      ? Number(t.difficulty_factor)
+      : Math.round((avgElo / 1350) * 1000) / 1000;
+
+    const adjustedScorePct = t.difficulty_adjusted_marks_pct !== undefined
+      ? Number(t.difficulty_adjusted_marks_pct)
+      : Math.round(rawScorePct * diffFactor * 10) / 10;
+
+    const expectedScorePct = t.expected_marks_pct !== undefined
+      ? Number(t.expected_marks_pct)
+      : Math.round(Math.max(15, Math.min(85, 50 - ((avgElo - 1350) / 15))) * 10) / 10;
+
+    const perfDelta = t.performance_vs_expected !== undefined
+      ? Number(t.performance_vs_expected)
+      : Math.round((rawScorePct - expectedScorePct) * 10) / 10;
+
+    const breakdown = t.difficulty_breakdown || { EASY: 0, MEDIUM: 0, HARD: 0 };
+    const tierAcc = t.tier_accuracy || { easy: null, medium: null, hard: null };
+
+    return {
+      test: t,
+      idx,
+      rawScorePct,
+      avgElo,
+      diffFactor,
+      adjustedScorePct,
+      expectedScorePct,
+      perfDelta,
+      breakdown,
+      tierAcc
+    };
+  });
+
+  const firstDiffPoint = diffPoints[0];
+  const latestDiffPoint = diffPoints[diffPoints.length - 1];
+  const rawDiffDelta = diffPoints.length >= 2 ? Math.round((latestDiffPoint.rawScorePct - firstDiffPoint.rawScorePct) * 10) / 10 : 0;
+  const adjDiffDelta = diffPoints.length >= 2 ? Math.round((latestDiffPoint.adjustedScorePct - firstDiffPoint.adjustedScorePct) * 10) / 10 : 0;
+  const eloDelta = diffPoints.length >= 2 ? (latestDiffPoint.avgElo - firstDiffPoint.avgElo) : 0;
+  const toughestTest = diffPoints.length > 0 ? diffPoints.reduce((max, p) => (p.avgElo > max.avgElo ? p : max), diffPoints[0]) : null;
+  const latestAlpha = latestDiffPoint?.perfDelta ?? 0;
+
+  // Chart Dimensions & Dual Scales
+  const diffSvgW = 760;
+  const diffSvgH = 230;
+  const diffPadL = 55;
+  const diffPadR = 55;
+  const diffPadT = 28;
+  const diffPadB = 36;
+  const diffPlotW = diffSvgW - diffPadL - diffPadR;
+  const diffPlotH = diffSvgH - diffPadT - diffPadB;
+
+  const diffElos = diffPoints.map((p) => p.avgElo);
+  const minElo = diffElos.length > 0 ? Math.min(...diffElos) : 1200;
+  const maxElo = diffElos.length > 0 ? Math.max(...diffElos) : 1600;
+  const plotMinElo = Math.max(1000, Math.floor((minElo - 60) / 50) * 50);
+  const plotMaxElo = Math.min(2000, Math.ceil((maxElo + 60) / 50) * 50);
+  const eloRange = Math.max(100, plotMaxElo - plotMinElo);
+
+  // Mode 1: Skill Curve Coordinates
+  const skillCoords = diffPoints.map((p, idx) => {
+    const x = diffPoints.length === 1 ? diffPadL + diffPlotW / 2 : diffPadL + (idx / (diffPoints.length - 1)) * diffPlotW;
+    const yRaw = diffPadT + (1 - Math.max(0, Math.min(1, p.rawScorePct / 100))) * diffPlotH;
+    const yAdj = diffPadT + (1 - Math.max(0, Math.min(1, p.adjustedScorePct / 100))) * diffPlotH;
+    const yElo = diffPadT + (1 - Math.max(0, Math.min(1, (p.avgElo - plotMinElo) / eloRange))) * diffPlotH;
+    return { ...p, x, yRaw, yAdj, yElo };
+  });
+
+  const adjPolyline = skillCoords.map((c) => `${c.x.toFixed(1)},${c.yAdj.toFixed(1)}`).join(' ');
+  const adjPolygon = skillCoords.length > 0
+    ? `${adjPolyline} ${skillCoords[skillCoords.length - 1].x.toFixed(1)},${(diffPadT + diffPlotH).toFixed(1)} ${skillCoords[0].x.toFixed(1)},${(diffPadT + diffPlotH).toFixed(1)}`
+    : '';
+  const rawPolyline = skillCoords.map((c) => `${c.x.toFixed(1)},${c.yRaw.toFixed(1)}`).join(' ');
+  const eloPolyline = skillCoords.map((c) => `${c.x.toFixed(1)},${c.yElo.toFixed(1)}`).join(' ');
+
+  // Mode 2: Toughness Matrix Coordinates (X = Paper Elo, Y = Raw Score %)
+  const matrixCoords = diffPoints.map((p) => {
+    const normX = Math.max(0, Math.min(1, (p.avgElo - plotMinElo) / eloRange));
+    const x = diffPadL + normX * diffPlotW;
+    const y = diffPadT + (1 - Math.max(0, Math.min(1, p.rawScorePct / 100))) * diffPlotH;
+    return { ...p, x, y };
+  });
+
+  // Benchmark Curve for Toughness Matrix
+  const benchmarkSteps = [0, 0.25, 0.5, 0.75, 1];
+  const benchmarkPolyline = benchmarkSteps.map((step) => {
+    const stepElo = plotMinElo + step * eloRange;
+    const stepExpected = Math.max(15, Math.min(85, 50 - ((stepElo - 1350) / 15)));
+    const x = diffPadL + step * diffPlotW;
+    const y = diffPadT + (1 - Math.max(0, Math.min(1, stepExpected / 100))) * diffPlotH;
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  }).join(' ');
+
+  const matrixSeqPolyline = matrixCoords.map((c) => `${c.x.toFixed(1)},${c.y.toFixed(1)}`).join(' ');
+
+  // Mode 3: Tier Mastery Coordinates
+  const tierCoords = diffPoints.map((p, idx) => {
+    const x = diffPoints.length === 1 ? diffPadL + diffPlotW / 2 : diffPadL + (idx / (diffPoints.length - 1)) * diffPlotW;
+    const yEasy = p.tierAcc.easy !== null && p.tierAcc.easy !== undefined ? diffPadT + (1 - Math.max(0, Math.min(1, p.tierAcc.easy / 100))) * diffPlotH : null;
+    const yMedium = p.tierAcc.medium !== null && p.tierAcc.medium !== undefined ? diffPadT + (1 - Math.max(0, Math.min(1, p.tierAcc.medium / 100))) * diffPlotH : null;
+    const yHard = p.tierAcc.hard !== null && p.tierAcc.hard !== undefined ? diffPadT + (1 - Math.max(0, Math.min(1, p.tierAcc.hard / 100))) * diffPlotH : null;
+    return { ...p, x, yEasy, yMedium, yHard };
+  });
+
+  const easyPolyline = tierCoords.filter((c) => c.yEasy !== null).map((c) => `${c.x.toFixed(1)},${c.yEasy.toFixed(1)}`).join(' ');
+  const medPolyline = tierCoords.filter((c) => c.yMedium !== null).map((c) => `${c.x.toFixed(1)},${c.yMedium.toFixed(1)}`).join(' ');
+  const hardPolyline = tierCoords.filter((c) => c.yHard !== null).map((c) => `${c.x.toFixed(1)},${c.yHard.toFixed(1)}`).join(' ');
 
   return (
     <div className="max-w-6xl mx-auto px-4 py-8 page-transition space-y-8">
@@ -668,6 +796,695 @@ export default function TestHistoryView({ user, inspectUsername, onSelectTest, o
               )}
             </div>
           )}
+        </div>
+      )}
+
+      {/* Difficulty-Calibrated Improvement Matrix Card */}
+      {completedTests.length > 0 && (
+        <div className="bg-[#161a24] border border-emerald-500/25 rounded-3xl p-6 sm:p-7 shadow-xl glow-emerald-subtle space-y-6">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-white/10 pb-4">
+            <div>
+              <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 text-[10px] font-black uppercase tracking-wider mb-2 font-mono">
+                <Gauge className="w-3.5 h-3.5" />
+                <span>Difficulty-Calibrated Progression Matrix</span>
+              </div>
+              <h2 className="text-xl sm:text-2xl font-black text-white tracking-tight flex items-center gap-2">
+                <span>Are You Improving Based On Test Difficulty?</span>
+                {diffPoints.length >= 2 && (
+                  <span className={`text-xs font-mono font-bold px-2 py-0.5 rounded-full flex items-center gap-1 border ${
+                    adjDiffDelta > 0
+                      ? 'bg-emerald-950/80 text-emerald-400 border-emerald-500/40'
+                      : 'bg-rose-950/80 text-rose-400 border-rose-500/40'
+                  }`}>
+                    {adjDiffDelta > 0 ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
+                    {adjDiffDelta > 0 ? `+${adjDiffDelta}%` : `${adjDiffDelta}%`} Calibrated Skill Growth
+                  </span>
+                )}
+              </h2>
+              <p className="text-xs text-slate-400 mt-1 max-w-2xl leading-relaxed">
+                Raw scores don't tell the full story if test difficulty fluctuates. This matrix normalizes your score against question Elo ratings (1200–1600+) and difficulty composition to verify true conceptual mastery.
+              </p>
+            </div>
+
+            {/* Mode Selector Pills */}
+            <div className="flex items-center bg-[#0e111a] p-1 rounded-xl border border-white/10 font-mono text-[11px]">
+              {[
+                { id: 'skill_curve', label: 'True Skill Curve', icon: TrendingUp },
+                { id: 'toughness_matrix', label: 'Toughness vs Score', icon: Target },
+                { id: 'tier_mastery', label: 'Tier Mastery', icon: Layers }
+              ].map((m) => {
+                const IconComponent = m.icon;
+                return (
+                  <button
+                    key={m.id}
+                    onClick={() => {
+                      sound.click();
+                      setDiffChartMode(m.id);
+                    }}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-bold transition cursor-pointer ${
+                      diffChartMode === m.id
+                        ? 'bg-emerald-600 text-white shadow-sm'
+                        : 'text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    <IconComponent className="w-3 h-3" />
+                    <span>{m.label}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* KPI Strip */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 font-mono">
+            <div className="bg-[#10141f] border border-white/5 rounded-xl p-3">
+              <span className="text-[10px] text-slate-400 block mb-0.5">Calibrated Score (Latest)</span>
+              <div className="flex items-baseline gap-1.5">
+                <span className="text-base font-black text-emerald-400">
+                  {latestDiffPoint?.adjustedScorePct ?? 0}%
+                </span>
+                <span className="text-[10px] text-slate-500 font-normal">
+                  (raw: {latestDiffPoint?.rawScorePct ?? 0}%)
+                </span>
+              </div>
+            </div>
+            <div className="bg-[#10141f] border border-white/5 rounded-xl p-3">
+              <span className="text-[10px] text-slate-400 block mb-0.5">Calibrated Skill Trajectory</span>
+              <div className="flex items-baseline gap-1.5">
+                <span className={`text-base font-black ${adjDiffDelta >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                  {adjDiffDelta >= 0 ? `+${adjDiffDelta}` : `${adjDiffDelta}`}%
+                </span>
+                <span className="text-[10px] text-slate-500 font-normal">
+                  (raw: {rawDiffDelta >= 0 ? `+${rawDiffDelta}` : `${rawDiffDelta}`}%)
+                </span>
+              </div>
+            </div>
+            <div className="bg-[#10141f] border border-white/5 rounded-xl p-3">
+              <span className="text-[10px] text-slate-400 block mb-0.5">Toughest Paper Conquered</span>
+              <div className="flex items-baseline gap-1.5">
+                <span className="text-base font-black text-purple-400">
+                  {toughestTest?.avgElo ?? 1350} Elo
+                </span>
+                <span className="text-[10px] text-slate-500 font-normal truncate max-w-[80px]">
+                  #{toughestTest?.test?.code}
+                </span>
+              </div>
+            </div>
+            <div className="bg-[#10141f] border border-white/5 rounded-xl p-3">
+              <span className="text-[10px] text-slate-400 block mb-0.5">Peer Benchmark Alpha</span>
+              <div className="flex items-baseline gap-1.5">
+                <span className={`text-base font-black ${latestAlpha >= 0 ? 'text-cyan-400' : 'text-amber-400'}`}>
+                  {latestAlpha >= 0 ? `+${latestAlpha}` : `${latestAlpha}`}%
+                </span>
+                <span className="text-[10px] text-slate-500 font-normal">
+                  {latestAlpha >= 0 ? 'Outperforming' : 'Baseline'}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {/* Mode Legend */}
+          <div className="flex flex-wrap items-center justify-between gap-3 text-[11px] font-mono px-1">
+            <div className="flex flex-wrap items-center gap-4">
+              {diffChartMode === 'skill_curve' && (
+                <>
+                  <div className="flex items-center gap-1.5">
+                    <span className="w-3 h-1 bg-emerald-500 rounded-full inline-block"></span>
+                    <span className="text-emerald-400 font-bold">Difficulty-Calibrated Score %</span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <span className="w-3 h-0.5 border-t border-dashed border-orange-500 inline-block"></span>
+                    <span className="text-orange-400">Raw Marks %</span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <span className="w-3 h-0.5 border-t border-dotted border-purple-400 inline-block"></span>
+                    <span className="text-purple-400">Paper Difficulty (Elo, Right Axis)</span>
+                  </div>
+                </>
+              )}
+              {diffChartMode === 'toughness_matrix' && (
+                <>
+                  <div className="flex items-center gap-1.5">
+                    <span className="w-3 h-0.5 border-t border-dashed border-sky-400 inline-block"></span>
+                    <span className="text-sky-400">Standard Peer Expectation Baseline</span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 inline-block"></span>
+                    <span className="text-emerald-400 font-bold">Your Test Session (Above = Outperformance)</span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <span className="w-3 h-0.5 border-t border-white/30 inline-block"></span>
+                    <span className="text-slate-400">Chronological Evolution Path</span>
+                  </div>
+                </>
+              )}
+              {diffChartMode === 'tier_mastery' && (
+                <>
+                  <div className="flex items-center gap-1.5">
+                    <span className="w-3 h-1 bg-emerald-500 rounded-full inline-block"></span>
+                    <span className="text-emerald-400 font-bold">Easy Questions Accuracy</span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <span className="w-3 h-1 bg-amber-500 rounded-full inline-block"></span>
+                    <span className="text-amber-400 font-bold">Medium Questions Accuracy</span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <span className="w-3 h-1 bg-rose-500 rounded-full inline-block"></span>
+                    <span className="text-rose-400 font-bold">Hard Questions Accuracy</span>
+                  </div>
+                </>
+              )}
+            </div>
+            <span className="text-[10px] text-slate-500">
+              Interactive • Hover nodes for full diagnostic breakdown
+            </span>
+          </div>
+
+          {/* Responsive SVG Chart */}
+          {diffPoints.length === 0 ? (
+            <div className="py-12 text-center text-xs text-slate-400 font-mono">
+              No completed tests found to analyze difficulty progression.
+            </div>
+          ) : diffPoints.length === 1 ? (
+            <div className="bg-[#0e111a] border border-white/10 rounded-2xl p-8 text-center font-mono">
+              <ShieldCheck className="w-8 h-8 text-emerald-400 mx-auto mb-2" />
+              <p className="text-sm font-bold text-white mb-1">
+                Baseline Toughness Logged: #{diffPoints[0].test.code} ({diffPoints[0].avgElo} Elo • {diffPoints[0].test.difficulty_tier})
+              </p>
+              <p className="text-xs text-slate-400">
+                Complete at least one more test to render continuous difficulty-adjusted skill vectors and peer benchmark curves.
+              </p>
+            </div>
+          ) : (
+            <div className="relative bg-[#0e111a] border border-white/10 rounded-2xl p-4 overflow-hidden">
+              <svg
+                viewBox={`0 0 ${diffSvgW} ${diffSvgH}`}
+                className="w-full h-auto max-h-[260px] overflow-visible"
+              >
+                <defs>
+                  <linearGradient id="diffAdjGradient" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor="#10b981" stopOpacity="0.35" />
+                    <stop offset="80%" stopColor="#10b981" stopOpacity="0.05" />
+                    <stop offset="100%" stopColor="#10b981" stopOpacity="0" />
+                  </linearGradient>
+                  <filter id="diffGlowGreen" x="-20%" y="-20%" width="140%" height="140%">
+                    <feGaussianBlur stdDeviation="3" result="blur" />
+                    <feComposite in="SourceGraphic" in2="blur" operator="over" />
+                  </filter>
+                  <filter id="diffGlowOrange" x="-20%" y="-20%" width="140%" height="140%">
+                    <feGaussianBlur stdDeviation="3" result="blur" />
+                    <feComposite in="SourceGraphic" in2="blur" operator="over" />
+                  </filter>
+                </defs>
+
+                {/* Horizontal Gridlines & Left Y-Axis (Score %) */}
+                {[0, 0.25, 0.5, 0.75, 1].map((pct) => {
+                  const yVal = diffPadT + (1 - pct) * diffPlotH;
+                  const labelPct = Math.round(pct * 100);
+                  const rightEloVal = Math.round(plotMinElo + pct * eloRange);
+                  return (
+                    <g key={pct}>
+                      <line
+                        x1={diffPadL}
+                        y1={yVal}
+                        x2={diffPadL + diffPlotW}
+                        y2={yVal}
+                        stroke="rgba(255,255,255,0.06)"
+                        strokeDasharray="3 3"
+                      />
+                      {/* Left Axis Label (Score %) */}
+                      <text
+                        x={diffPadL - 8}
+                        y={yVal + 3}
+                        textAnchor="end"
+                        className="text-[9px] fill-slate-500 font-mono"
+                      >
+                        {labelPct}%
+                      </text>
+                      {/* Right Axis Label (Elo) - Only in skill_curve mode */}
+                      {diffChartMode === 'skill_curve' && (
+                        <text
+                          x={diffPadL + diffPlotW + 8}
+                          y={yVal + 3}
+                          textAnchor="start"
+                          className="text-[9px] fill-purple-400 font-mono"
+                        >
+                          {rightEloVal}
+                        </text>
+                      )}
+                    </g>
+                  );
+                })}
+
+                {/* --- MODE 1: SKILL CURVE --- */}
+                {diffChartMode === 'skill_curve' && (
+                  <>
+                    {/* Filled Gradient Area under Adjusted Score */}
+                    {adjPolygon && (
+                      <polygon
+                        points={adjPolygon}
+                        fill="url(#diffAdjGradient)"
+                      />
+                    )}
+
+                    {/* Paper Difficulty Elo Line (Purple Dotted) */}
+                    {eloPolyline && (
+                      <polyline
+                        points={eloPolyline}
+                        fill="none"
+                        stroke="#a855f7"
+                        strokeWidth="1.8"
+                        strokeDasharray="3 3"
+                        strokeLinecap="round"
+                        opacity="0.85"
+                      />
+                    )}
+
+                    {/* Raw Marks % Line (Orange Dashed) */}
+                    {rawPolyline && (
+                      <polyline
+                        points={rawPolyline}
+                        fill="none"
+                        stroke="#f97316"
+                        strokeWidth="2"
+                        strokeDasharray="4 4"
+                        strokeLinecap="round"
+                        opacity="0.9"
+                      />
+                    )}
+
+                    {/* Difficulty-Calibrated Score % (Emerald Solid Glowing) */}
+                    {adjPolyline && (
+                      <polyline
+                        points={adjPolyline}
+                        fill="none"
+                        stroke="#10b981"
+                        strokeWidth="2.8"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
+                    )}
+
+                    {/* Interactive Points on Skill Curve */}
+                    {skillCoords.map((c, i) => {
+                      const isHovered = hoveredDiffPoint?.test?.code === c.test.code;
+                      return (
+                        <g
+                          key={c.test.code || i}
+                          className="cursor-pointer"
+                          onClick={() => onSelectTest(c.test.code, targetUsername)}
+                          onMouseEnter={() => setHoveredDiffPoint(c)}
+                          onMouseLeave={() => setHoveredDiffPoint(null)}
+                        >
+                          {/* Vertical guide bar on hover */}
+                          {isHovered && (
+                            <line
+                              x1={c.x}
+                              y1={diffPadT}
+                              x2={c.x}
+                              y2={diffPadT + diffPlotH}
+                              stroke="rgba(16, 185, 129, 0.3)"
+                              strokeWidth="1.5"
+                              strokeDasharray="2 2"
+                            />
+                          )}
+
+                          {/* Paper Elo Diamond */}
+                          <polygon
+                            points={`${c.x},${c.yElo - 3.5} ${c.x + 3.5},${c.yElo} ${c.x},${c.yElo + 3.5} ${c.x - 3.5},${c.yElo}`}
+                            fill="#a855f7"
+                            stroke="#0e111a"
+                            strokeWidth="1"
+                          />
+
+                          {/* Raw Score Orange Dot */}
+                          <circle
+                            cx={c.x}
+                            cy={c.yRaw}
+                            r={isHovered ? 5 : 3.5}
+                            fill={isHovered ? '#fff' : '#f97316'}
+                            stroke="#0e111a"
+                            strokeWidth="1.5"
+                          />
+
+                          {/* Calibrated Score Emerald Node */}
+                          <circle
+                            cx={c.x}
+                            cy={c.yAdj}
+                            r={isHovered ? 6.5 : 4.5}
+                            fill={isHovered ? '#fff' : '#10b981'}
+                            stroke="#0e111a"
+                            strokeWidth="2"
+                            filter={isHovered ? 'url(#diffGlowGreen)' : undefined}
+                          />
+
+                          {/* Bottom X-Axis Label */}
+                          <text
+                            x={c.x}
+                            y={diffPadT + diffPlotH + 16}
+                            textAnchor="middle"
+                            className={`text-[9px] font-mono transition-colors ${
+                              isHovered ? 'fill-emerald-400 font-bold' : 'fill-slate-500'
+                            }`}
+                          >
+                            #{c.test.code}
+                          </text>
+                        </g>
+                      );
+                    })}
+                  </>
+                )}
+
+                {/* --- MODE 2: TOUGHNESS VS SCORE MATRIX --- */}
+                {diffChartMode === 'toughness_matrix' && (
+                  <>
+                    {/* Outperformance Zone Shading (Upper Right) */}
+                    <rect
+                      x={diffPadL}
+                      y={diffPadT}
+                      width={diffPlotW}
+                      height={diffPlotH}
+                      fill="rgba(16, 185, 129, 0.02)"
+                    />
+
+                    {/* Standard JEE Peer Benchmark Curve */}
+                    {benchmarkPolyline && (
+                      <g>
+                        <polyline
+                          points={benchmarkPolyline}
+                          fill="none"
+                          stroke="#38bdf8"
+                          strokeWidth="2"
+                          strokeDasharray="4 4"
+                          opacity="0.8"
+                        />
+                        <text
+                          x={diffPadL + diffPlotW - 6}
+                          y={diffPadT + diffPlotH * 0.72}
+                          textAnchor="end"
+                          className="text-[9px] fill-sky-400 font-mono font-bold"
+                        >
+                          JEE Peer Expectation Curve
+                        </text>
+                      </g>
+                    )}
+
+                    {/* Chronological Trajectory Connection Path */}
+                    {matrixSeqPolyline && (
+                      <polyline
+                        points={matrixSeqPolyline}
+                        fill="none"
+                        stroke="rgba(255,255,255,0.2)"
+                        strokeWidth="1.5"
+                        strokeDasharray="3 3"
+                        strokeLinecap="round"
+                      />
+                    )}
+
+                    {/* Matrix Scatter Nodes */}
+                    {matrixCoords.map((c, i) => {
+                      const isHovered = hoveredDiffPoint?.test?.code === c.test.code;
+                      const isPositiveAlpha = c.perfDelta >= 0;
+                      return (
+                        <g
+                          key={c.test.code || i}
+                          className="cursor-pointer"
+                          onClick={() => onSelectTest(c.test.code, targetUsername)}
+                          onMouseEnter={() => setHoveredDiffPoint(c)}
+                          onMouseLeave={() => setHoveredDiffPoint(null)}
+                        >
+                          {/* Vertical Drop to Elo axis */}
+                          <line
+                            x1={c.x}
+                            y1={c.y}
+                            x2={c.x}
+                            y2={diffPadT + diffPlotH}
+                            stroke={isPositiveAlpha ? 'rgba(16, 185, 129, 0.25)' : 'rgba(245, 158, 11, 0.25)'}
+                            strokeWidth="1"
+                            strokeDasharray="2 2"
+                          />
+
+                          {/* Outer pulse ring on hover */}
+                          {isHovered && (
+                            <circle
+                              cx={c.x}
+                              cy={c.y}
+                              r="10"
+                              fill="none"
+                              stroke={isPositiveAlpha ? '#10b981' : '#f59e0b'}
+                              strokeWidth="1.5"
+                              opacity="0.6"
+                            />
+                          )}
+
+                          {/* Node Circle */}
+                          <circle
+                            cx={c.x}
+                            cy={c.y}
+                            r={isHovered ? 7 : 5.5}
+                            fill={isPositiveAlpha ? '#10b981' : '#f59e0b'}
+                            stroke="#0e111a"
+                            strokeWidth="2"
+                            filter={isHovered ? 'url(#diffGlowGreen)' : undefined}
+                          />
+
+                          {/* Delta Badge beside node */}
+                          <text
+                            x={c.x + 8}
+                            y={c.y - 4}
+                            className={`text-[8.5px] font-mono font-bold ${
+                              isPositiveAlpha ? 'fill-emerald-400' : 'fill-amber-400'
+                            }`}
+                          >
+                            #{c.test.code} ({isPositiveAlpha ? `+${c.perfDelta}` : c.perfDelta}%)
+                          </text>
+
+                          {/* Bottom X-Axis Elo Marker */}
+                          <text
+                            x={c.x}
+                            y={diffPadT + diffPlotH + 16}
+                            textAnchor="middle"
+                            className={`text-[9px] font-mono transition-colors ${
+                              isHovered ? 'fill-purple-300 font-bold' : 'fill-slate-500'
+                            }`}
+                          >
+                            {c.avgElo} Elo
+                          </text>
+                        </g>
+                      );
+                    })}
+                  </>
+                )}
+
+                {/* --- MODE 3: TIER MASTERY --- */}
+                {diffChartMode === 'tier_mastery' && (
+                  <>
+                    {/* Easy Questions Polyline */}
+                    {easyPolyline && (
+                      <polyline
+                        points={easyPolyline}
+                        fill="none"
+                        stroke="#10b981"
+                        strokeWidth="2.4"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
+                    )}
+
+                    {/* Medium Questions Polyline */}
+                    {medPolyline && (
+                      <polyline
+                        points={medPolyline}
+                        fill="none"
+                        stroke="#f59e0b"
+                        strokeWidth="2.4"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
+                    )}
+
+                    {/* Hard Questions Polyline */}
+                    {hardPolyline && (
+                      <polyline
+                        points={hardPolyline}
+                        fill="none"
+                        stroke="#ef4444"
+                        strokeWidth="2.4"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
+                    )}
+
+                    {/* Interactive Points on Tier Lines */}
+                    {tierCoords.map((c, i) => {
+                      const isHovered = hoveredDiffPoint?.test?.code === c.test.code;
+                      return (
+                        <g
+                          key={c.test.code || i}
+                          className="cursor-pointer"
+                          onClick={() => onSelectTest(c.test.code, targetUsername)}
+                          onMouseEnter={() => setHoveredDiffPoint(c)}
+                          onMouseLeave={() => setHoveredDiffPoint(null)}
+                        >
+                          {/* Easy Node */}
+                          {c.yEasy !== null && (
+                            <circle
+                              cx={c.x}
+                              cy={c.yEasy}
+                              r={isHovered ? 5.5 : 4}
+                              fill="#10b981"
+                              stroke="#0e111a"
+                              strokeWidth="1.5"
+                            />
+                          )}
+
+                          {/* Medium Node */}
+                          {c.yMedium !== null && (
+                            <circle
+                              cx={c.x}
+                              cy={c.yMedium}
+                              r={isHovered ? 5.5 : 4}
+                              fill="#f59e0b"
+                              stroke="#0e111a"
+                              strokeWidth="1.5"
+                            />
+                          )}
+
+                          {/* Hard Node */}
+                          {c.yHard !== null && (
+                            <circle
+                              cx={c.x}
+                              cy={c.yHard}
+                              r={isHovered ? 5.5 : 4}
+                              fill="#ef4444"
+                              stroke="#0e111a"
+                              strokeWidth="1.5"
+                            />
+                          )}
+
+                          {/* Bottom X-Axis Label */}
+                          <text
+                            x={c.x}
+                            y={diffPadT + diffPlotH + 16}
+                            textAnchor="middle"
+                            className={`text-[9px] font-mono transition-colors ${
+                              isHovered ? 'fill-emerald-400 font-bold' : 'fill-slate-500'
+                            }`}
+                          >
+                            #{c.test.code}
+                          </text>
+                        </g>
+                      );
+                    })}
+                  </>
+                )}
+              </svg>
+
+              {/* Hover Tooltip Overlay */}
+              {hoveredDiffPoint && (
+                <div
+                  className="absolute pointer-events-none z-20 bg-[#161a24] border border-emerald-500/50 shadow-2xl rounded-xl p-3.5 text-xs font-mono min-w-[240px]"
+                  style={{
+                    left: `${Math.min(68, Math.max(8, (hoveredDiffPoint.x / diffSvgW) * 100))}%`,
+                    top: '12px'
+                  }}
+                >
+                  <div className="font-sans font-bold text-white text-xs truncate max-w-[220px]">
+                    {hoveredDiffPoint.test.preset_name}
+                  </div>
+                  <div className="text-[10px] text-slate-400 mt-0.5 flex items-center justify-between">
+                    <span>Room #{hoveredDiffPoint.test.code}</span>
+                    <span className="px-1.5 py-0.5 rounded bg-purple-500/20 text-purple-300 font-bold">
+                      {hoveredDiffPoint.avgElo} Elo • {hoveredDiffPoint.test.difficulty_tier}
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2 mt-2 pt-2 border-t border-white/10 text-[11px]">
+                    <div>
+                      <span className="text-slate-400 text-[10px] block">Raw Score %</span>
+                      <strong className="text-orange-400">{hoveredDiffPoint.rawScorePct}%</strong>
+                      <span className="text-[9px] text-slate-500 block">({hoveredDiffPoint.test.marks} marks)</span>
+                    </div>
+                    <div>
+                      <span className="text-slate-400 text-[10px] block">Calibrated Score %</span>
+                      <strong className="text-emerald-400">{hoveredDiffPoint.adjustedScorePct}%</strong>
+                      <span className="text-[9px] text-emerald-500/80 block">×{hoveredDiffPoint.diffFactor} Toughness</span>
+                    </div>
+                  </div>
+
+                  <div className="mt-2 pt-2 border-t border-white/10 text-[10px] space-y-1">
+                    <div className="flex items-center justify-between">
+                      <span className="text-slate-400">Peer Expectation:</span>
+                      <span className="text-slate-300 font-bold">{hoveredDiffPoint.expectedScorePct}%</span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-slate-400">Alpha Outperformance:</span>
+                      <span className={`font-bold ${hoveredDiffPoint.perfDelta >= 0 ? 'text-emerald-400' : 'text-amber-400'}`}>
+                        {hoveredDiffPoint.perfDelta >= 0 ? `+${hoveredDiffPoint.perfDelta}` : `${hoveredDiffPoint.perfDelta}`}%
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between pt-1 text-[9px] text-slate-400 border-t border-white/5">
+                      <span>Question Mix:</span>
+                      <span className="text-slate-300 font-mono">
+                        {hoveredDiffPoint.breakdown.EASY}E • {hoveredDiffPoint.breakdown.MEDIUM}M • {hoveredDiffPoint.breakdown.HARD}H
+                      </span>
+                    </div>
+                    {hoveredDiffPoint.tierAcc && (
+                      <div className="flex items-center justify-between text-[9px]">
+                        <span className="text-slate-400">Tier Accuracy:</span>
+                        <span className="text-slate-300 font-mono">
+                          {hoveredDiffPoint.tierAcc.easy !== null ? `${hoveredDiffPoint.tierAcc.easy}% E` : '—'} • {hoveredDiffPoint.tierAcc.medium !== null ? `${hoveredDiffPoint.tierAcc.medium}% M` : '—'} • {hoveredDiffPoint.tierAcc.hard !== null ? `${hoveredDiffPoint.tierAcc.hard}% H` : '—'}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="text-[9px] text-emerald-400 mt-2 flex items-center gap-1 font-bold">
+                    <span>Click node to view full analysis</span>
+                    <ArrowRight className="w-2.5 h-2.5" />
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Diagnostic Performance Verdict Callout */}
+          <div className="bg-[#0e111a] border border-emerald-500/20 rounded-2xl p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs font-mono">
+            <div className="flex items-start gap-3">
+              <div className="p-2 rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 shrink-0 mt-0.5">
+                <Sparkles className="w-4 h-4" />
+              </div>
+              <div>
+                <span className="text-white font-bold block text-sm font-sans mb-0.5">
+                  Diagnostic Performance Verdict: {adjDiffDelta > 0 ? 'Verified Conceptual Mastery Under Tougher Papers' : 'Stable Difficulty-Calibrated Progression'}
+                </span>
+                <p className="text-slate-300 text-xs font-sans leading-relaxed">
+                  {eloDelta > 0 && adjDiffDelta > 0 ? (
+                    <>
+                      Your test papers jumped by <strong className="text-purple-300">+{eloDelta} Elo</strong> (from {firstDiffPoint.avgElo} to {latestDiffPoint.avgElo} Elo with {latestDiffPoint.breakdown.MEDIUM} Medium questions), yet your difficulty-calibrated performance climbed by <strong className="text-emerald-400">+{adjDiffDelta}%</strong> (beating the peer benchmark curve by <strong className="text-cyan-400">+{latestAlpha}%</strong>). You are solving harder JEE questions under pressure, not just coasting on easier ones.
+                    </>
+                  ) : eloDelta > 0 ? (
+                    <>
+                      Your latest paper difficulty increased to <strong className="text-purple-300">{latestDiffPoint.avgElo} Elo</strong>. Your difficulty-adjusted index stands at <strong className="text-emerald-400">{latestDiffPoint.adjustedScorePct}%</strong>, achieving <strong className="text-cyan-400">{latestAlpha >= 0 ? `+${latestAlpha}` : `${latestAlpha}`}% Alpha</strong> relative to standard peer benchmark expectation.
+                    </>
+                  ) : (
+                    <>
+                      Difficulty calibration scales scores against standard JEE difficulty (1350 Elo). Your current difficulty-calibrated score is <strong className="text-emerald-400">{latestDiffPoint?.adjustedScorePct ?? 0}%</strong> across completed test sessions.
+                    </>
+                  )}
+                </p>
+              </div>
+            </div>
+            {toughestTest && (
+              <button
+                onClick={() => onSelectTest(toughestTest.test.code, targetUsername)}
+                className="shrink-0 px-3.5 py-2 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 text-emerald-300 font-bold text-xs transition cursor-pointer flex items-center gap-1.5"
+              >
+                <span>Inspect Toughest Paper (#{toughestTest.test.code})</span>
+                <ArrowRight className="w-3.5 h-3.5" />
+              </button>
+            )}
+          </div>
         </div>
       )}
 
