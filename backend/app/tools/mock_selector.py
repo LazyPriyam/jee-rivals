@@ -13,9 +13,28 @@ import json
 import logging
 import random
 import statistics
+import datetime
 from typing import List, Dict, Optional, Set, Any, Tuple
 
 logger = logging.getLogger("jee_rivals.mock_selector")
+
+def _parse_iso_to_ts(val: Any) -> float:
+    if not val:
+        return 0.0
+    if isinstance(val, (int, float)):
+        return float(val)
+    val_str = str(val).strip()
+    try:
+        dt = datetime.datetime.fromisoformat(val_str.replace("Z", "+00:00"))
+        return dt.timestamp()
+    except Exception:
+        pass
+    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M:%S.%f", "%Y-%m-%d"):
+        try:
+            return datetime.datetime.strptime(val_str, fmt).timestamp()
+        except Exception:
+            pass
+    return 0.0
 
 from backend.app.tools.jee_syllabus import (
     JEE_SYLLABUS,
@@ -111,10 +130,11 @@ def get_participants_seen_question_map(
     cursor,
     user_ids: Optional[List[str]],
     exclude_room_id: Optional[str] = None,
-) -> Dict[str, int]:
+) -> Tuple[Dict[str, int], Dict[str, float]]:
     """
-    Returns a mapping of {question_id: seen_count} where seen_count is the number
-    of participants in user_ids who have previously encountered or attempted the question.
+    Returns (seen_counts, seen_last_ts):
+      - seen_counts: {question_id: count of participants who attempted it}
+      - seen_last_ts: {question_id: epoch timestamp when question was most recently attempted}
     A question is considered seen by a user if:
       1. It appears in `activity_log` for that user.
       2. It was answered in `room_participants.answers` for any room that the user
@@ -123,19 +143,20 @@ def get_participants_seen_question_map(
       Unattempted / skipped questions in generated mock tests are NEVER marked as seen.
     """
     if not cursor or not user_ids:
-        return {}
+        return {}, {}
 
     valid_uids = list({str(u).strip() for u in user_ids if u and str(u).strip()})
     if not valid_uids:
-        return {}
+        return {}, {}
 
     user_seen: Dict[str, Set[str]] = {uid: set() for uid in valid_uids}
+    seen_last_ts: Dict[str, float] = {}
     placeholders = ",".join("?" for _ in valid_uids)
 
     # 1. Fetch attempted questions from activity_log
     try:
         cursor.execute(
-            f"SELECT user_id, question_id FROM activity_log WHERE user_id IN ({placeholders})",
+            f"SELECT user_id, question_id, created_at FROM activity_log WHERE user_id IN ({placeholders})",
             valid_uids,
         )
         for row in cursor.fetchall():
@@ -147,16 +168,24 @@ def get_participants_seen_question_map(
                 qid = row["question_id"]
             except Exception:
                 qid = row[1] if hasattr(row, "__getitem__") else None
+            try:
+                cat = row["created_at"]
+            except Exception:
+                cat = row[2] if hasattr(row, "__getitem__") and len(row) > 2 else None
 
             if uid in user_seen and qid:
-                user_seen[uid].add(str(qid).strip())
+                clean_qid = str(qid).strip()
+                user_seen[uid].add(clean_qid)
+                ts = _parse_iso_to_ts(cat)
+                if ts > 0:
+                    seen_last_ts[clean_qid] = max(seen_last_ts.get(clean_qid, 0.0), ts)
     except Exception as e:
         logger.warning(f"Error querying activity_log for seen questions: {e}")
 
     # 2. Fetch actually attempted questions from room_participants answers
     try:
         sql = f"""
-            SELECT rp.user_id, rp.answers
+            SELECT rp.user_id, rp.answers, r.completed_at, r.created_at, rp.finished_at
             FROM room_participants rp
             JOIN rooms r ON rp.room_id = r.id
             WHERE rp.user_id IN ({placeholders})
@@ -180,6 +209,14 @@ def get_participants_seen_question_map(
             if uid not in user_seen or not answers_raw:
                 continue
 
+            room_ts = 0.0
+            for k in ("completed_at", "finished_at", "created_at"):
+                val = row.get(k) if hasattr(row, "get") else None
+                if val:
+                    room_ts = _parse_iso_to_ts(val)
+                    if room_ts > 0:
+                        break
+
             # Parse answers dict from room_participants: ONLY count questions the user actually attempted/answered
             try:
                 ans_map = json.loads(answers_raw) if isinstance(answers_raw, str) else answers_raw
@@ -194,7 +231,10 @@ def get_participants_seen_question_map(
                             selected = ans_val
 
                         if selected is not None and str(selected).strip().upper() not in ("NONE", "SKIPPED", ""):
-                            user_seen[uid].add(str(qid).strip())
+                            clean_qid = str(qid).strip()
+                            user_seen[uid].add(clean_qid)
+                            if room_ts > 0:
+                                seen_last_ts[clean_qid] = max(seen_last_ts.get(clean_qid, 0.0), room_ts)
             except Exception:
                 pass
     except Exception as e:
@@ -206,7 +246,7 @@ def get_participants_seen_question_map(
         for qid in qids:
             seen_counts[qid] = seen_counts.get(qid, 0) + 1
 
-    return seen_counts
+    return seen_counts, seen_last_ts
 
 
 def get_effective_chapter_elos(
@@ -300,6 +340,7 @@ def _pick_from_chapters_weighted(
     passage_groups: Dict[str, List[dict]],
     prefer_advanced: bool = False,
     seen_counts: Optional[Dict[str, int]] = None,
+    seen_last_ts: Optional[Dict[str, float]] = None,
     target_chapter_elos: Optional[Dict[str, float]] = None,
     target_exam: str = "MAIN",
     tier_counts: Optional[Dict[str, int]] = None,
@@ -334,6 +375,14 @@ def _pick_from_chapters_weighted(
             # Maximum seen count among all siblings of this passage
             return max(seen_counts.get(s["id"], 0) for s in passage_groups[pid])
         return seen_counts.get(q["id"], 0)
+
+    def _get_q_last_seen(q: dict) -> float:
+        if not seen_last_ts:
+            return 0.0
+        pid = q.get("passage_id")
+        if pid and pid in passage_groups:
+            return max(seen_last_ts.get(s["id"], 0.0) for s in passage_groups[pid])
+        return seen_last_ts.get(q["id"], 0.0)
 
     def _get_q_tier_and_dist(q: dict) -> Tuple[str, float]:
         qe = float(q.get("elo_rating") or 1500.0)
@@ -445,9 +494,14 @@ def _pick_from_chapters_weighted(
         shuffled.sort(key=_sort_key)
         return shuffled
 
-    def _try_add_question(q: dict, max_total: int) -> int:
+    def _try_add_question(q: dict, max_total: int, enforce_tier_cap: bool = False) -> int:
         if q["id"] in seen_ids:
             return 0
+        qt, _ = _get_q_tier_and_dist(q)
+        if enforce_tier_cap and tier_targets and tier_counts and is_authentic_mock:
+            if tier_counts.get(qt, 0) >= tier_targets.get(qt, 0):
+                return 0
+
         pid = q.get("passage_id")
         if pid and pid in passage_groups:
             if pid in seen_passages:
@@ -471,11 +525,11 @@ def _pick_from_chapters_weighted(
             seen_ids.add(q["id"])
             picked.append(q)
             if tier_counts is not None:
-                qt, _ = _get_q_tier_and_dist(q)
                 tier_counts[qt] = tier_counts.get(qt, 0) + 1
             return 1
 
     # Pass 1A: Draw UNSEEN questions (_get_q_seen == 0) from chapters that have positive quota (ch_quotas[ch] > 0)
+    # Strictly enforce tier caps so we NEVER overfill a tier with unseen questions at the expense of deficit tiers
     ordered_chapters = sorted(
         by_chapter.keys(),
         key=lambda c: (
@@ -493,7 +547,6 @@ def _pick_from_chapters_weighted(
         if ch_rem <= 0:
             continue
         added_in_ch = 0
-        # Dynamically sort chapter candidates according to live tier deficits
         live_cands = _sort_chapter_cands(by_chapter[ch])
         for q in live_cands:
             if len(picked) >= quota or added_in_ch >= ch_rem:
@@ -501,12 +554,13 @@ def _pick_from_chapters_weighted(
             # In Pass 1A, only draw questions unseen by all participants
             if _get_q_seen(q) > 0:
                 continue
-            added = _try_add_question(q, quota)
+            added = _try_add_question(q, quota, enforce_tier_cap=True)
             if added > 0:
                 added_in_ch += added
                 ch_quotas[ch] = max(0, ch_quotas.get(ch, 0) - added)
 
     # Pass 1B: If quota still not met, draw remaining UNSEEN questions from other chapters ordered by weightage
+    # Still strictly enforcing tier caps so we preserve quota slots for deficit tiers
     if len(picked) < quota:
         unseen_chapters = sorted(
             [c for c in by_chapter.keys() if any(_get_q_seen(q) == 0 for q in by_chapter[c] if q["id"] not in seen_ids)],
@@ -522,12 +576,52 @@ def _pick_from_chapters_weighted(
                     break
                 if _get_q_seen(q) > 0:
                     continue
-                added = _try_add_question(q, quota)
+                added = _try_add_question(q, quota, enforce_tier_cap=True)
                 if added > 0:
                     ch_quotas[ch] = max(0, ch_quotas.get(ch, 0) - added)
 
-    # Pass 2: Soft force fallback when bank supply of unseen questions is exhausted.
-    # Draw from remaining candidates (which are sorted by least seen count first).
+    # Pass 2: Targeted Tier Deficit Backfill from SEEN pool (Least Seen & Distant Past Recycled)
+    # If any tier is still below target (e.g. Anchor 40% has only 2 unseen questions in this subject pool),
+    # pull from SEEN questions of that EXACT tier rather than substituting harder or easier questions.
+    # Prioritizes:
+    #   1. Least times seen (seen_count ascending: 1, 2, 3...)
+    #   2. Distant past (last_seen_ts ascending: oldest timestamp first)
+    #   3. Canonical tier target proximity
+    if len(picked) < quota and tier_targets and tier_counts and is_authentic_mock:
+        tier_keys = ["ANCHOR", "FRONTIER", "PEAK"] if not is_adv else ["FRONTIER", "PEAK", "ANCHOR"]
+        for t in tier_keys:
+            if len(picked) >= quota:
+                break
+            t_deficit = tier_targets.get(t, 0) - tier_counts.get(t, 0)
+            if t_deficit <= 0:
+                continue
+
+            tier_seen_cands = [
+                q for q in candidates
+                if q["id"] not in seen_ids
+                and _get_q_tier_and_dist(q)[0] == t
+            ]
+
+            def _tier_seen_sort_key(x):
+                seen = _get_q_seen(x)
+                last_ts = _get_q_last_seen(x)
+                ch = normalize_chapter_name(x.get("chapter") or "")
+                w = weights_map.get(ch, 1.0)
+                _, dist = _get_q_tier_and_dist(x)
+                return (seen, last_ts, -w, dist + random.uniform(0, 5.0))
+
+            tier_seen_cands.sort(key=_tier_seen_sort_key)
+
+            for q in tier_seen_cands:
+                if len(picked) >= quota or tier_counts.get(t, 0) >= tier_targets.get(t, 0):
+                    break
+                added = _try_add_question(q, quota, enforce_tier_cap=False)
+                if added > 0:
+                    ch = normalize_chapter_name(q.get("chapter") or "")
+                    ch_quotas[ch] = max(0, ch_quotas.get(ch, 0) - added)
+
+    # Pass 3: Soft force fallback when bank supply of both unseen and deficit tier questions is exhausted.
+    # Draw from remaining candidates (which are sorted by least seen count first and distant past).
     if len(picked) < quota:
         fallback_chapters = sorted(
             by_chapter.keys(),
@@ -541,10 +635,16 @@ def _pick_from_chapters_weighted(
             if len(picked) >= quota:
                 break
             live_cands = _sort_chapter_cands(by_chapter[ch])
+            # Sort remaining cands by least seen count and distant past
+            live_cands.sort(key=lambda x: (
+                _get_q_seen(x),
+                _get_q_last_seen(x),
+                _get_q_tier_and_dist(x)[1]
+            ))
             for q in live_cands:
                 if len(picked) >= quota:
                     break
-                added = _try_add_question(q, quota)
+                added = _try_add_question(q, quota, enforce_tier_cap=False)
                 if added > 0:
                     ch_quotas[ch] = max(0, ch_quotas.get(ch, 0) - added)
 
@@ -647,7 +747,7 @@ def select_mock_and_room_questions(
         return []
 
     # Build participant seen counts map for soft-force prioritization
-    seen_counts = get_participants_seen_question_map(
+    seen_counts, seen_last_ts = get_participants_seen_question_map(
         cursor=cursor,
         user_ids=user_ids,
         exclude_room_id=exclude_room_id,
@@ -888,6 +988,7 @@ def select_mock_and_room_questions(
                 passage_groups=passage_groups,
                 prefer_advanced=False,
                 seen_counts=seen_counts,
+                seen_last_ts=seen_last_ts,
                 target_chapter_elos=target_chapter_elos,
                 target_exam=target_exam,
                 tier_counts=tier_counts,
@@ -910,6 +1011,7 @@ def select_mock_and_room_questions(
                 passage_groups=passage_groups,
                 prefer_advanced=False,
                 seen_counts=seen_counts,
+                seen_last_ts=seen_last_ts,
                 target_chapter_elos=target_chapter_elos,
                 target_exam=target_exam,
                 tier_counts=tier_counts,
@@ -934,6 +1036,7 @@ def select_mock_and_room_questions(
                     passage_groups=passage_groups,
                     prefer_advanced=False,
                     seen_counts=seen_counts,
+                    seen_last_ts=seen_last_ts,
                     target_chapter_elos=target_chapter_elos,
                     target_exam=target_exam,
                     tier_counts=tier_counts,
@@ -972,6 +1075,7 @@ def select_mock_and_room_questions(
                     passage_groups=passage_groups,
                     prefer_advanced=True,
                     seen_counts=seen_counts,
+                    seen_last_ts=seen_last_ts,
                     target_chapter_elos=target_chapter_elos,
                     target_exam=target_exam,
                     tier_counts=tier_counts,
@@ -1002,6 +1106,7 @@ def select_mock_and_room_questions(
                     passage_groups=passage_groups,
                     prefer_advanced=True,
                     seen_counts=seen_counts,
+                    seen_last_ts=seen_last_ts,
                     target_chapter_elos=target_chapter_elos,
                     target_exam=target_exam,
                     tier_counts=tier_counts,
@@ -1021,6 +1126,7 @@ def select_mock_and_room_questions(
                     passage_groups=passage_groups,
                     prefer_advanced=True,
                     seen_counts=seen_counts,
+                    seen_last_ts=seen_last_ts,
                     target_chapter_elos=target_chapter_elos,
                     target_exam=target_exam,
                     tier_counts=tier_counts,
@@ -1040,6 +1146,7 @@ def select_mock_and_room_questions(
                     passage_groups=passage_groups,
                     prefer_advanced=True,
                     seen_counts=seen_counts,
+                    seen_last_ts=seen_last_ts,
                     target_chapter_elos=target_chapter_elos,
                     target_exam=target_exam,
                     tier_counts=tier_counts,
@@ -1062,6 +1169,7 @@ def select_mock_and_room_questions(
                     passage_groups=passage_groups,
                     prefer_advanced=True,
                     seen_counts=seen_counts,
+                    seen_last_ts=seen_last_ts,
                     target_chapter_elos=target_chapter_elos,
                     target_exam=target_exam,
                     tier_counts=tier_counts,
@@ -1085,6 +1193,7 @@ def select_mock_and_room_questions(
                     passage_groups=passage_groups,
                     prefer_advanced=True,
                     seen_counts=seen_counts,
+                    seen_last_ts=seen_last_ts,
                     target_chapter_elos=target_chapter_elos,
                     target_exam=target_exam,
                     tier_counts=tier_counts,
@@ -1106,6 +1215,7 @@ def select_mock_and_room_questions(
                     passage_groups=passage_groups,
                     prefer_advanced=True,
                     seen_counts=seen_counts,
+                    seen_last_ts=seen_last_ts,
                     target_chapter_elos=target_chapter_elos,
                     target_exam=target_exam,
                     tier_counts=tier_counts,
@@ -1126,6 +1236,7 @@ def select_mock_and_room_questions(
                     passage_groups=passage_groups,
                     prefer_advanced=True,
                     seen_counts=seen_counts,
+                    seen_last_ts=seen_last_ts,
                     target_chapter_elos=target_chapter_elos,
                     target_exam=target_exam,
                     tier_counts=tier_counts,
