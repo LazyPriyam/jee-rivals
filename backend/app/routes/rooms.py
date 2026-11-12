@@ -2242,6 +2242,11 @@ def get_room_results(code: str, user: Optional[dict] = Depends(get_optional_user
                     if isinstance(a_val, dict):
                         d_m = a_val.get("delta_marks")
                         if d_m is not None:
+                            # Auto-heal any question where delta_marks was corrupted to base_score (100)
+                            if float(d_m) > 4.0:
+                                d_m = 4.0
+                                a_val["delta_marks"] = 4.0
+                                answers_modified = True
                             authoritative_marks += float(d_m)
                         elif a_val.get("correct") or a_val.get("is_dropped"):
                             authoritative_marks += 4.0

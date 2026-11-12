@@ -507,7 +507,7 @@ def reconcile_fixed_question(
                     upgrade_delta = base_score + neg_mark
                     if isinstance(raw_val, dict):
                         raw_val["correct"] = True
-                        raw_val["delta_marks"] = base_score
+                        raw_val["delta_marks"] = 4.0
                         raw_val["delta_score"] = int(base_score)
                         p_answers[question_id] = raw_val
 

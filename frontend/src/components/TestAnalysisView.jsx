@@ -2177,16 +2177,16 @@ export default function TestAnalysisView({
                           <Clock className="w-3.5 h-3.5" />
                           <span>{Math.round(item.timeSpent)}s</span>
                         </span>
-                        {item.isDropped || isReportApproved || roomReport?.status === 'APPROVED' || roomReport?.consensus_status === 'CONSENSUS_AGREED' ? (
+                        {item.isDropped || roomReport?.status === 'APPROVED' || roomReport?.consensus_status === 'CONSENSUS_AGREED' ? (
                           <span className="text-xs font-black px-2.5 py-0.5 rounded-full flex items-center gap-1.5 animate-pulse border bg-emerald-500/20 text-emerald-300 border-emerald-500/40">
                             <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
                             <span>
-                              {roomReport?.status === 'APPROVED' || isReportApproved || roomReport?.reason === 'OUT_OF_TEST_SYLLABUS' || reportedReasons[q.id] === 'OUT_OF_TEST_SYLLABUS'
+                              {roomReport?.status === 'APPROVED' || roomReport?.reason === 'OUT_OF_TEST_SYLLABUS' || reportedReasons[q.id] === 'OUT_OF_TEST_SYLLABUS'
                                 ? '+4.0 MARKS (OUT OF SYLLABUS • EXCLUDED FROM SCORING)'
                                 : '+4.0 MARKS (DEFECT CONFIRMED • NTA BONUS)'}
                             </span>
                           </span>
-                        ) : !item.isDropped && !isReportApproved && roomReport?.status !== 'APPROVED' && (item.isPending || (roomReport && roomReport.status === 'PENDING')) ? (
+                        ) : !item.isDropped && roomReport?.status !== 'APPROVED' && (item.isPending || (roomReport && roomReport.status === 'PENDING')) ? (
                           <span className={`text-xs font-black px-2.5 py-0.5 rounded-full flex items-center gap-1.5 animate-pulse border ${
                             roomReport?.consensus_status === 'CONSENSUS_REJECTED'
                               ? 'bg-slate-800 text-slate-300 border-white/20'
@@ -2504,11 +2504,11 @@ export default function TestAnalysisView({
                         <ChevronDown className={`w-3.5 h-3.5 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
                       </button>
 
-                      {item.isDropped || isReportApproved || roomReport?.status === 'APPROVED' ? (
+                      {item.isDropped || roomReport?.status === 'APPROVED' ? (
                         <div className="text-xs font-mono text-emerald-400 flex items-center gap-1.5 font-bold">
                           <CheckCircle2 className="w-3.5 h-3.5" />
                           <span>
-                            {roomReport?.status === 'APPROVED' || isReportApproved || roomReport?.reason === 'OUT_OF_TEST_SYLLABUS' || reportedReasons[q.id] === 'OUT_OF_TEST_SYLLABUS'
+                            {roomReport?.status === 'APPROVED' || roomReport?.reason === 'OUT_OF_TEST_SYLLABUS' || reportedReasons[q.id] === 'OUT_OF_TEST_SYLLABUS'
                               ? 'Out of Syllabus Approved • Credit Finalized'
                               : 'Defect Verified • Bonus Credited'}
                           </span>
