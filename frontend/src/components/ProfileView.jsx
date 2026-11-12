@@ -1212,20 +1212,22 @@ export default function ProfileView({
           </span>
         </button>
 
-        <button
-          onClick={() => setActiveSubTab('tests')}
-          className={`flex items-center gap-2 px-5 py-3 rounded-2xl text-sm font-bold transition whitespace-nowrap cursor-pointer ${
-            activeSubTab === 'tests'
-              ? 'bg-orange-500 text-white shadow-lg shadow-orange-500/20'
-              : 'text-slate-400 hover:text-white hover:bg-white/5'
-          }`}
-        >
-          <FileText className="w-4 h-4" />
-          <span>Mock Tests & Papers</span>
-          <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-black/40 border border-white/20">
-            {(data.test_history || []).length}
-          </span>
-        </button>
+        {isOwnProfile && (
+          <button
+            onClick={() => setActiveSubTab('tests')}
+            className={`flex items-center gap-2 px-5 py-3 rounded-2xl text-sm font-bold transition whitespace-nowrap cursor-pointer ${
+              activeSubTab === 'tests'
+                ? 'bg-orange-500 text-white shadow-lg shadow-orange-500/20'
+                : 'text-slate-400 hover:text-white hover:bg-white/5'
+            }`}
+          >
+            <FileText className="w-4 h-4" />
+            <span>Mock Tests & Papers</span>
+            <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-black/40 border border-white/20">
+              {(data.test_history || []).length}
+            </span>
+          </button>
+        )}
 
         <button
           onClick={() => setActiveSubTab('matches')}
@@ -2557,6 +2559,20 @@ export default function ProfileView({
           TAB 4: MOCK EXAMINATION PAPERS & TEST ARCHIVES (SCORECARDS)
           ========================================================================= */}
       {activeSubTab === 'tests' && (
+        !isOwnProfile ? (
+          <div className="bg-[#161a24] border border-white/10 rounded-3xl p-8 sm:p-12 text-center max-w-lg mx-auto my-8 animate-fadeIn">
+            <div className="w-16 h-16 rounded-2xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center mx-auto mb-4 text-amber-400 shadow-lg shadow-amber-950/20">
+              <Shield className="w-8 h-8" />
+            </div>
+            <h3 className="text-lg font-bold text-white mb-2">Test History is Confidential</h3>
+            <p className="text-slate-400 text-sm leading-relaxed mb-5">
+              Candidate examination scorecards, test analytics, and question derivations are private to <strong className="text-slate-200">@{p.username}</strong>.
+            </p>
+            <div className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-[#11141d] border border-white/10 text-xs font-mono text-slate-300">
+              <span>🔒 Candidate Privacy Shield Enforced</span>
+            </div>
+          </div>
+        ) : (
         <div className="space-y-6 animate-fadeIn">
           {/* Header Banner */}
           <div className="bg-[#161a24] border border-white/10 rounded-3xl p-6 shadow-xl flex flex-col md:flex-row md:items-center justify-between gap-4">
@@ -2700,6 +2716,7 @@ export default function ProfileView({
             </div>
           )}
         </div>
+        )
       )}
 
       {/* =========================================================================

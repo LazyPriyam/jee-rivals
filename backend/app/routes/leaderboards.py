@@ -6,7 +6,7 @@ from fastapi import APIRouter, HTTPException, Query, Depends
 
 from backend.app.database import get_connection, get_user_by_username
 from backend.app.models import UserProfile, ProfileUpdateRequest
-from backend.app.auth import get_current_user
+from backend.app.auth import get_current_user, get_optional_user
 from backend.app.routes.auth import format_user_profile, invalidate_coverage_cache
 from backend.app.tools.jee_syllabus import build_user_skill_tree
 from backend.app.tools.achievements_engine import evaluate_user_achievements
@@ -375,7 +375,11 @@ def update_current_user_profile(
 
 
 @router.get("/profile/{username}")
-def get_public_profile(username: str, force: bool = False):
+def get_public_profile(
+    username: str,
+    force: bool = False,
+    current_user: Optional[dict] = Depends(get_optional_user)
+):
     uname_clean = username.strip()
     uname_key = uname_clean.lower()
     now = time.time()
@@ -385,10 +389,23 @@ def get_public_profile(username: str, force: bool = False):
     if uname_key in tombstones:
         raise HTTPException(status_code=404, detail=f"User '{username}' not found or account has been permanently deleted.")
 
+    is_self = bool(current_user and (current_user.get("username") or "").strip().lower() == uname_key)
+    is_admin = bool(current_user and current_user.get("is_admin"))
+
     if not force:
         cached_pub = _PUBLIC_PROFILE_CACHE.get(uname_key)
         if cached_pub and (now - cached_pub[0] < 20.0):
-            return cached_pub[1]
+            payload = dict(cached_pub[1])
+            # Strictly protect test history: only populate for candidate themselves or admin
+            if is_self or is_admin:
+                from backend.app.routes.rooms import get_user_test_history
+                try:
+                    payload["test_history"] = get_user_test_history(user=get_user_by_username(uname_clean), limit=20)
+                except Exception:
+                    payload["test_history"] = []
+            else:
+                payload["test_history"] = []
+            return payload
 
     user = get_user_by_username(uname_clean)
     if not user or user.get("is_banned") or str(user.get("id")) in tombstones:
@@ -567,12 +584,14 @@ def get_public_profile(username: str, force: bool = False):
             "avg_time": round((sum_time / tot) if tot > 0 else 0, 1)
         })
 
-    # 7. Completed Mock Tests & Practice Examination Papers (reusing cursor c, fast limit of 20 for profile)
-    from backend.app.routes.rooms import get_user_test_history
-    try:
-        test_history = get_user_test_history(user=user, cursor=c, limit=20)
-    except Exception:
-        test_history = []
+    # 7. Completed Mock Tests & Practice Examination Papers (STRICT PRIVACY: only for candidate themselves or admin)
+    test_history = []
+    if is_self or is_admin:
+        from backend.app.routes.rooms import get_user_test_history
+        try:
+            test_history = get_user_test_history(user=user, cursor=c, limit=20)
+        except Exception:
+            test_history = []
 
     profile = format_user_profile(user, cursor=c)
     conn.close()
@@ -583,9 +602,13 @@ def get_public_profile(username: str, force: bool = False):
         "skill_tree": skill_tree_data,
         "achievements": achievements_data,
         "match_history": match_history,
-        "test_history": test_history,
+        "test_history": [],  # Kept empty in public cache to guarantee zero leaks
         "recent_activity": recent_acts,
         "chapter_breakdown": chap_perf
     }
     _PUBLIC_PROFILE_CACHE[uname_key] = (time.time(), result_payload)
-    return result_payload
+
+    # Attach private test history ONLY for the candidate themselves or admin
+    out_payload = dict(result_payload)
+    out_payload["test_history"] = test_history
+    return out_payload

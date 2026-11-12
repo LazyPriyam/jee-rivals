@@ -453,8 +453,24 @@ def get_user_test_history(user: dict = Depends(get_current_user), cursor=None, l
 
 
 @router.get("/user/{username}/history")
-def get_user_test_history_by_username(username: str):
-    """Returns past completed mock tests, papers, and battle rooms for any specified candidate."""
+def get_user_test_history_by_username(
+    username: str,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Returns past completed mock tests, papers, and battle rooms for candidate.
+    STRICT PRIVACY: Only the candidate themselves or an admin can view test history.
+    """
+    uname_clean = username.strip().lower()
+    viewer_name = (current_user.get("username") or "").strip().lower()
+    is_admin = bool(current_user.get("is_admin"))
+
+    if viewer_name != uname_clean and not is_admin:
+        raise HTTPException(
+            status_code=403,
+            detail="Test history is private. You can only view your own examination records."
+        )
+
     u = get_user_by_username(username.strip())
     if not u:
         raise HTTPException(status_code=404, detail=f"User '{username}' not found.")
@@ -2092,6 +2108,20 @@ def get_room_results(code: str, user: Optional[dict] = Depends(get_optional_user
                 if conn:
                     conn.close()
                 raise HTTPException(status_code=403, detail="Examination is currently in progress.")
+
+        # Strict privacy enforcement for Mock Tests / Solo Papers:
+        # Non-participants are prohibited from inspecting another user's test scorecard and derivations.
+        participant_uids = [p["user_id"] for p in part_rows if p.get("user_id")]
+        is_participant = bool(user and user.get("id") in participant_uids)
+        is_admin = bool(user and user.get("is_admin"))
+        if room.get("mode") == "MOCK_TEST" or len(participant_uids) <= 1:
+            if not is_participant and not is_admin:
+                if conn:
+                    conn.close()
+                raise HTTPException(
+                    status_code=403,
+                    detail="Access denied. Examination analysis and question derivations are private to the candidate."
+                )
 
         q_ids = _safe_parse_list_or_json(room.get("question_ids"))
         questions_data = []

@@ -476,30 +476,41 @@ export const api = {
         method: "POST",
         body: JSON.stringify({ answers, total_time_seconds, question_times, timeline }),
       }),
-    results: async (code) => {
+    results: async (code, force = false) => {
       const cleanCode = (code || "").trim().toUpperCase();
       const cacheKey = `jee_cached_results_${cleanCode}`;
-      try {
-        const stored = sessionStorage.getItem(cacheKey);
-        if (stored) {
-          const parsed = JSON.parse(stored);
-          if (parsed && (parsed.questions?.length || parsed.participants?.length)) {
-            request(`/api/rooms/${cleanCode}/results`)
-              .then((fresh) => {
-                try {
-                  sessionStorage.setItem(cacheKey, JSON.stringify(fresh));
-                } catch (_) {}
-              })
-              .catch(() => {});
-            return parsed;
+      if (!force) {
+        try {
+          const stored = sessionStorage.getItem(cacheKey);
+          if (stored) {
+            const parsed = JSON.parse(stored);
+            if (parsed && (parsed.questions?.length || parsed.participants?.length)) {
+              request(`/api/rooms/${cleanCode}/results`)
+                .then((fresh) => {
+                  try {
+                    sessionStorage.setItem(cacheKey, JSON.stringify(fresh));
+                    if (typeof window !== "undefined") {
+                      window.dispatchEvent(new CustomEvent("jee:results_updated", { detail: { code: cleanCode, data: fresh } }));
+                    }
+                  } catch (_) {}
+                })
+                .catch(() => {});
+              return parsed;
+            }
           }
-        }
-      } catch (_) {}
+        } catch (_) {}
+      }
       const res = await request(`/api/rooms/${cleanCode}/results`);
       try {
         sessionStorage.setItem(cacheKey, JSON.stringify(res));
       } catch (_) {}
       return res;
+    },
+    invalidateCachedResults: (code) => {
+      try {
+        const cleanCode = (code || "").trim().toUpperCase();
+        sessionStorage.removeItem(`jee_cached_results_${cleanCode}`);
+      } catch (_) {}
     },
     getMyHistory: () => request("/api/rooms/my/history"),
     getUserHistory: (username) => request(`/api/rooms/user/${encodeURIComponent(username)}/history`),

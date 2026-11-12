@@ -111,7 +111,9 @@ export default function TestAnalysisView({
           question_id: qid,
           status: normStatus
         };
-        reportedIds.push(qid);
+        if (normStatus === 'PENDING') {
+          reportedIds.push(qid);
+        }
         if (r.reason) reasonsMap[qid] = r.reason;
 
         // If report is approved, dismissed, or quarantined, purge stale localStorage flags:
@@ -185,17 +187,32 @@ export default function TestAnalysisView({
       api.questions.getReports({ reporter_id: user.id })
         .then((reps) => {
           if (Array.isArray(reps)) {
-            const repIds = reps.map((r) => r.question_id).filter(Boolean);
+            const pendingIds = reps
+              .filter((r) => {
+                const s = (r.status || r.report_status || 'PENDING').toUpperCase();
+                return s === 'PENDING';
+              })
+              .map((r) => r.question_id)
+              .filter(Boolean);
             const reasonsMap = {};
             reps.forEach((r) => {
               if (r.question_id && r.reason) {
                 reasonsMap[r.question_id] = r.reason;
               }
+              const s = (r.status || r.report_status || 'PENDING').toUpperCase();
+              if (s === 'APPROVED' || s === 'DISMISSED' || s === 'QUARANTINED') {
+                try {
+                  localStorage.removeItem(`jee_reported_${r.question_id}`);
+                  localStorage.removeItem(`jee_reported_dispute_${r.question_id}`);
+                } catch (_) {}
+              }
             });
             if (Object.keys(reasonsMap).length > 0) {
               setReportedReasons((prev) => ({ ...prev, ...reasonsMap }));
             }
-            setReportedQuestionIds((prev) => new Set([...prev, ...repIds]));
+            if (pendingIds.length > 0) {
+              setReportedQuestionIds((prev) => new Set([...prev, ...pendingIds]));
+            }
           }
         })
         .catch(() => {});
@@ -204,6 +221,14 @@ export default function TestAnalysisView({
 
   useEffect(() => {
     fetchRoomReports();
+    const handleResultsUpdated = (e) => {
+      const updatedCode = (e.detail?.code || '').trim().toUpperCase();
+      if (roomCode && updatedCode === roomCode.trim().toUpperCase() && e.detail?.data) {
+        setData(e.detail.data);
+      }
+    };
+    window.addEventListener('jee:results_updated', handleResultsUpdated);
+    return () => window.removeEventListener('jee:results_updated', handleResultsUpdated);
   }, [roomCode]);
 
   const handleVoteReport = async (reportId, voteType, questionId) => {
@@ -621,20 +646,23 @@ export default function TestAnalysisView({
 
     // Check if question has a report pending or confirmed dropped under official NTA rules:
     const roomReport = roomReports[q.id];
-    const isReportApproved = roomReport?.status === 'APPROVED';
-    const isReportPending = !isReportApproved && (reportedQuestionIds.has(q.id) ||
-      Boolean(localStorage.getItem(`jee_reported_${q.id}`)) ||
-      Boolean(localStorage.getItem(`jee_reported_dispute_${q.id}`)) ||
-      (roomCode ? Boolean(localStorage.getItem(`jee_reported_room_${roomCode.trim().toUpperCase()}_${q.id}`)) : false) ||
-      (roomReport && roomReport.status === 'PENDING' && roomReport.consensus_status !== 'CONSENSUS_AGREED'));
+    const isReportApproved = (roomReport?.status || '').toUpperCase() === 'APPROVED' || (roomReport?.report_status || '').toUpperCase() === 'APPROVED';
 
     // Official NTA Dropped Questions are ONLY those verified and quarantined by moderation or consensus, OR approved out-of-syllabus:
     const isDroppedQuestion = (q.validation_status || '').toUpperCase() === 'QUARANTINED' ||
       Boolean(userSubmission?.is_dropped) ||
-      roomReport?.status === 'QUARANTINED' ||
+      (roomReport?.status || '').toUpperCase() === 'QUARANTINED' ||
       isReportApproved ||
       roomReport?.consensus_status === 'CONSENSUS_AGREED' ||
       q.id === 'eff5b1bc-a730-4423-b9c3-34423a407bbc';
+
+    const isReportPending = !isReportApproved && !isDroppedQuestion && (
+      (roomReport && roomReport.status === 'PENDING' && roomReport.consensus_status !== 'CONSENSUS_AGREED') ||
+      (reportedQuestionIds.has(q.id)) ||
+      (!roomReport && Boolean(localStorage.getItem(`jee_reported_${q.id}`))) ||
+      (!roomReport && Boolean(localStorage.getItem(`jee_reported_dispute_${q.id}`))) ||
+      (!roomReport && roomCode ? Boolean(localStorage.getItem(`jee_reported_room_${roomCode.trim().toUpperCase()}_${q.id}`)) : false)
+    );
 
     if (isDroppedQuestion) {
       if (!isCorrect) {
@@ -2177,16 +2205,16 @@ export default function TestAnalysisView({
                           <Clock className="w-3.5 h-3.5" />
                           <span>{Math.round(item.timeSpent)}s</span>
                         </span>
-                        {item.isDropped || roomReport?.status === 'APPROVED' || roomReport?.consensus_status === 'CONSENSUS_AGREED' ? (
-                          <span className="text-xs font-black px-2.5 py-0.5 rounded-full flex items-center gap-1.5 animate-pulse border bg-emerald-500/20 text-emerald-300 border-emerald-500/40">
+                        {item.isDropped || (roomReport?.status || '').toUpperCase() === 'APPROVED' || (roomReport?.report_status || '').toUpperCase() === 'APPROVED' || roomReport?.consensus_status === 'CONSENSUS_AGREED' ? (
+                          <span className="text-xs font-black px-2.5 py-0.5 rounded-full flex items-center gap-1.5 border bg-emerald-500/20 text-emerald-300 border-emerald-500/40">
                             <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
                             <span>
-                              {roomReport?.status === 'APPROVED' || roomReport?.reason === 'OUT_OF_TEST_SYLLABUS' || reportedReasons[q.id] === 'OUT_OF_TEST_SYLLABUS'
-                                ? '+4.0 MARKS (OUT OF SYLLABUS • EXCLUDED FROM SCORING)'
+                              {(roomReport?.status || '').toUpperCase() === 'APPROVED' || (roomReport?.report_status || '').toUpperCase() === 'APPROVED' || roomReport?.reason === 'OUT_OF_TEST_SYLLABUS' || reportedReasons[q.id] === 'OUT_OF_TEST_SYLLABUS'
+                                ? '+4.0 MARKS (OUT OF SYLLABUS • CREDIT FINALIZED)'
                                 : '+4.0 MARKS (DEFECT CONFIRMED • NTA BONUS)'}
                             </span>
                           </span>
-                        ) : !item.isDropped && roomReport?.status !== 'APPROVED' && (item.isPending || (roomReport && roomReport.status === 'PENDING')) ? (
+                        ) : !item.isDropped && (roomReport?.status || '').toUpperCase() !== 'APPROVED' && (roomReport?.report_status || '').toUpperCase() !== 'APPROVED' && (item.isPending || (roomReport && roomReport.status === 'PENDING')) ? (
                           <span className={`text-xs font-black px-2.5 py-0.5 rounded-full flex items-center gap-1.5 animate-pulse border ${
                             roomReport?.consensus_status === 'CONSENSUS_REJECTED'
                               ? 'bg-slate-800 text-slate-300 border-white/20'
@@ -2504,11 +2532,11 @@ export default function TestAnalysisView({
                         <ChevronDown className={`w-3.5 h-3.5 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
                       </button>
 
-                      {item.isDropped || roomReport?.status === 'APPROVED' ? (
+                      {item.isDropped || (roomReport?.status || '').toUpperCase() === 'APPROVED' || (roomReport?.report_status || '').toUpperCase() === 'APPROVED' ? (
                         <div className="text-xs font-mono text-emerald-400 flex items-center gap-1.5 font-bold">
                           <CheckCircle2 className="w-3.5 h-3.5" />
                           <span>
-                            {roomReport?.status === 'APPROVED' || roomReport?.reason === 'OUT_OF_TEST_SYLLABUS' || reportedReasons[q.id] === 'OUT_OF_TEST_SYLLABUS'
+                            {(roomReport?.status || '').toUpperCase() === 'APPROVED' || (roomReport?.report_status || '').toUpperCase() === 'APPROVED' || roomReport?.reason === 'OUT_OF_TEST_SYLLABUS' || reportedReasons[q.id] === 'OUT_OF_TEST_SYLLABUS'
                               ? 'Out of Syllabus Approved • Credit Finalized'
                               : 'Defect Verified • Bonus Credited'}
                           </span>

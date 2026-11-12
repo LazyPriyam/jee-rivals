@@ -28,6 +28,7 @@ import {
   Target,
   Gauge,
   Sparkles,
+  Shield,
   ShieldCheck,
   Flame,
   Award
@@ -53,15 +54,15 @@ export default function TestHistoryView({ user, inspectUsername, onSelectTest, o
   const [deleteConfirmModal, setDeleteConfirmModal] = useState(null);
   const [deletingCode, setDeletingCode] = useState(null);
 
-  const targetUsername = inspectUsername || user?.username;
+  const targetUsername = user?.username;
   const isOwnHistory = !inspectUsername || (user && inspectUsername.toLowerCase() === user.username.toLowerCase());
 
   const fetchHistory = () => {
-    if (!targetUsername && !user) {
+    if (!user) {
       setLoading(false);
       return;
     }
-    const cacheKey = `jee_cached_history_${targetUsername || 'me'}`;
+    const cacheKey = `jee_cached_history_${user.username || 'me'}`;
     try {
       const cached = sessionStorage.getItem(cacheKey);
       if (cached) {
@@ -77,11 +78,7 @@ export default function TestHistoryView({ user, inspectUsername, onSelectTest, o
       setLoading(true);
     }
     setError('');
-    const req = inspectUsername && !isOwnHistory
-      ? api.rooms.getUserHistory(inspectUsername)
-      : api.rooms.getMyHistory();
-
-    req
+    api.rooms.getMyHistory()
       .then((data) => {
         const list = Array.isArray(data) ? data : [];
         setHistory(list);
@@ -422,25 +419,38 @@ export default function TestHistoryView({ user, inspectUsername, onSelectTest, o
   const medPolyline = tierCoords.filter((c) => c.yMedium !== null).map((c) => `${c.x.toFixed(1)},${c.yMedium.toFixed(1)}`).join(' ');
   const hardPolyline = tierCoords.filter((c) => c.yHard !== null).map((c) => `${c.x.toFixed(1)},${c.yHard.toFixed(1)}`).join(' ');
 
+  if (!isOwnHistory) {
+    return (
+      <div className="max-w-xl mx-auto px-4 py-16 page-transition">
+        <div className="bg-[#161a24] border border-white/10 rounded-3xl p-8 sm:p-12 text-center shadow-2xl">
+          <div className="w-16 h-16 rounded-2xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center mx-auto mb-4 text-amber-400 shadow-lg shadow-amber-950/20">
+            <Shield className="w-8 h-8" />
+          </div>
+          <h3 className="text-xl font-bold text-white mb-2">Test Archives are Confidential</h3>
+          <p className="text-slate-400 text-sm leading-relaxed mb-6">
+            Candidate examination scorecards, test analytics, and question derivations are private to <strong className="text-slate-200">@{inspectUsername}</strong>. You can only view your own examination records.
+          </p>
+          {onClearInspect ? (
+            <button
+              onClick={onClearInspect}
+              className="px-6 py-2.5 rounded-xl bg-orange-500 hover:bg-orange-600 text-white font-bold text-xs transition cursor-pointer shadow-lg shadow-orange-500/20"
+            >
+              Back to My Test History
+            </button>
+          ) : (
+            <div className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-[#11141d] border border-white/10 text-xs font-mono text-slate-300">
+              <span>🔒 Candidate Privacy Shield Enforced</span>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="max-w-6xl mx-auto px-4 py-8 page-transition space-y-8">
       {/* Page Header Banner */}
       <div className="bg-gradient-to-r from-[#172033] via-[#1f283c] to-[#172033] border border-orange-500/30 rounded-3xl p-6 sm:p-10 shadow-2xl glow-orange-subtle">
-        {!isOwnHistory && (
-          <div className="bg-[#1a1f2e] border border-orange-500/30 p-4 rounded-2xl flex items-center justify-between mb-2">
-            <span className="text-xs font-mono font-bold text-orange-400">
-              Viewing examination archives of candidate: @{inspectUsername}
-            </span>
-            {onClearInspect && (
-              <button
-                onClick={onClearInspect}
-                className="text-xs font-bold px-3 py-1 bg-white/10 hover:bg-white/20 text-white rounded-lg transition cursor-pointer"
-              >
-                Back to My Test History
-              </button>
-            )}
-          </div>
-        )}
 
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
           <div>
