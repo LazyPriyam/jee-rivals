@@ -3,7 +3,7 @@ import logging
 import traceback
 import datetime
 from pathlib import Path
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Query, status
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Query, status, HTTPException
 from fastapi.requests import Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
