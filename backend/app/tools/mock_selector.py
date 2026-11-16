@@ -11,6 +11,7 @@ Enforces:
 
 import json
 import logging
+import math
 import random
 import statistics
 import datetime
@@ -388,36 +389,41 @@ def _pick_from_chapters_weighted(
         qe = float(q.get("elo_rating") or 1500.0)
 
         if is_authentic_mock:
-            # Pillar A: Authentic National Exam Distribution (Zero Dynamic Elo Distortion)
-            # Enforces official NTA (JEE Main) and IIT (JEE Advanced) bell curves:
-            if is_adv:
-                # JEE Advanced Canonical Distribution:
-                # ANCHOR (Accessible Stepping Stones, ~25%): 1500 - 1749 (Target: 1650.0)
-                # FRONTIER (Core IIT Standard, ~50%):       1750 - 2049 (Target: 1900.0)
-                # PEAK (AIR < 500 Apex Deciders, ~25%):      2050 - 2500+ (Target: 2200.0)
-                if qe < 1750.0:
-                    tier = "ANCHOR"
-                    target_e = 1650.0
-                elif qe < 2050.0:
-                    tier = "FRONTIER"
-                    target_e = 1900.0
-                else:
-                    tier = "PEAK"
-                    target_e = 2200.0
+            # Pillar A: Authentic National Exam Distribution (Canonical Difficulty Tiers)
+            # Enforces official NTA (JEE Main: 40% Easy, 45% Medium, 15% Hard) and
+            # IIT (JEE Advanced: 25% Easy, 50% Medium, 25% Hard) distributions.
+            dt = str(q.get("difficulty_tier") or "").strip().upper()
+            if dt in ("EASY", "ANCHOR"):
+                tier = "ANCHOR"
+                target_e = 1650.0 if is_adv else 1350.0
+            elif dt in ("MEDIUM", "FRONTIER"):
+                tier = "FRONTIER"
+                target_e = 1900.0 if is_adv else 1550.0
+            elif dt in ("HARD", "PEAK"):
+                tier = "PEAK"
+                target_e = 2200.0 if is_adv else 1750.0
             else:
-                # JEE Main Canonical Distribution:
-                # ANCHOR (Speed / Recall / Foundation, ~40%): 1200 - 1449 (Target: 1350.0)
-                # FRONTIER (Standard Competitive Main, ~45%): 1450 - 1699 (Target: 1550.0)
-                # PEAK (Apex / Calculative Hard, ~15%):       1700 - 1950+ (Target: 1750.0)
-                if qe < 1450.0:
-                    tier = "ANCHOR"
-                    target_e = 1350.0
-                elif qe < 1700.0:
-                    tier = "FRONTIER"
-                    target_e = 1550.0
+                # Fallback to Elo rating only if difficulty_tier is missing or unrecognized
+                if is_adv:
+                    if qe < 1750.0:
+                        tier = "ANCHOR"
+                        target_e = 1650.0
+                    elif qe < 2050.0:
+                        tier = "FRONTIER"
+                        target_e = 1900.0
+                    else:
+                        tier = "PEAK"
+                        target_e = 2200.0
                 else:
-                    tier = "PEAK"
-                    target_e = 1750.0
+                    if qe < 1450.0:
+                        tier = "ANCHOR"
+                        target_e = 1350.0
+                    elif qe < 1700.0:
+                        tier = "FRONTIER"
+                        target_e = 1550.0
+                    else:
+                        tier = "PEAK"
+                        target_e = 1750.0
             dist = abs(qe - target_e)
             return tier, dist
 
@@ -511,6 +517,11 @@ def _pick_from_chapters_weighted(
                 return 0
             if len(picked) + len(siblings) > max_total and len(siblings) > 1:
                 return 0
+            if enforce_tier_cap and tier_targets and tier_counts and is_authentic_mock:
+                sib_tiers = [_get_q_tier_and_dist(s)[0] for s in siblings]
+                for st in set(sib_tiers):
+                    if tier_counts.get(st, 0) + sib_tiers.count(st) > tier_targets.get(st, 0):
+                        return 0
             seen_passages.add(pid)
             for s in siblings:
                 seen_ids.add(s["id"])
@@ -615,38 +626,34 @@ def _pick_from_chapters_weighted(
             for q in tier_seen_cands:
                 if len(picked) >= quota or tier_counts.get(t, 0) >= tier_targets.get(t, 0):
                     break
-                added = _try_add_question(q, quota, enforce_tier_cap=False)
+                added = _try_add_question(q, quota, enforce_tier_cap=True)
                 if added > 0:
                     ch = normalize_chapter_name(q.get("chapter") or "")
                     ch_quotas[ch] = max(0, ch_quotas.get(ch, 0) - added)
 
-    # Pass 3: Soft force fallback when bank supply of both unseen and deficit tier questions is exhausted.
-    # Draw from remaining candidates (which are sorted by least seen count first and distant past).
+    # Pass 3: Soft force fallback when bank supply of deficit tier questions is truly exhausted.
+    # Draw from remaining candidates prioritizing the nearest tier to deficit, least seen count, distant past.
     if len(picked) < quota:
-        fallback_chapters = sorted(
-            by_chapter.keys(),
-            key=lambda c: (
-                ch_quotas.get(c, 0) > 0,
-                weights_map.get(c, 2.0) + random.uniform(0, 0.5),
-            ),
-            reverse=True,
-        )
-        for ch in fallback_chapters:
+        rem_deficit_tiers = [t for t in ("ANCHOR", "FRONTIER", "PEAK") if (tier_targets and tier_counts and tier_counts.get(t, 0) < tier_targets.get(t, 0))]
+        all_remaining = [q for q in candidates if q["id"] not in seen_ids]
+
+        def _fallback_sort_key(x):
+            seen = _get_q_seen(x)
+            last_ts = _get_q_last_seen(x)
+            xt, dist = _get_q_tier_and_dist(x)
+            ch = normalize_chapter_name(x.get("chapter") or "")
+            w = weights_map.get(ch, 1.0)
+            tier_penalty = 0 if xt in rem_deficit_tiers else (1 if xt == "FRONTIER" else 2)
+            return (tier_penalty, seen, last_ts, -w, dist)
+
+        all_remaining.sort(key=_fallback_sort_key)
+        for q in all_remaining:
             if len(picked) >= quota:
                 break
-            live_cands = _sort_chapter_cands(by_chapter[ch])
-            # Sort remaining cands by least seen count and distant past
-            live_cands.sort(key=lambda x: (
-                _get_q_seen(x),
-                _get_q_last_seen(x),
-                _get_q_tier_and_dist(x)[1]
-            ))
-            for q in live_cands:
-                if len(picked) >= quota:
-                    break
-                added = _try_add_question(q, quota, enforce_tier_cap=False)
-                if added > 0:
-                    ch_quotas[ch] = max(0, ch_quotas.get(ch, 0) - added)
+            added = _try_add_question(q, quota, enforce_tier_cap=False)
+            if added > 0:
+                ch = normalize_chapter_name(q.get("chapter") or "")
+                ch_quotas[ch] = max(0, ch_quotas.get(ch, 0) - added)
 
     return picked
 
@@ -714,6 +721,103 @@ def order_subject_questions_jee_advanced(subj_qs: List[dict]) -> List[dict]:
     sec_comp.sort(key=lambda x: (x.get("passage_id") or x.get("id") or "", x.get("subquestion_index") or 0))
 
     return sec_multi + sec_single + sec_num + sec_comp + sec_mat + sec_other
+
+
+def compute_exam_tier_targets(
+    target_count: int,
+    active_subjects: List[str],
+    is_jee_advanced: bool = False,
+    difficulty_tier: Optional[str] = "MIXED"
+) -> Dict[str, Dict[str, int]]:
+    """
+    Computes exact, mathematically robust question quotas per subject and tier.
+    Guarantees:
+      1. For every subject s: sum(tier_targets[s].values()) == subj_targets[s]
+      2. Across all subjects: sum(tier_targets[s][t]) == global_tier_target[t]
+      3. Global tier targets follow 40% Anchor (Easy), 45% Frontier (Medium), 15% Peak (Hard)
+         for JEE Main, and 25% / 50% / 25% for JEE Advanced, using Largest Remainder Method.
+      4. Total questions across all subjects and tiers == target_count.
+    """
+    num_subjs = len(active_subjects)
+    if num_subjs == 0 or target_count <= 0:
+        return {}
+
+    base_subj_q = target_count // num_subjs
+    rem_subj = target_count % num_subjs
+    subj_targets = {}
+    for i, s in enumerate(active_subjects):
+        subj_targets[s] = base_subj_q + (1 if i < rem_subj else 0)
+
+    diff_f = (difficulty_tier or "MIXED").strip().upper()
+    if diff_f not in ("ALL", "MIXED", ""):
+        target_t = "ANCHOR" if diff_f in ("EASY", "ANCHOR") else (
+            "PEAK" if diff_f in ("HARD", "PEAK") else "FRONTIER"
+        )
+        return {s: {"ANCHOR": subj_targets[s] if target_t == "ANCHOR" else 0,
+                    "FRONTIER": subj_targets[s] if target_t == "FRONTIER" else 0,
+                    "PEAK": subj_targets[s] if target_t == "PEAK" else 0}
+                for s in active_subjects}
+
+    if is_jee_advanced:
+        tier_props = [("FRONTIER", 0.50), ("ANCHOR", 0.25), ("PEAK", 0.25)]
+    else:
+        tier_props = [("ANCHOR", 0.40), ("FRONTIER", 0.45), ("PEAK", 0.15)]
+
+    raw_shares = {t: target_count * p for t, p in tier_props}
+    floor_shares = {t: int(math.floor(raw_shares[t])) for t, _ in tier_props}
+    remainders = {t: raw_shares[t] - floor_shares[t] for t, _ in tier_props}
+
+    if target_count >= 3:
+        for t, _ in tier_props:
+            if floor_shares[t] == 0:
+                floor_shares[t] = 1
+
+    current_sum = sum(floor_shares.values())
+    if current_sum < target_count:
+        deficit = target_count - current_sum
+        sorted_by_rem = sorted(tier_props, key=lambda x: remainders[x[0]], reverse=True)
+        for i in range(deficit):
+            t = sorted_by_rem[i % len(sorted_by_rem)][0]
+            floor_shares[t] += 1
+    elif current_sum > target_count:
+        excess = current_sum - target_count
+        sorted_by_rem = sorted(tier_props, key=lambda x: remainders[x[0]])
+        for i in range(excess):
+            t = sorted_by_rem[i % len(sorted_by_rem)][0]
+            if floor_shares[t] > 1:
+                floor_shares[t] -= 1
+
+    global_targets = floor_shares
+    subj_tier_targets = {s: {"ANCHOR": 0, "FRONTIER": 0, "PEAK": 0} for s in active_subjects}
+
+    for t in ["ANCHOR", "FRONTIER", "PEAK"]:
+        g_t = global_targets[t]
+        t_base = g_t // num_subjs
+        t_rem = g_t % num_subjs
+        for i, s in enumerate(active_subjects):
+            subj_tier_targets[s][t] = t_base + (1 if i < t_rem else 0)
+
+    for s in active_subjects:
+        diff = sum(subj_tier_targets[s].values()) - subj_targets[s]
+        if diff > 0:
+            for other_s in active_subjects:
+                if other_s == s:
+                    continue
+                other_diff = subj_targets[other_s] - sum(subj_tier_targets[other_s].values())
+                if other_diff > 0:
+                    transfer_amt = min(diff, other_diff)
+                    for t in ["FRONTIER", "PEAK", "ANCHOR"]:
+                        if subj_tier_targets[s][t] > 1 and transfer_amt > 0:
+                            subj_tier_targets[s][t] -= 1
+                            subj_tier_targets[other_s][t] += 1
+                            diff -= 1
+                            transfer_amt -= 1
+                        if diff == 0:
+                            break
+                if diff == 0:
+                    break
+
+    return subj_tier_targets
 
 
 def select_mock_and_room_questions(
@@ -834,6 +938,14 @@ def select_mock_and_room_questions(
     seen_passages: Set[str] = set()
     final_questions: List[dict] = []
 
+    # Proportional multi-subject tier targets (40% Easy, 45% Medium, 15% Hard for Main)
+    subj_tier_targets_map = compute_exam_tier_targets(
+        target_count=target_count,
+        active_subjects=active_subjects,
+        is_jee_advanced=is_jee_advanced,
+        difficulty_tier=difficulty_tier,
+    )
+
     # Resolve cumulative retention buckets if cumulative_mode is active
     bucket_recent_set: Set[str] = set()
     bucket_consol_set: Set[str] = set()
@@ -932,22 +1044,9 @@ def select_mock_and_room_questions(
         is_authentic_mock = (mode not in ("ADAPTIVE", "ADAPTIVE_PRACTICE"))
 
         # Cognitive Tier Targets for this subject (Authentic NTA / IIT Bell Curves):
-        # JEE Main: 40% Speed/Recall Anchor + 45% Core Competitive Frontier + 15% Apex Differentiator
-        # JEE Advanced: 25% Accessible Stepping Anchor + 50% Core IIT Frontier + 25% Apex AIR 500 Peak
+        # Enforces exact 40% Anchor (Easy), 45% Frontier (Medium), 15% Peak (Hard) across the paper
         tier_counts: Dict[str, int] = {"ANCHOR": 0, "FRONTIER": 0, "PEAK": 0}
-        if is_jee_advanced:
-            t_frontier = max(1, round(s_target * 0.50))
-            t_peak = max(1, round(s_target * 0.25))
-            t_anchor = max(1, s_target - (t_frontier + t_peak))
-        else:
-            t_frontier = max(1, round(s_target * 0.45))
-            t_anchor = max(1, round(s_target * 0.40))
-            t_peak = max(1, s_target - (t_frontier + t_anchor))
-        tier_targets = {
-            "ANCHOR": t_anchor,
-            "FRONTIER": t_frontier,
-            "PEAK": t_peak,
-        }
+        tier_targets = dict(subj_tier_targets_map.get(s, {"ANCHOR": 0, "FRONTIER": 0, "PEAK": 0}))
 
         if is_jee_main:
             # ─────────────────────────────────────────────────────────────
@@ -977,24 +1076,40 @@ def select_mock_and_room_questions(
                     target_nvq = 0
                     target_scq = s_target
 
-            # 1. Pick Section B (Numerical Value Questions) across weighted chapters
-            picked_nvq = _pick_from_chapters_weighted(
-                candidates=nvq_pool,
-                quota=target_nvq,
-                ch_quotas=ch_quotas,
-                weights_map=weights_map,
-                seen_ids=seen_ids,
-                seen_passages=seen_passages,
-                passage_groups=passage_groups,
-                prefer_advanced=False,
-                seen_counts=seen_counts,
-                seen_last_ts=seen_last_ts,
-                target_chapter_elos=target_chapter_elos,
-                target_exam=target_exam,
-                tier_counts=tier_counts,
-                tier_targets=tier_targets,
-                is_authentic_mock=is_authentic_mock,
-            )
+            # Determine balanced NVQ tier targets so NVQ Section B does not monopolize any tier
+            if target_nvq > 0:
+                if has_diff_filter:
+                    nvq_tier_targets = {t: (target_nvq if tier_targets.get(t, 0) > 0 else 0) for t in ("ANCHOR", "FRONTIER", "PEAK")}
+                else:
+                    nvq_t_anchor = max(0, min(tier_targets.get("ANCHOR", 0), round(target_nvq * 0.40)))
+                    nvq_t_frontier = max(0, min(tier_targets.get("FRONTIER", 0), round(target_nvq * 0.40)))
+                    nvq_t_peak = max(0, target_nvq - (nvq_t_anchor + nvq_t_frontier))
+                    nvq_tier_targets = {
+                        "ANCHOR": nvq_t_anchor,
+                        "FRONTIER": nvq_t_frontier,
+                        "PEAK": nvq_t_peak,
+                    }
+
+                # 1. Pick Section B (Numerical Value Questions) across weighted chapters
+                picked_nvq = _pick_from_chapters_weighted(
+                    candidates=nvq_pool,
+                    quota=target_nvq,
+                    ch_quotas=ch_quotas,
+                    weights_map=weights_map,
+                    seen_ids=seen_ids,
+                    seen_passages=seen_passages,
+                    passage_groups=passage_groups,
+                    prefer_advanced=False,
+                    seen_counts=seen_counts,
+                    seen_last_ts=seen_last_ts,
+                    target_chapter_elos=target_chapter_elos,
+                    target_exam=target_exam,
+                    tier_counts=tier_counts,
+                    tier_targets=nvq_tier_targets,
+                    is_authentic_mock=is_authentic_mock,
+                )
+            else:
+                picked_nvq = []
 
             # Backfill any NVQ shortfall into Section A (Single Choice)
             nvq_shortfall = max(0, target_nvq - len(picked_nvq))
