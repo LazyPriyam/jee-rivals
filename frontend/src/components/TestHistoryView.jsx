@@ -232,6 +232,20 @@ export default function TestHistoryView({ user, inspectUsername, onSelectTest, o
     if (graphMetric === 'marks_percentage') {
       val = t.marks_percentage !== undefined ? t.marks_percentage : Math.max(0, Math.round((mVal / maxM) * 100));
       label = `${val}%`;
+    } else if (graphMetric === 'difficulty_calibrated') {
+      const avgElo = t.avg_question_elo
+        ? Number(t.avg_question_elo)
+        : (t.difficulty_tier === 'HARD' ? 1520 : (t.difficulty_tier === 'EASY' ? 1280 : 1380));
+      const diffFactor = t.difficulty_factor !== undefined
+        ? Number(t.difficulty_factor)
+        : Math.round((avgElo / 1350) * 1000) / 1000;
+      const rawPct = t.marks_percentage !== undefined
+        ? Number(t.marks_percentage)
+        : (maxM > 0 ? Math.round((mVal / maxM) * 100) : 0);
+      val = t.difficulty_adjusted_marks_pct !== undefined
+        ? Number(t.difficulty_adjusted_marks_pct)
+        : Math.round(rawPct * diffFactor * 10) / 10;
+      label = `${val}% Calibrated`;
     } else if (graphMetric === 'marks') {
       // Scale any test to standard 300 marks for equitable comparison across part-syllabus / full-mock papers
       val = t.scaled_marks_300 !== undefined
@@ -551,6 +565,7 @@ export default function TestHistoryView({ user, inspectUsername, onSelectTest, o
               <div className="flex items-center bg-[#0e111a] p-1 rounded-xl border border-white/10 font-mono text-[11px]">
                 {[
                   { id: 'marks_percentage', label: 'Marks %' },
+                  { id: 'difficulty_calibrated', label: 'Difficulty-Calibrated %' },
                   { id: 'marks', label: 'Score (/300)' },
                   { id: 'accuracy', label: 'Accuracy %' },
                   { id: 'attempt_rate', label: 'Attempted %' }
@@ -601,27 +616,41 @@ export default function TestHistoryView({ user, inspectUsername, onSelectTest, o
           {/* KPI Strip above Chart */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 font-mono">
             <div className="bg-[#10141f] border border-white/5 rounded-xl p-3">
-              <span className="text-[10px] text-slate-400 block mb-0.5">Average Performance</span>
-              <span className="text-base font-black text-white">
+              <span className="text-[10px] text-slate-400 block mb-0.5">
+                {graphMetric === 'difficulty_calibrated' ? 'Avg Calibrated Score' : 'Average Performance'}
+              </span>
+              <span className={`text-base font-black ${graphMetric === 'difficulty_calibrated' ? 'text-emerald-400' : 'text-white'}`}>
                 {avgGraphVal}{graphMetric === 'marks' ? ' / 300' : '%'}
               </span>
             </div>
             <div className="bg-[#10141f] border border-white/5 rounded-xl p-3">
-              <span className="text-[10px] text-slate-400 block mb-0.5">Peak Session</span>
-              <span className="text-base font-black text-orange-400">
+              <span className="text-[10px] text-slate-400 block mb-0.5">
+                {graphMetric === 'difficulty_calibrated' ? 'Peak Calibrated Session' : 'Peak Session'}
+              </span>
+              <span className={`text-base font-black ${graphMetric === 'difficulty_calibrated' ? 'text-emerald-300' : 'text-orange-400'}`}>
                 {peakGraphVal}{graphMetric === 'marks' ? ' / 300' : '%'}
               </span>
             </div>
             <div className="bg-[#10141f] border border-white/5 rounded-xl p-3">
-              <span className="text-[10px] text-slate-400 block mb-0.5">Latest Session</span>
-              <span className="text-base font-black text-sky-400">
+              <span className="text-[10px] text-slate-400 block mb-0.5">
+                {graphMetric === 'difficulty_calibrated' ? 'Latest Calibrated' : 'Latest Session'}
+              </span>
+              <span className={`text-base font-black ${graphMetric === 'difficulty_calibrated' ? 'text-cyan-400' : 'text-sky-400'}`}>
                 {lastPoint}{graphMetric === 'marks' ? ' / 300' : '%'}
               </span>
             </div>
             <div className="bg-[#10141f] border border-white/5 rounded-xl p-3">
-              <span className="text-[10px] text-slate-400 block mb-0.5">Tracked In Chart</span>
-              <span className="text-base font-black text-purple-400">
-                {graphPoints.length} Test{graphPoints.length !== 1 ? 's' : ''}
+              <span className="text-[10px] text-slate-400 block mb-0.5">
+                {graphMetric === 'difficulty_calibrated' ? 'Calibrated Skill Growth' : 'Tracked In Chart'}
+              </span>
+              <span className={`text-base font-black ${
+                graphMetric === 'difficulty_calibrated'
+                  ? (trendDelta >= 0 ? 'text-emerald-400' : 'text-rose-400')
+                  : 'text-purple-400'
+              }`}>
+                {graphMetric === 'difficulty_calibrated'
+                  ? `${trendDelta >= 0 ? '+' : ''}${trendDelta}% Growth`
+                  : `${graphPoints.length} Test${graphPoints.length !== 1 ? 's' : ''}`}
               </span>
             </div>
           </div>
@@ -649,9 +678,9 @@ export default function TestHistoryView({ user, inspectUsername, onSelectTest, o
               >
                 <defs>
                   <linearGradient id="chartGradient" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="#f97316" stopOpacity="0.4" />
-                    <stop offset="80%" stopColor="#f97316" stopOpacity="0.05" />
-                    <stop offset="100%" stopColor="#f97316" stopOpacity="0" />
+                    <stop offset="0%" stopColor={graphMetric === 'difficulty_calibrated' ? '#10b981' : '#f97316'} stopOpacity="0.4" />
+                    <stop offset="80%" stopColor={graphMetric === 'difficulty_calibrated' ? '#10b981' : '#f97316'} stopOpacity="0.05" />
+                    <stop offset="100%" stopColor={graphMetric === 'difficulty_calibrated' ? '#10b981' : '#f97316'} stopOpacity="0" />
                   </linearGradient>
                   <filter id="glowCircle" x="-20%" y="-20%" width="140%" height="140%">
                     <feGaussianBlur stdDeviation="3" result="blur" />
@@ -722,7 +751,7 @@ export default function TestHistoryView({ user, inspectUsername, onSelectTest, o
                   <polyline
                     points={polylineStr}
                     fill="none"
-                    stroke="#f97316"
+                    stroke={graphMetric === 'difficulty_calibrated' ? '#10b981' : '#f97316'}
                     strokeWidth="2.5"
                     strokeLinecap="round"
                     strokeLinejoin="round"
@@ -744,7 +773,7 @@ export default function TestHistoryView({ user, inspectUsername, onSelectTest, o
                         cx={c.x}
                         cy={c.y}
                         r={isHovered ? 6 : 4}
-                        fill={isHovered ? '#fff' : '#f97316'}
+                        fill={isHovered ? '#fff' : (graphMetric === 'difficulty_calibrated' ? '#10b981' : '#f97316')}
                         stroke="#0e111a"
                         strokeWidth="2"
                         className="transition-all duration-200"
@@ -797,6 +826,20 @@ export default function TestHistoryView({ user, inspectUsername, onSelectTest, o
                         {hoveredPoint.test.accuracy}%
                       </strong>
                     </div>
+                    <div>
+                      <span className="text-slate-400 text-[10px] block">Paper Toughness</span>
+                      <strong className="text-purple-300">
+                        {hoveredPoint.test.avg_question_elo ? `${hoveredPoint.test.avg_question_elo} Elo` : (hoveredPoint.test.difficulty_tier || 'Medium')}
+                      </strong>
+                    </div>
+                    {hoveredPoint.test.difficulty_adjusted_marks_pct !== undefined && (
+                      <div>
+                        <span className="text-slate-400 text-[10px] block">Calibrated</span>
+                        <strong className="text-emerald-400">
+                          {hoveredPoint.test.difficulty_adjusted_marks_pct}%
+                        </strong>
+                      </div>
+                    )}
                   </div>
                   <div className="text-[9px] text-orange-400 mt-1.5 flex items-center gap-1 font-bold">
                     <span>Click node to view full analysis</span>

@@ -46,6 +46,7 @@ import {
   ThumbsDown
 } from 'lucide-react';
 import ReportQuestionModal from './ReportQuestionModal';
+import { getReportedQuestions, addReportedQuestion } from '../utils/storageGuardian';
 
 export default function TestAnalysisView({
   roomCode,
@@ -128,7 +129,8 @@ export default function TestAnalysisView({
         }
       };
 
-      const processList = (raw) => {
+      const cleanRoomCode = (roomCode || '').trim().toUpperCase();
+      const processList = (raw, isUserReports = false) => {
         if (!raw) return;
         let list = [];
         if (Array.isArray(raw)) {
@@ -142,11 +144,22 @@ export default function TestAnalysisView({
         } else if (typeof raw === 'object') {
           list = Object.values(raw);
         }
-        list.forEach(ingestReport);
+        list.forEach((r) => {
+          if (!r) return;
+          // STRICT ROOM ISOLATION:
+          // User's past reports from other rooms/tests must NEVER leak into this room's view.
+          if (isUserReports) {
+            const repRoom = (r.room_code || '').trim().toUpperCase();
+            if (repRoom !== cleanRoomCode && (r.status || '').toUpperCase() !== 'QUARANTINED') {
+              return;
+            }
+          }
+          ingestReport(r);
+        });
       };
 
-      if (roomRes) processList(roomRes);
-      if (userRes) processList(userRes);
+      if (roomRes) processList(roomRes, false);
+      if (userRes) processList(userRes, true);
 
       setRoomReports(repMap);
       if (Object.keys(reasonsMap).length > 0) {
@@ -158,53 +171,47 @@ export default function TestAnalysisView({
 
   // Load existing user reports and persistent local storage to badge flagged questions automatically
   useEffect(() => {
+    const cleanCode = (roomCode || '').trim().toUpperCase();
+    const uid = user?.id || 'anon';
+
+    // 1. Purge legacy un-scoped localStorage keys so they cannot cross-contaminate across rooms/users:
     try {
-      const localReported = [];
-      const localReasons = {};
-      for (let i = 0; i < localStorage.length; i++) {
+      for (let i = localStorage.length - 1; i >= 0; i--) {
         const k = localStorage.key(i);
-        if (k && (k.startsWith('jee_reported_') || k.startsWith('jee_dispute_'))) {
-          const parts = k.split('_');
-          const qId = parts[parts.length - 1];
-          if (qId && qId.length > 10) {
-            localReported.push(qId);
-            const val = localStorage.getItem(k);
-            if (val && val !== 'true') {
-              localReasons[qId] = val;
-            }
-          }
+        if (k && (k.startsWith('jee_reported_') || k.startsWith('jee_dispute_')) && !k.startsWith('jee_reported_in_test_usr_')) {
+          localStorage.removeItem(k);
         }
-      }
-      if (localReported.length > 0) {
-        setReportedQuestionIds((prev) => new Set([...prev, ...localReported]));
-      }
-      if (Object.keys(localReasons).length > 0) {
-        setReportedReasons((prev) => ({ ...prev, ...localReasons }));
       }
     } catch (_) {}
 
-    if (user?.id) {
+    // 2. Load strictly user+room scoped reported questions:
+    if (cleanCode) {
+      try {
+        const userRoomSet = getReportedQuestions(uid, cleanCode);
+        if (userRoomSet && userRoomSet.size > 0) {
+          setReportedQuestionIds((prev) => new Set([...prev, ...Array.from(userRoomSet)]));
+        }
+      } catch (_) {}
+    }
+
+    // 3. Ingest user reports strictly matching this specific room:
+    if (user?.id && cleanCode) {
       api.questions.getReports({ reporter_id: user.id })
         .then((reps) => {
           if (Array.isArray(reps)) {
             const pendingIds = reps
               .filter((r) => {
                 const s = (r.status || r.report_status || 'PENDING').toUpperCase();
-                return s === 'PENDING';
+                const repRoom = (r.room_code || '').trim().toUpperCase();
+                return s === 'PENDING' && repRoom === cleanCode;
               })
               .map((r) => r.question_id)
               .filter(Boolean);
             const reasonsMap = {};
             reps.forEach((r) => {
-              if (r.question_id && r.reason) {
+              const repRoom = (r.room_code || '').trim().toUpperCase();
+              if (repRoom === cleanCode && r.question_id && r.reason) {
                 reasonsMap[r.question_id] = r.reason;
-              }
-              const s = (r.status || r.report_status || 'PENDING').toUpperCase();
-              if (s === 'APPROVED' || s === 'DISMISSED' || s === 'QUARANTINED') {
-                try {
-                  localStorage.removeItem(`jee_reported_${r.question_id}`);
-                  localStorage.removeItem(`jee_reported_dispute_${r.question_id}`);
-                } catch (_) {}
               }
             });
             if (Object.keys(reasonsMap).length > 0) {
@@ -217,7 +224,7 @@ export default function TestAnalysisView({
         })
         .catch(() => {});
     }
-  }, [user?.id]);
+  }, [user?.id, roomCode]);
 
   useEffect(() => {
     fetchRoomReports();
@@ -252,10 +259,9 @@ export default function TestAnalysisView({
     const refund = Number(reportInfo?.provisional_elo_refunded || 0);
     const bonus = Number(reportInfo?.bonus_marks_awarded || 0);
     if (qId) {
-      try {
-        localStorage.setItem(`jee_reported_${qId}`, reason || 'true');
-        if (cleanCode) localStorage.setItem(`jee_reported_room_${cleanCode}_${qId}`, reason || 'true');
-      } catch (_) {}
+      if (cleanCode) {
+        addReportedQuestion(user?.id, cleanCode, qId);
+      }
       setReportedQuestionIds((prev) => new Set(prev).add(qId));
       if (reason) {
         setReportedReasons((prev) => ({ ...prev, [qId]: reason }));
@@ -656,12 +662,12 @@ export default function TestAnalysisView({
       roomReport?.consensus_status === 'CONSENSUS_AGREED' ||
       q.id === 'eff5b1bc-a730-4423-b9c3-34423a407bbc';
 
+    const cleanRoomCode = (roomCode || '').trim().toUpperCase();
+    const userRoomReports = cleanRoomCode ? getReportedQuestions(user?.id, cleanRoomCode) : new Set();
     const isReportPending = !isReportApproved && !isDroppedQuestion && (
       (roomReport && roomReport.status === 'PENDING' && roomReport.consensus_status !== 'CONSENSUS_AGREED') ||
       (reportedQuestionIds.has(q.id)) ||
-      (!roomReport && Boolean(localStorage.getItem(`jee_reported_${q.id}`))) ||
-      (!roomReport && Boolean(localStorage.getItem(`jee_reported_dispute_${q.id}`))) ||
-      (!roomReport && roomCode ? Boolean(localStorage.getItem(`jee_reported_room_${roomCode.trim().toUpperCase()}_${q.id}`)) : false)
+      userRoomReports.has(q.id)
     );
 
     if (isDroppedQuestion) {

@@ -2206,12 +2206,13 @@ def get_room_results(code: str, user: Optional[dict] = Depends(get_optional_user
             defective_qids.add("eff5b1bc-a730-4423-b9c3-34423a407bbc")
 
         try:
-            placeholders = ",".join("?" for _ in clean_q_ids_str) if clean_q_ids_str else "''"
-            c.execute(f"""
+            # STRICT ROOM ISOLATION: Room reports (including out-of-syllabus approvals) belong ONLY to this room.
+            # Global defects are already identified separately via questions.validation_status == 'QUARANTINED'.
+            c.execute("""
                 SELECT question_id FROM question_reports 
-                WHERE (room_code = ? OR question_id IN ({placeholders}))
+                WHERE room_code = ?
                   AND (status IN ('QUARANTINED', 'APPROVED') OR consensus_status = 'CONSENSUS_AGREED')
-            """, (code, *clean_q_ids_str))
+            """, (code,))
             for rep_row in c.fetchall():
                 defective_qids.add(str(rep_row[0] if isinstance(rep_row, (list, tuple)) else rep_row["question_id"]))
         except Exception as rep_err:

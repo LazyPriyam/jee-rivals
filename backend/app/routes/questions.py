@@ -395,16 +395,10 @@ def get_room_reports(room_code: str, user: Optional[dict] = Depends(get_optional
         except Exception:
             q_ids = []
 
-    where_clauses = ["room_code = ?"]
-    params = [code]
-
-    if q_ids:
-        placeholders = ",".join("?" for _ in q_ids)
-        where_clauses.append(f"question_id IN ({placeholders})")
-        params.extend(q_ids)
-
-    query = f"SELECT * FROM question_reports WHERE {' OR '.join(where_clauses)} ORDER BY created_at ASC"
-    c.execute(query, tuple(params))
+    # STRICT ROOM ISOLATION: Question reports filed in a room belong strictly to that room.
+    # Reports filed in other rooms or tests must NEVER leak into this room's results or derivations.
+    query = "SELECT * FROM question_reports WHERE room_code = ? ORDER BY created_at ASC"
+    c.execute(query, (code,))
     rows = [dict(r) for r in c.fetchall()]
 
     result = {}
@@ -1383,8 +1377,15 @@ def approve_question_report(question_id: str, admin: bool = Depends(verify_admin
             """, (notif_id, uid, notif_title, notif_msg, details_json, now))
 
     # 4. Reconcile test sheets in room_participants so student scorecards in DB receive +4.0 marks
+    # STRICT ROOM SCOPING: If report was filed for a specific room or out of syllabus for that test,
+    # ONLY reconcile participants in that specific room, NOT unrelated historical rooms.
+    rep_room_codes = {r["room_code"].strip().upper() for r in pending_reports if r.get("room_code")}
     c.execute("SELECT id, code, question_ids FROM rooms WHERE question_ids LIKE ?", (f"%{question_id}%",))
-    affected_rooms = [dict(r) for r in c.fetchall()]
+    all_candidate_rooms = [dict(r) for r in c.fetchall()]
+    affected_rooms = [
+        rm for rm in all_candidate_rooms
+        if not rep_room_codes or (rm.get("code") and rm["code"].strip().upper() in rep_room_codes)
+    ]
     for rm in affected_rooms:
         try:
             raw_qids = json.loads(rm["question_ids"]) if isinstance(rm["question_ids"], str) else (rm["question_ids"] or [])
