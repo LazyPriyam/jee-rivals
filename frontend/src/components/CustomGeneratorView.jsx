@@ -1,5 +1,4 @@
 import React, { useState, useEffect } from 'react';
-import { createPortal } from 'react-dom';
 import { api } from '../utils/api';
 import { sound } from '../utils/sound';
 import {
@@ -74,40 +73,6 @@ export default function CustomGeneratorView({ user, onRoomCreated, onOpenAuth })
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [countdown, setCountdown] = useState(null); // null, 3, 2, 1, 0
-  const [countdownRoom, setCountdownRoom] = useState(null);
-
-  // 3-2-1 Countdown Timer before launching solo test
-  useEffect(() => {
-    if (countdown === null) return;
-
-    if (countdown > 1) {
-      const timer = setTimeout(() => {
-        setCountdown((prev) => prev - 1);
-        sound.countdown();
-      }, 1000);
-      return () => clearTimeout(timer);
-    }
-
-    if (countdown === 1) {
-      const timer = setTimeout(() => {
-        setCountdown(0);
-        sound.start();
-      }, 1000);
-      return () => clearTimeout(timer);
-    }
-
-    if (countdown === 0) {
-      const timer = setTimeout(() => {
-        if (countdownRoom) {
-          onRoomCreated(countdownRoom);
-        }
-        setCountdown(null);
-        setCountdownRoom(null);
-      }, 600);
-      return () => clearTimeout(timer);
-    }
-  }, [countdown, countdownRoom, onRoomCreated]);
 
   // Fetch chapters with unit metadata
   useEffect(() => {
@@ -378,13 +343,10 @@ export default function CustomGeneratorView({ user, onRoomCreated, onOpenAuth })
       });
 
       if (startInstantly && room?.code) {
-        // Trigger 3-2-1 countdown for solo tests
         try {
           const startedRoom = await api.rooms.start(room.code);
-          setCountdownRoom(startedRoom || { ...room, status: 'IN_PROGRESS' });
           setLoading(false);
-          setCountdown(3);
-          sound.countdown();
+          onRoomCreated(startedRoom || { ...room, status: 'IN_PROGRESS' });
           return;
         } catch (_) {}
       }
@@ -1732,51 +1694,6 @@ export default function CustomGeneratorView({ user, onRoomCreated, onOpenAuth })
             </div>
           </div>
         </div>
-      )}
-
-      {/* 3-2-1 Solo Test Countdown Overlay */}
-      {countdown !== null && typeof document !== 'undefined' && createPortal(
-        <div className="fixed inset-0 z-[9999] bg-[#0c101a]/95 backdrop-blur-md flex flex-col items-center justify-center p-6 text-center select-none animate-fadeIn">
-          {/* Exam Hall Terminal Badge */}
-          <div className="mb-6 inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-orange-950/80 border border-orange-500/40 text-orange-400 text-xs font-mono font-bold tracking-widest uppercase shadow-lg">
-            <span className="w-2 h-2 rounded-full bg-orange-400 animate-ping" />
-            <span>Terminal Initialized</span>
-          </div>
-
-          <h2 className="text-2xl sm:text-3xl font-black text-white tracking-tight mb-2">
-            Solo Session Ready
-          </h2>
-          <p className="text-xs sm:text-sm text-slate-400 font-medium max-w-md mb-8">
-            Preparing questions and environment. Test starts automatically.
-          </p>
-
-          {/* Big Countdown Number Circle */}
-          <div className="relative flex items-center justify-center mb-8">
-            <div className={`w-36 h-36 sm:w-44 sm:h-44 rounded-full border-4 flex items-center justify-center transition-all duration-300 shadow-2xl ${
-              countdown === 0
-                ? 'border-emerald-500 bg-emerald-950/40 shadow-[0_0_60px_rgba(16,185,129,0.6)] scale-110'
-                : countdown === 1
-                ? 'border-amber-400 bg-amber-950/40 shadow-[0_0_60px_rgba(251,191,36,0.6)] scale-105'
-                : 'border-orange-500 bg-orange-950/40 shadow-[0_0_60px_rgba(249,115,22,0.6)] scale-100'
-            }`}>
-              <span className={`font-mono font-black transition-all duration-300 transform ${
-                countdown === 0
-                  ? 'text-3xl sm:text-4xl text-emerald-300 animate-pulse'
-                  : 'text-6xl sm:text-7xl text-white'
-              }`}>
-                {countdown === 0 ? 'START!' : countdown}
-              </span>
-            </div>
-          </div>
-
-          {/* Specs Preview */}
-          <div className="flex items-center gap-4 text-xs font-mono text-slate-300 bg-[#161b28] px-5 py-2.5 rounded-2xl border border-white/10 shadow-inner">
-            <span className="text-orange-400 font-bold">{questionCount} Questions</span>
-            <span className="text-slate-600">•</span>
-            <span className="text-white font-bold">{totalDurationMinutes} Minutes</span>
-          </div>
-        </div>,
-        document.body
       )}
     </div>
   );

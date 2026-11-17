@@ -34,6 +34,17 @@ import {
 export default function MockTestView({ room, user, onMatchComplete, onExitToDashboard }) {
   const savedProgress = getMockTestDraftProgress(user?.id, room.code);
 
+  const isFreshTest = !savedProgress || (
+    Object.keys(savedProgress.answers || {}).length === 0 &&
+    (!savedProgress.currentIndex || savedProgress.currentIndex === 0)
+  );
+
+  const [countdown, setCountdown] = useState(() => (isFreshTest ? 3 : null));
+  const countdownRef = useRef(countdown);
+  useEffect(() => {
+    countdownRef.current = countdown;
+  }, [countdown]);
+
   const [questions, setQuestions] = useState(() => sortQuestionsBySubject(room.all_questions || []));
   const [currentIndex, setCurrentIndex] = useState(() => savedProgress?.currentIndex ?? 0);
   const [answers, setAnswers] = useState(() => savedProgress?.answers || {}); // q_id -> selected_option
@@ -49,6 +60,30 @@ export default function MockTestView({ room, user, onMatchComplete, onExitToDash
     const sorted = sortQuestionsBySubject(room.all_questions || []);
     return sorted[savedProgress?.currentIndex || 0]?.subject || sorted[0]?.subject || 'Physics';
   });
+
+  // 3-2-1 Countdown Timer before authentic NTA examination starts
+  useEffect(() => {
+    if (countdown === null) return;
+
+    if (countdown === 3 || countdown === 2 || countdown === 1) {
+      sound.countdown();
+      const timer = setTimeout(() => {
+        setCountdown((prev) => (prev && prev > 1 ? prev - 1 : 0));
+      }, 1000);
+      return () => clearTimeout(timer);
+    }
+
+    if (countdown === 0) {
+      sound.start();
+      const timer = setTimeout(() => {
+        startTimeRef.current = Date.now();
+        deadlineRef.current = Date.now() + initialDuration * 1000;
+        setTimeRemaining(initialDuration);
+        setCountdown(null);
+      }, 750);
+      return () => clearTimeout(timer);
+    }
+  }, [countdown, initialDuration]);
 
   // Exam Duration in seconds (e.g. 60 min -> 3600s, or room.total_duration_minutes)
   const initialDuration = (room.total_duration_minutes || 60) * 60;
@@ -184,6 +219,7 @@ export default function MockTestView({ room, user, onMatchComplete, onExitToDash
     clearInterval(timerRef.current);
 
     const tick = () => {
+      if (countdownRef.current !== null) return;
       const rem = Math.max(0, Math.ceil((deadlineRef.current - Date.now()) / 1000));
       setTimeRemaining(rem);
 
@@ -1121,6 +1157,53 @@ export default function MockTestView({ room, user, onMatchComplete, onExitToDash
               <span className="w-2 h-2 rounded-full bg-orange-500 animate-pulse" />
               <span>Syncing examination metrics</span>
             </div>
+          </div>
+        </div>,
+        document.body
+      )}
+
+      {/* 9. 3-2-1 NTA Examination Countdown Overlay */}
+      {countdown !== null && typeof document !== 'undefined' && createPortal(
+        <div className="fixed inset-0 z-[99999] bg-[#0c101a]/95 backdrop-blur-md flex flex-col items-center justify-center p-6 text-center select-none">
+          {/* Exam Hall Terminal Badge */}
+          <div className="mb-6 inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-orange-950/80 border border-orange-500/40 text-orange-400 text-xs font-mono font-bold tracking-widest uppercase shadow-lg">
+            <span className="w-2 h-2 rounded-full bg-orange-400 animate-ping" />
+            <span>NTA CBT Terminal Ready</span>
+          </div>
+
+          <h2 className="text-2xl sm:text-3xl font-black text-white tracking-tight mb-2">
+            Examination Paper Sealed & Ready
+          </h2>
+          <p className="text-xs sm:text-sm text-slate-400 font-medium max-w-md mb-8">
+            Entering Computer Based Test environment. The exam will begin automatically.
+          </p>
+
+          {/* Big Countdown Number Circle */}
+          <div className="relative flex items-center justify-center mb-8">
+            <div className={`w-36 h-36 sm:w-44 sm:h-44 rounded-full border-4 flex items-center justify-center transition-all duration-300 shadow-2xl ${
+              countdown === 0
+                ? 'border-emerald-500 bg-emerald-950/40 shadow-[0_0_60px_rgba(16,185,129,0.6)] scale-110'
+                : countdown === 1
+                ? 'border-amber-400 bg-amber-950/40 shadow-[0_0_60px_rgba(251,191,36,0.6)] scale-105'
+                : 'border-orange-500 bg-orange-950/40 shadow-[0_0_60px_rgba(249,115,22,0.6)] scale-100'
+            }`}>
+              <span className={`font-mono font-black transition-all duration-300 transform ${
+                countdown === 0
+                  ? 'text-3xl sm:text-4xl text-emerald-300 animate-pulse'
+                  : 'text-6xl sm:text-7xl text-white'
+              }`}>
+                {countdown === 0 ? 'START!' : countdown}
+              </span>
+            </div>
+          </div>
+
+          {/* Exam Specs Preview */}
+          <div className="flex items-center gap-4 text-xs font-mono text-slate-300 bg-[#161b28] px-5 py-2.5 rounded-2xl border border-white/10 shadow-inner">
+            <span className="text-orange-400 font-bold">{questions.length || room.total_questions || 30} Questions</span>
+            <span className="text-slate-600">•</span>
+            <span className="text-white font-bold">{room.total_duration_minutes || 60} Minutes</span>
+            <span className="text-slate-600">•</span>
+            <span className="text-emerald-400 font-bold">Section A & B Marking</span>
           </div>
         </div>,
         document.body
