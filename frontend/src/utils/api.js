@@ -87,10 +87,10 @@ export function getCachedUser() {
   }
 }
 
-export function setCachedUser(user) {
+export function setCachedUser(user, force = false) {
   try {
     if (user) {
-      const existing = getCachedUser();
+      const existing = force ? null : getCachedUser();
       let protectedUser = user;
       if (existing && existing.id === user.id) {
         // High-watermark safeguard on client side: never allow Elo or RP rollback
@@ -143,6 +143,7 @@ export function recordSavedAccount(user, token = null, pin = null) {
       id: user.id,
       username: user.username,
       avatar_id: user.avatar_id || "flame",
+      avatar_image_url: user.avatar_image_url || existing?.avatar_image_url || null,
       overall_elo: Math.round(highElo),
       current_division: user.current_division || "BRONZE",
       title: user.title || "JEE Aspirant",
@@ -180,9 +181,12 @@ export async function switchSavedAccount(username) {
       const me = await api.auth.getMe();
       setCachedUser(me);
       recordSavedAccount(me, acc.token, acc.pin);
+      try {
+        localStorage.setItem("jee_saved_username", me.username);
+      } catch (_) {}
       return me;
     } catch (err) {
-      if (err?.message?.toLowerCase().includes("deleted")) {
+      if (err?.status === 404 || err?.message?.toLowerCase().includes("deleted") || err?.message?.includes("does not exist anymore")) {
         removeSavedAccount(acc.username);
         throw err;
       }
@@ -197,9 +201,12 @@ export async function switchSavedAccount(username) {
       setToken(resp.token, true);
       setCachedUser(resp.user);
       recordSavedAccount(resp.user, resp.token, acc.pin);
+      try {
+        localStorage.setItem("jee_saved_username", resp.user.username);
+      } catch (_) {}
       return resp.user;
     } catch (err) {
-      if (err?.message?.toLowerCase().includes("deleted") || err?.message?.toLowerCase().includes("not found")) {
+      if (err?.status === 404 || err?.message?.toLowerCase().includes("deleted") || err?.message?.includes("not found")) {
         removeSavedAccount(acc.username);
       }
       throw err;
@@ -354,19 +361,24 @@ export const api = {
         method: "POST",
         body: JSON.stringify({ chat_settings }),
       }),
-    resetData: () =>
-      request("/api/auth/reset-data", {
+    resetData: async () => {
+      const res = await request("/api/auth/reset-data", {
         method: "POST",
-      }),
+      });
+      invalidateCachedProfile();
+      if (res?.user) {
+        setCachedUser(res.user, true);
+        recordSavedAccount(res.user);
+      }
+      return res;
+    },
     deleteAccount: async (pin, confirmation = "DELETE") => {
       const res = await request("/api/auth/delete-account", {
         method: "POST",
         body: JSON.stringify({ pin, confirmation }),
       });
       invalidateCachedProfile();
-      try {
-        sessionStorage.clear();
-      } catch (_) {}
+      purgeUserSessionArtifacts();
       return res;
     },
   },

@@ -7,7 +7,7 @@ from fastapi import APIRouter, HTTPException, Query, Depends
 from backend.app.database import get_connection, get_user_by_username
 from backend.app.models import UserProfile, ProfileUpdateRequest
 from backend.app.auth import get_current_user, get_optional_user
-from backend.app.routes.auth import format_user_profile, invalidate_coverage_cache
+from backend.app.routes.auth import format_user_profile, invalidate_coverage_cache, is_safe_image_url
 from backend.app.tools.jee_syllabus import build_user_skill_tree
 from backend.app.tools.achievements_engine import evaluate_user_achievements
 from backend.app.tools.division_engine import evaluate_user_division, DIVISION_TIERS_CONFIG
@@ -321,6 +321,9 @@ def update_current_user_profile(
     if req.target_exam_date is not None:
         updates.append("target_exam_date = ?")
         params.append(req.target_exam_date.strip())
+    if req.target_exam is not None:
+        updates.append("target_exam = ?")
+        params.append(req.target_exam.strip())
     if req.bio is not None:
         updates.append("bio = ?")
         params.append(req.bio.strip())
@@ -330,6 +333,19 @@ def update_current_user_profile(
     if req.pinned_badges is not None:
         updates.append("pinned_badges = ?")
         params.append(json.dumps(req.pinned_badges))
+    if req.learnt_chapters is not None:
+        updates.append("learnt_chapters = ?")
+        params.append(json.dumps(req.learnt_chapters))
+    if req.chat_settings is not None:
+        updates.append("chat_settings = ?")
+        params.append(json.dumps(req.chat_settings))
+    if req.daily_question_goal is not None:
+        try:
+            goal_val = max(5, min(300, int(req.daily_question_goal)))
+            updates.append("daily_question_goal = ?")
+            params.append(goal_val)
+        except (ValueError, TypeError):
+            pass
     if req.title is not None:
         updates.append("title = ?")
         params.append(req.title.strip())
@@ -338,6 +354,9 @@ def update_current_user_profile(
         params.append(req.avatar_id.strip())
     if req.avatar_image_url is not None:
         val = req.avatar_image_url.strip() if req.avatar_image_url else None
+        if val and not is_safe_image_url(val):
+            conn.close()
+            raise HTTPException(status_code=400, detail="Invalid avatar image format. Allowed formats: PNG, JPEG, WebP, GIF.")
         if val and len(val) > 120_000:
             conn.close()
             raise HTTPException(status_code=400, detail="Avatar image size is too large (max 100KB).")
@@ -345,6 +364,9 @@ def update_current_user_profile(
         params.append(val if val else None)
     if req.banner_image_url is not None:
         val = req.banner_image_url.strip() if req.banner_image_url else None
+        if val and not is_safe_image_url(val):
+            conn.close()
+            raise HTTPException(status_code=400, detail="Invalid banner image format. Allowed formats: PNG, JPEG, WebP, GIF.")
         if val and len(val) > 300_000:
             conn.close()
             raise HTTPException(status_code=400, detail="Banner image size is too large (max 250KB).")

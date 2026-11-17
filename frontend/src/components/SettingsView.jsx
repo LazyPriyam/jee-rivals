@@ -252,8 +252,15 @@ export default function SettingsView({
         setToken(res.token, rememberMeActive);
       }
       if (res.user) {
+        // Cleanly migrate saved accounts: remove old username entry and preserve saved PIN under new username
+        const oldUsername = user?.username;
+        const savedList = getSavedAccounts();
+        const oldSavedAcc = savedList.find(a => a.username?.toLowerCase() === oldUsername?.toLowerCase());
+        if (oldUsername && oldUsername.toLowerCase() !== trimmed.toLowerCase()) {
+          removeSavedAccount(oldUsername);
+        }
         setCachedUser(res.user);
-        recordSavedAccount(res.user, res.token);
+        recordSavedAccount(res.user, res.token, oldSavedAcc?.pin);
         try {
           localStorage.setItem('jee_saved_username', trimmed);
         } catch (_) {}
@@ -1081,6 +1088,7 @@ export default function SettingsView({
                                 sound.click();
                                 const switched = await switchSavedAccount(acc.username);
                                 if (onUpdateUser) onUpdateUser(switched);
+                                setSavedDeviceAccounts(getSavedAccounts());
                                 setAccountSuccess(`Switched to ${acc.username}!`);
                                 setTimeout(() => setAccountSuccess(''), 3000);
                               } catch (err) {

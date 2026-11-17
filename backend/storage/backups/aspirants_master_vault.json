@@ -11,7 +11,7 @@
       "chemistry_elo": 1489.7,
       "math_elo": 1691.2,
       "current_division": "Bronze III",
-      "weekly_rp": 0,
+      "weekly_rp": 60,
       "total_solved": 255,
       "total_correct": 169,
       "gold_medals": 1,
@@ -19,7 +19,7 @@
       "bronze_medals": 0,
       "chapter_stats": "{\"Work, Energy and Power\": {\"attempts\": 4, \"correct\": 2, \"subject\": \"Physics\"}}",
       "created_at": "2026-10-10T03:07:12.631328",
-      "last_active": "2026-11-06T13:59:30.150159+00:00",
+      "last_active": "2026-11-07T07:33:06.865430+00:00",
       "target_college": "IIT Bombay Computer Science and Engineering",
       "target_exam_date": "JEE Advanced 2027",
       "bio": "कर्मण्येवाधिकारस्ते मा फलेषु कदाचन।\nमा कर्मफलहेतुर्भूर्मा ते सङ्गोऽस्त्वकर्मणि॥",
@@ -51,17 +51,17 @@
       "overall_elo": 1983.4,
       "physics_elo": 2801.8,
       "chemistry_elo": 2226.1,
-      "math_elo": 3627.5,
+      "math_elo": 3654.5,
       "current_division": "Platinum II",
-      "weekly_rp": 0,
-      "total_solved": 499,
-      "total_correct": 331,
+      "weekly_rp": 920,
+      "total_solved": 501,
+      "total_correct": 333,
       "gold_medals": 0,
       "silver_medals": 2,
       "bronze_medals": 0,
       "chapter_stats": "{}",
       "created_at": "2026-10-10T17:48:09.558488",
-      "last_active": "2026-11-06T15:50:20.270953+00:00",
+      "last_active": "2026-11-06T16:03:29.121589+00:00",
       "target_college": "IIT Delhi (Mathematics & Computing)",
       "target_exam_date": "JEE Main Jan 2026",
       "bio": "Aiming for AIR 0!. PvP .\nOM\nवक्रतुण्ड महाकाय सूर्यकोटि समप्रभ।\nनिर्विघ्नं कुरु मे देव सर्वकार्येषु सर्वदा॥",
@@ -95,7 +95,7 @@
       "chemistry_elo": 1194.2,
       "math_elo": 1194.4,
       "current_division": "Bronze III",
-      "weekly_rp": 0,
+      "weekly_rp": 35,
       "total_solved": 0,
       "total_correct": 0,
       "gold_medals": 0,
@@ -103,7 +103,7 @@
       "bronze_medals": 1,
       "chapter_stats": "{}",
       "created_at": "2026-11-06T10:37:14.463906",
-      "last_active": "2026-11-06T15:51:13.054867+00:00",
+      "last_active": "2026-11-06T16:46:23.603653+00:00",
       "target_college": "IIT Bombay (Computer Science)",
       "target_exam_date": "JEE Main Jan 2026",
       "bio": "Aiming for Top 500 AIR. PvP Aspirant.",
@@ -127,7 +127,7 @@
       "token_version": 1
     }
   ],
-  "timestamp": "2026-11-07T06:40:47.780090+00:00",
+  "timestamp": "2026-11-17T07:02:28.132663+00:00",
   "version": 2,
   "user_chapter_elo": [
     {
@@ -418,12 +418,6 @@
       "reason": "test_account_purge"
     },
     {
-      "id": "480b2aea-f85f-4775-8352-58a849bc4d54",
-      "username": "Tester_e49610",
-      "deleted_at": "2026-10-10T00:00:00",
-      "reason": "test_account_purge"
-    },
-    {
       "id": "aa446a43-905f-4b5f-81cd-80197c329d07",
       "username": "Dummy",
       "deleted_at": "2026-10-10T00:00:00",
@@ -458,12 +452,6 @@
       "username": "PuranlovesMaths@123",
       "deleted_at": "2026-10-10T00:00:00",
       "reason": "user_purge"
-    },
-    {
-      "id": "test_u",
-      "username": "Tester",
-      "deleted_at": "2026-10-10T00:00:00",
-      "reason": "test_purge"
     },
     {
       "id": "2377f056-3ed6-43a2-8d86-e53a031a7e8c",

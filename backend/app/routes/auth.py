@@ -36,6 +36,16 @@ def invalidate_coverage_cache(user_id: str = None):
         _COVERAGE_CACHE.clear()
         _PROFILE_OUT_CACHE.clear()
 
+def is_safe_image_url(url: str = None) -> bool:
+    if not url or not isinstance(url, str):
+        return True
+    u = url.strip()
+    if u.startswith("https://") or u.startswith("http://"):
+        return True
+    if u.startswith(("data:image/png;base64,", "data:image/jpeg;base64,", "data:image/webp;base64,", "data:image/jpg;base64,", "data:image/gif;base64,")):
+        return True
+    return False
+
 def format_user_profile(user: dict, cursor=None) -> UserProfile:
     user_id = str(user.get("id", ""))
     now = time.time()
@@ -264,6 +274,34 @@ def format_user_profile(user: dict, cursor=None) -> UserProfile:
 @router.post("/register", response_model=AuthResponse)
 def register(req: UserRegisterRequest):
     username = req.username.strip()
+    pin = req.pin.strip()
+
+    if len(username) < 3 or len(username) > 20:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Username must be between 3 and 20 characters."
+        )
+
+    if not re.match(r"^[a-zA-Z0-9_-]+$", username):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Username can only contain letters, numbers, underscores, and hyphens."
+        )
+
+    if len(pin) < 4 or len(pin) > 32:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="PIN must be between 4 and 32 characters."
+        )
+
+    # Check tombstones: permanently retired accounts cannot be re-registered
+    tombstones = get_cached_tombstones()
+    if username.lower() in tombstones:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Callsign '{username}' was permanently deleted and cannot be re-registered. Please choose another nickname."
+        )
+
     existing = get_user_by_username(username)
     if existing:
         if existing.get("is_banned"):
@@ -271,7 +309,7 @@ def register(req: UserRegisterRequest):
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="The requested application does not exist anymore."
             )
-        if verify_pin(req.pin, existing["pin_hash"]):
+        if verify_pin(pin, existing["pin_hash"]):
             token = create_access_token(existing["id"], existing["username"], existing["pin_hash"], existing.get("token_version", 1))
             return AuthResponse(token=token, user=format_user_profile(existing))
         raise HTTPException(
@@ -280,7 +318,7 @@ def register(req: UserRegisterRequest):
         )
 
     user_id = str(uuid.uuid4())
-    pin_hashed = hash_pin(req.pin)
+    pin_hashed = hash_pin(pin)
     now = datetime.datetime.utcnow().isoformat()
 
     conn = get_connection()
@@ -291,14 +329,14 @@ def register(req: UserRegisterRequest):
             overall_elo, physics_elo, chemistry_elo, math_elo,
             current_division, weekly_rp, total_solved, total_correct,
             gold_medals, silver_medals, bronze_medals,
-            chapter_stats, created_at, last_active
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            chapter_stats, created_at, last_active, token_version
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, (
         user_id, username, pin_hashed, req.avatar_id or "default", "JEE Aspirant",
         1200.0, 1200.0, 1200.0, 1200.0,
         "BRONZE", 0, 0, 0,
         0, 0, 0,
-        "{}", now, now
+        "{}", now, now, 1
     ))
     conn.commit()
     conn.close()
@@ -422,6 +460,8 @@ def update_profile(data: dict, user: dict = Depends(get_current_user)):
         raw_val = data["avatar_image_url"]
         if raw_val is not None and isinstance(raw_val, str) and raw_val.strip():
             clean_val = raw_val.strip()
+            if not is_safe_image_url(clean_val):
+                raise HTTPException(status_code=400, detail="Invalid avatar image format. Allowed formats: PNG, JPEG, WebP, GIF.")
             if len(clean_val) > 120_000:
                 raise HTTPException(status_code=400, detail="Avatar image size is too large (max 100KB).")
             fields.append("avatar_image_url = ?")
@@ -433,6 +473,8 @@ def update_profile(data: dict, user: dict = Depends(get_current_user)):
         raw_val = data["banner_image_url"]
         if raw_val is not None and isinstance(raw_val, str) and raw_val.strip():
             clean_val = raw_val.strip()
+            if not is_safe_image_url(clean_val):
+                raise HTTPException(status_code=400, detail="Invalid banner image format. Allowed formats: PNG, JPEG, WebP, GIF.")
             if len(clean_val) > 300_000:
                 raise HTTPException(status_code=400, detail="Banner image size is too large (max 250KB).")
             fields.append("banner_image_url = ?")
@@ -523,6 +565,12 @@ def update_daily_goal(data: dict, user: dict = Depends(get_current_user)):
     c = conn.cursor()
     c.execute("UPDATE users SET daily_question_goal = ? WHERE id = ?", (goal, user["id"]))
     conn.commit()
+    # Immediate dual-layer vault backup
+    try:
+        from backend.app.database import backup_all_users
+        backup_all_users(conn)
+    except Exception:
+        pass
     conn.close()
 
     invalidate_user_cache(user["id"], user.get("username"))
@@ -551,6 +599,14 @@ def change_username(req: ChangeUsernameRequest, user: dict = Depends(get_current
             detail="Username can only contain letters, numbers, underscores, and hyphens."
         )
 
+    # Check tombstones: permanently retired accounts cannot be claimed
+    tombstones = get_cached_tombstones()
+    if new_username.lower() in tombstones:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Callsign '{new_username}' is permanently retired and unavailable."
+        )
+
     existing = get_user_by_username(new_username)
     if existing and existing["id"] != user["id"]:
         raise HTTPException(
@@ -558,21 +614,37 @@ def change_username(req: ChangeUsernameRequest, user: dict = Depends(get_current
             detail=f"Callsign '{new_username}' is already in use by another aspirant."
         )
 
+    old_username = user.get("username")
+    new_token_version = (user.get("token_version") or 1) + 1
+
     conn = get_connection()
     c = conn.cursor()
-    c.execute("UPDATE users SET username = ? WHERE id = ?", (new_username, user["id"]))
+    c.execute("UPDATE users SET username = ?, token_version = ? WHERE id = ?", (new_username, new_token_version, user["id"]))
+    try:
+        c.execute("UPDATE tournament_participants SET username = ? WHERE user_id = ?", (new_username, user["id"]))
+        c.execute("UPDATE question_reports SET reporter_username = ? WHERE reporter_id = ?", (new_username, user["id"]))
+    except Exception:
+        pass
     conn.commit()
+    # Immediate dual-layer vault backup to guarantee username change persists across restarts
+    try:
+        from backend.app.database import backup_all_users
+        backup_all_users(conn)
+    except Exception:
+        pass
     conn.close()
 
-    invalidate_user_cache(user["id"], user.get("username"))
+    invalidate_user_cache(user["id"], old_username)
+    invalidate_user_cache(user["id"], new_username)
     invalidate_coverage_cache(user["id"])
     try:
         from backend.app.routes.leaderboards import invalidate_leaderboard_caches
-        invalidate_leaderboard_caches(user.get("username"))
+        invalidate_leaderboard_caches(old_username)
+        invalidate_leaderboard_caches(new_username)
     except Exception:
         pass
     updated = get_user_by_id(user["id"])
-    new_token = create_access_token(user["id"], new_username, user.get("pin_hash"), (updated.get("token_version") if updated else 1))
+    new_token = create_access_token(user["id"], new_username, user.get("pin_hash"), new_token_version)
     return {
         "message": f"Callsign updated to {new_username}",
         "token": new_token,
@@ -598,15 +670,23 @@ def change_pin(req: ChangePinRequest, user: dict = Depends(get_current_user)):
         )
 
     pin_hashed = hash_pin(new_pin)
+    new_token_version = (user.get("token_version") or 1) + 1
+
     conn = get_connection()
     c = conn.cursor()
-    c.execute("UPDATE users SET pin_hash = ? WHERE id = ?", (pin_hashed, user["id"]))
+    c.execute("UPDATE users SET pin_hash = ?, token_version = ? WHERE id = ?", (pin_hashed, new_token_version, user["id"]))
     conn.commit()
+    # Immediate dual-layer vault backup to guarantee PIN change persists across restarts
+    try:
+        from backend.app.database import backup_all_users
+        backup_all_users(conn)
+    except Exception:
+        pass
     conn.close()
 
-    invalidate_user_cache(user["id"])
+    invalidate_user_cache(user["id"], user.get("username"))
     updated = get_user_by_id(user["id"])
-    new_token = create_access_token(user["id"], user["username"], pin_hashed, (updated.get("token_version") if updated else 1))
+    new_token = create_access_token(user["id"], user["username"], pin_hashed, new_token_version)
     return {
         "message": "Security PIN successfully updated.",
         "token": new_token,
@@ -641,6 +721,9 @@ def reset_user_data(user: dict = Depends(get_current_user)):
     c.execute("DELETE FROM adaptive_sessions WHERE user_id = ?", (user_id,))
     c.execute("DELETE FROM user_rank_history WHERE user_id = ?", (user_id,))
     c.execute("DELETE FROM room_participants WHERE user_id = ?", (user_id,))
+    c.execute("DELETE FROM user_chapter_elo WHERE user_id = ?", (user_id,))
+    c.execute("DELETE FROM user_fsrs_states WHERE user_id = ?", (user_id,))
+    c.execute("DELETE FROM question_bookmarks WHERE user_id = ?", (user_id,))
     c.execute("""
         UPDATE users SET 
             total_solved = 0,
@@ -654,10 +737,21 @@ def reset_user_data(user: dict = Depends(get_current_user)):
     """, (user_id,))
 
     conn.commit()
+    # Immediate dual-layer vault backup to guarantee reset persists across restarts
+    try:
+        from backend.app.database import backup_all_users
+        backup_all_users(conn)
+    except Exception:
+        pass
     conn.close()
 
-    invalidate_user_cache(user_id)
+    invalidate_user_cache(user_id, user.get("username"))
     invalidate_coverage_cache(user_id)
+    try:
+        from backend.app.routes.leaderboards import invalidate_leaderboard_caches
+        invalidate_leaderboard_caches(user.get("username"))
+    except Exception:
+        pass
     updated = get_user_by_id(user_id)
     return {
         "message": "Practice and drill stats successfully reset to baseline.",
@@ -681,6 +775,15 @@ def delete_account(req: DeleteAccountRequest, user: dict = Depends(get_current_u
         )
 
     user_id = user["id"]
+
+    # Disconnect user presence from active multiplayer rooms if any
+    try:
+        from backend.app.websockets.room_hub import room_hub
+        for r_code in list(room_hub.rooms.keys()):
+            room_hub.disconnect(r_code, user_id)
+    except Exception:
+        pass
+
     conn = get_connection()
     c = conn.cursor()
 

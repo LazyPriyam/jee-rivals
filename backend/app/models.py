@@ -2,7 +2,7 @@ from typing import List, Dict, Any, Optional
 from pydantic import BaseModel, Field
 
 class UserRegisterRequest(BaseModel):
-    username: str = Field(..., min_length=2, max_length=20)
+    username: str = Field(..., min_length=3, max_length=20)
     pin: str = Field(..., min_length=4, max_length=32)
     avatar_id: Optional[str] = "default"
 

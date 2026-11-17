@@ -344,6 +344,9 @@ export default function App() {
   };
 
   const handleLogout = () => {
+    if (user?.id) {
+      clearActiveTestRoom(user.id);
+    }
     purgeUserSessionArtifacts();
     setToken(null);
     setCachedUser(null);
@@ -777,6 +780,12 @@ export default function App() {
               onViewProfile={handleViewProfile}
               onSelectTest={handleSelectTest}
               onUpdateUser={(u) => {
+                if (user && u && user.id !== u.id) {
+                  clearActiveTestRoom(user.id);
+                  setCurrentRoom(null);
+                  setRoomViewMode(null);
+                  setActiveMatch(null);
+                }
                 setUser(u);
                 setCachedUser(u);
                 recordSavedAccount(u);
@@ -793,6 +802,12 @@ export default function App() {
             <SettingsView
               user={user}
               onUpdateUser={(u) => {
+                if (user && u && user.id !== u.id) {
+                  clearActiveTestRoom(user.id);
+                  setCurrentRoom(null);
+                  setRoomViewMode(null);
+                  setActiveMatch(null);
+                }
                 setUser(u);
                 setCachedUser(u);
                 recordSavedAccount(u);

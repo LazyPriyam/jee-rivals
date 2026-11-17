@@ -8,7 +8,8 @@ import {
   getSavedAccounts,
   removeSavedAccount,
   isRememberMeEnabled,
-  setRememberMePreference
+  setRememberMePreference,
+  purgeUserSessionArtifacts
 } from '../utils/api';
 import {
   Flame,
@@ -152,7 +153,15 @@ export default function AuthModal({ isOpen, onClose, onSuccess }) {
     const updated = getSavedAccounts();
     setSavedAccounts(updated);
     if (username.toLowerCase() === accUsername.toLowerCase()) {
-      setUsername(updated[0]?.username || '');
+      const nextUname = updated[0]?.username || '';
+      setUsername(nextUname);
+      try {
+        if (nextUname) {
+          localStorage.setItem('jee_saved_username', nextUname);
+        } else {
+          localStorage.removeItem('jee_saved_username');
+        }
+      } catch (_) {}
     }
   };
 
@@ -167,8 +176,18 @@ export default function AuthModal({ isOpen, onClose, onSuccess }) {
       setError('Please choose a nickname.');
       return;
     }
-    if (cleanPin.length < 4) {
-      setError('PIN must be at least 4 characters.');
+    if (isRegister) {
+      if (cleanUser.length < 3 || cleanUser.length > 20) {
+        setError('Callsign must be between 3 and 20 characters.');
+        return;
+      }
+      if (!/^[a-zA-Z0-9_-]+$/.test(cleanUser)) {
+        setError('Callsign can only contain letters, numbers, underscores, and hyphens.');
+        return;
+      }
+    }
+    if (cleanPin.length < 4 || cleanPin.length > 32) {
+      setError('PIN must be 4 to 32 characters.');
       return;
     }
 
