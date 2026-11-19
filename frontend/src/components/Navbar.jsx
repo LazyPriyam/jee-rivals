@@ -23,7 +23,8 @@ import {
   ShieldAlert,
   Settings,
   Crosshair,
-  Sparkles
+  Sparkles,
+  FileText
 } from 'lucide-react';
 import { sound } from '../utils/sound';
 import { api } from '../utils/api';
@@ -97,6 +98,7 @@ export default function Navbar({
     { id: 'mastery', label: 'Chapter Mastery', icon: Crosshair },
     { id: 'skills', label: 'Skill Tree', icon: Compass },
     { id: 'mocks', label: 'NTA Mocks', icon: BookOpen },
+    { id: 'tests', label: 'Tests', icon: FileText },
     { id: 'history', label: 'Test History', icon: Clock },
     { id: 'generator', label: 'Custom Blueprint', icon: Sliders },
     { id: 'tournaments', label: 'Tournaments', icon: Award },

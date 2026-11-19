@@ -1651,6 +1651,23 @@ export default function TestHistoryView({ user, inspectUsername, onSelectTest, o
                       </span>
                     )}
 
+                    {item.is_scheduled && (
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-indigo-950/80 text-indigo-300 border border-indigo-500/40 flex items-center gap-1">
+                        🎯 Scheduled Exam
+                      </span>
+                    )}
+                    {item.is_scheduled && (
+                      item.is_late ? (
+                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-950/80 text-amber-300 border border-amber-500/40">
+                          ⏱️ Late Attempt
+                        </span>
+                      ) : (
+                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-950/80 text-emerald-300 border border-emerald-500/40">
+                          🏆 Official Rank
+                        </span>
+                      )
+                    )}
+
                     <span className="text-xs text-slate-400">• {formattedDate}</span>
                     <span className="text-xs text-slate-400">• Room #{item.code}</span>
                   </div>

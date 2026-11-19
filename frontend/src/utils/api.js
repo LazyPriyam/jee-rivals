@@ -789,5 +789,20 @@ export const api = {
         method: 'POST',
       }),
   },
+  scheduledTests: {
+    getCatalog: () => request('/api/scheduled-tests/catalog'),
+    getAspirants: () => request('/api/scheduled-tests/aspirants'),
+    create: (payload) =>
+      request('/api/scheduled-tests/create', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      }),
+    start: (testId) =>
+      request(`/api/scheduled-tests/${testId}/start`, {
+        method: 'POST',
+      }),
+    getLeaderboard: (testId) =>
+      request(`/api/scheduled-tests/${testId}/leaderboard`),
+  },
 };
 

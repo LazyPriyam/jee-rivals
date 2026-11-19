@@ -843,6 +843,52 @@ def migration_014_account_and_ip_bans(conn: sqlite3.Connection):
         c.execute("ALTER TABLE users ADD COLUMN token_version INTEGER DEFAULT 1")
 
 
+def migration_015_scheduled_tests(conn: sqlite3.Connection):
+    """
+    Creates scheduled_tests table and safely extends rooms and room_participants.
+    Supports pre-generated question papers, cohort assignments, start time unlocks,
+    deadlines, and two-tier on-time vs late standings.
+    """
+    c = conn.cursor()
+
+    c.execute("""
+    CREATE TABLE IF NOT EXISTS scheduled_tests (
+        id TEXT PRIMARY KEY,
+        room_id TEXT NOT NULL,
+        title TEXT NOT NULL,
+        description TEXT,
+        exam_type TEXT NOT NULL DEFAULT 'MAIN',
+        difficulty TEXT DEFAULT 'BALANCED',
+        duration_minutes INTEGER NOT NULL DEFAULT 60,
+        total_questions INTEGER NOT NULL,
+        total_marks INTEGER NOT NULL,
+        question_ids TEXT NOT NULL,
+        subjects TEXT,
+        chapters TEXT,
+        scheduled_start_time TEXT NOT NULL,
+        deadline_time TEXT NOT NULL,
+        assigned_user_ids TEXT NOT NULL,
+        created_by_user_id TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'ACTIVE',
+        created_at TEXT NOT NULL
+    );
+    """)
+
+    # Safe column extension for room_participants
+    c.execute("PRAGMA table_info(room_participants)")
+    existing_participant_cols = {row[1] for row in c.fetchall()}
+    if "is_late" not in existing_participant_cols:
+        c.execute("ALTER TABLE room_participants ADD COLUMN is_late INTEGER DEFAULT 0")
+
+    # Safe column extension for rooms
+    c.execute("PRAGMA table_info(rooms)")
+    existing_room_cols = {row[1] for row in c.fetchall()}
+    if "is_scheduled" not in existing_room_cols:
+        c.execute("ALTER TABLE rooms ADD COLUMN is_scheduled INTEGER DEFAULT 0")
+    if "scheduled_test_id" not in existing_room_cols:
+        c.execute("ALTER TABLE rooms ADD COLUMN scheduled_test_id TEXT")
+
+
 # Master migration registry (ordered sequentially)
 MIGRATIONS: List[Dict[str, Any]] = [
     {
@@ -914,6 +960,11 @@ MIGRATIONS: List[Dict[str, Any]] = [
         "version": 14,
         "name": "account_and_ip_bans",
         "func": migration_014_account_and_ip_bans,
+    },
+    {
+        "version": 15,
+        "name": "scheduled_tests",
+        "func": migration_015_scheduled_tests,
     },
 ]
 

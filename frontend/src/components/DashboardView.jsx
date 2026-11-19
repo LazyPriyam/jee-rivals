@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Swords, Zap, Trophy, Shield, Play, ArrowRight, Sparkles, BookOpen, Clock, AlertCircle, Users, Globe, Lock, Flame, Sliders, UserPlus, Brain, CheckCircle2 } from 'lucide-react';
+import { Swords, Zap, Trophy, Shield, Play, ArrowRight, Sparkles, BookOpen, Clock, AlertCircle, Users, Globe, Lock, Flame, Sliders, UserPlus, Brain, CheckCircle2, FileText } from 'lucide-react';
 import { api } from '../utils/api';
 import { sound } from '../utils/sound';
 import OngoingMatchCard from './OngoingMatchCard';
@@ -22,6 +22,24 @@ export default function DashboardView({
   onUpdateUser,
 }) {
   const [joinCode, setJoinCode] = useState('');
+  const [scheduledAlert, setScheduledAlert] = useState(null);
+
+  useEffect(() => {
+    if (!user) return;
+    api.scheduledTests.getCatalog()
+      .then((cat) => {
+        if (cat?.pending && cat.pending.length > 0) {
+          setScheduledAlert({ type: 'PENDING', title: cat.pending[0].title, id: cat.pending[0].id });
+        } else if (cat?.active && cat.active.length > 0) {
+          setScheduledAlert({ type: 'ACTIVE', title: cat.active[0].title, id: cat.active[0].id });
+        } else if (cat?.upcoming && cat.upcoming.length > 0) {
+          setScheduledAlert({ type: 'UPCOMING', title: cat.upcoming[0].title, id: cat.upcoming[0].id });
+        } else {
+          setScheduledAlert(null);
+        }
+      })
+      .catch(() => {});
+  }, [user?.id]);
   const [passcode, setPasscode] = useState('');
   const [joinError, setJoinError] = useState('');
   const [joining, setJoining] = useState(false);
@@ -131,6 +149,30 @@ export default function DashboardView({
           onForfeit={handleForfeit}
         />
       )}
+      {/* Scheduled Test Notification Banner */}
+      {scheduledAlert && (
+        <div
+          onClick={() => onNavigateTab && onNavigateTab('tests')}
+          className="mb-6 p-4 rounded-2xl bg-gradient-to-r from-indigo-950/90 via-slate-900 to-indigo-950/90 border border-indigo-500/50 shadow-xl cursor-pointer hover:border-indigo-400 transition flex items-center justify-between gap-4"
+        >
+          <div className="flex items-center gap-3">
+            <span className="p-2.5 rounded-xl bg-indigo-500/20 text-indigo-400 border border-indigo-500/30 animate-pulse">
+              <FileText className="w-5 h-5" />
+            </span>
+            <div>
+              <div className="text-xs font-bold text-indigo-300 uppercase tracking-wider">
+                {scheduledAlert.type === 'PENDING' ? '⚠️ Assigned Examination Ready' : scheduledAlert.type === 'ACTIVE' ? '⚡ Scheduled Contest Live Now' : '⏳ Upcoming Exam Scheduled'}
+              </div>
+              <div className="text-sm font-black text-white">{scheduledAlert.title}</div>
+            </div>
+          </div>
+          <button className="px-3.5 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold flex items-center gap-1.5 shadow-md shrink-0">
+            <span>View Tests</span>
+            <ArrowRight className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
+
       {/* Hero Battle Section - Captivating Orange & White on Soft Slate Grey */}
       <div className="relative bg-gradient-to-br from-[#2b3345] via-[#242b3b] to-[#1e2330] border border-orange-500/30 rounded-3xl p-6 sm:p-12 shadow-2xl glow-orange-subtle overflow-hidden mb-10">
         <div className="absolute top-0 right-0 w-96 h-96 bg-orange-500/10 rounded-full blur-3xl -z-10"></div>

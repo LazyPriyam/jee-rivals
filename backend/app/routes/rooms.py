@@ -238,9 +238,10 @@ def get_user_test_history(user: dict = Depends(get_current_user), cursor=None, l
         SELECT r.id, r.code, r.mode, r.preset_name, r.subject, r.subjects,
                r.chapter, r.chapters, r.target_exam, r.total_questions,
                r.total_duration_minutes, r.status, r.created_at, r.completed_at,
-               r.difficulty_tier, r.question_ids,
-               p.score, p.marks, p.answers, p.is_finished, p.finished_at,
-               (SELECT COUNT(*) FROM room_participants WHERE room_id = r.id) as participant_count
+               r.difficulty_tier, r.question_ids, r.is_scheduled, r.scheduled_test_id,
+               p.score, p.marks, p.answers, p.is_finished, p.finished_at, p.is_late,
+               (SELECT COUNT(*) FROM room_participants WHERE room_id = r.id) as participant_count,
+               (SELECT title FROM scheduled_tests WHERE id = r.scheduled_test_id OR room_id = r.id LIMIT 1) as scheduled_title
         FROM rooms r
         JOIN room_participants p ON r.id = p.room_id
         WHERE p.user_id = ?
@@ -417,8 +418,11 @@ def get_user_test_history(user: dict = Depends(get_current_user), cursor=None, l
         history.append({
             "room_id": r["id"],
             "code": r["code"],
-            "mode": r["mode"],
-            "preset_name": r["preset_name"] or f"Test #{r['code']}",
+            "mode": "SCHEDULED_TEST" if (r.get("is_scheduled") or r.get("scheduled_title")) else r["mode"],
+            "preset_name": r.get("scheduled_title") or r["preset_name"] or f"Test #{r['code']}",
+            "is_scheduled": bool(r.get("is_scheduled") or r.get("scheduled_title")),
+            "is_late": bool(r.get("is_late")),
+            "scheduled_test_id": r.get("scheduled_test_id"),
             "subject": r["subject"],
             "target_exam": r.get("target_exam", "MIXED"),
             "total_questions": total_questions,
@@ -1484,11 +1488,30 @@ async def submit_bulk_mock(
         answers_dict["__meta_timeline"] = req.timeline
 
 
+    is_late_val = 0
+    if room.get("is_scheduled") or room.get("scheduled_test_id"):
+        st_id = room.get("scheduled_test_id")
+        c.execute("SELECT deadline_time FROM scheduled_tests WHERE id = ? OR room_id = ?", (st_id, room_id))
+        st_dl = c.fetchone()
+        if st_dl:
+            dl_str = st_dl[0] if isinstance(st_dl, (tuple, list)) else st_dl["deadline_time"]
+            if dl_str:
+                try:
+                    clean_dl = str(dl_str).strip().replace("Z", "+00:00")
+                    dl_dt = datetime.datetime.fromisoformat(clean_dl)
+                    if dl_dt.tzinfo is None:
+                        dl_dt = dl_dt.replace(tzinfo=datetime.timezone.utc)
+                    now_utc = datetime.datetime.now(datetime.timezone.utc)
+                    if now_utc > dl_dt:
+                        is_late_val = 1
+                except Exception:
+                    pass
+
     c.execute("""
         UPDATE room_participants
-        SET score = ?, marks = ?, current_question_index = ?, answers = ?, is_finished = 1, finished_at = ?
+        SET score = ?, marks = ?, current_question_index = ?, answers = ?, is_finished = 1, finished_at = ?, is_late = ?
         WHERE room_id = ? AND user_id = ?
-    """, (total_score, total_marks, attempted_count, json.dumps(answers_dict), now, room_id, user["id"]))
+    """, (total_score, total_marks, attempted_count, json.dumps(answers_dict), now, is_late_val, room_id, user["id"]))
 
     # Update user stats
     c.execute("""

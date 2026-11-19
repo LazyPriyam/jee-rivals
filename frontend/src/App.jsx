@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import Navbar from './components/Navbar';
 import DashboardView from './components/DashboardView';
 import MocksCenterView from './components/MocksCenterView';
+import TestsView from './components/TestsView';
 import CustomGeneratorView from './components/CustomGeneratorView';
 import InviteFriendsView from './components/InviteFriendsView';
 import RoomLobbyView from './components/RoomLobbyView';
@@ -699,6 +700,22 @@ export default function App() {
               onJoinRoomCode={handleJoinRoomCode}
               onOpenAuth={() => setAuthModalOpen(true)}
               isActive={activeTab === 'mocks'}
+            />
+          </div>
+        )}
+
+        {/* Tab: Scheduled Tests & Contests */}
+        {visitedTabs.tests && (
+          <div className={activeTab === 'tests' ? 'block' : 'hidden'}>
+            <TestsView
+              user={user}
+              onStartTest={handleJoinRoomCode}
+              onSelectTest={(code) => {
+                setInspectTestCode(code);
+                setActiveTab('history');
+              }}
+              onOpenAuth={() => setAuthModalOpen(true)}
+              isActive={activeTab === 'tests'}
             />
           </div>
         )}
