@@ -136,8 +136,8 @@ export default function TestsView({ user, onStartTest, onSelectTest, onOpenAuth 
     }
     try {
       const res = await api.scheduledTests.start(test.id);
-      if (res && res.room_code && onStartTest) {
-        onStartTest(res.room_code);
+      if (res && onStartTest) {
+        onStartTest(res.room || res.room_code);
       }
     } catch (err) {
       alert(err.message || 'Failed to start scheduled test.');

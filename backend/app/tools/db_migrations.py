@@ -889,6 +889,19 @@ def migration_015_scheduled_tests(conn: sqlite3.Connection):
         c.execute("ALTER TABLE rooms ADD COLUMN scheduled_test_id TEXT")
 
 
+def migration_016_fix_scheduled_test_room_status(conn: sqlite3.Connection):
+    """
+    Ensures rooms linked to scheduled tests have status = 'IN_PROGRESS'
+    so they can be joined and taken without encountering 'Match has already started or completed'.
+    """
+    c = conn.cursor()
+    c.execute("""
+        UPDATE rooms
+        SET status = 'IN_PROGRESS'
+        WHERE is_scheduled = 1 AND status = 'ACTIVE'
+    """)
+
+
 # Master migration registry (ordered sequentially)
 MIGRATIONS: List[Dict[str, Any]] = [
     {
@@ -965,6 +978,11 @@ MIGRATIONS: List[Dict[str, Any]] = [
         "version": 15,
         "name": "scheduled_tests",
         "func": migration_015_scheduled_tests,
+    },
+    {
+        "version": 16,
+        "name": "fix_scheduled_test_room_status",
+        "func": migration_016_fix_scheduled_test_room_status,
     },
 ]
 

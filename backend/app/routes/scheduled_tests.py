@@ -18,7 +18,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from backend.app.auth import get_current_user, get_optional_user
 from backend.app.database import get_connection
-from backend.app.routes.rooms import generate_room_code
+from backend.app.routes.rooms import generate_room_code, get_room_state
 from backend.app.tools.mock_selector import select_mock_and_room_questions
 
 logger = logging.getLogger("jee_rivals.scheduled_tests")
@@ -149,20 +149,20 @@ def create_scheduled_test(
             question_ids, total_questions, total_duration_minutes, timing_type,
             status, created_at, subjects, chapters, target_exam,
             is_public, passcode, speed_bonus_enabled, negative_marking, base_correct_score,
-            is_scheduled, scheduled_test_id
+            is_scheduled, scheduled_test_id, started_at
         ) VALUES (
             ?, ?, ?, 'MOCK_TEST', ?, ?, ?, ?,
             ?, ?, ?, 'TOTAL',
-            'ACTIVE', ?, ?, ?, ?,
+            'IN_PROGRESS', ?, ?, ?, ?,
             0, NULL, 0, ?, ?,
-            1, ?
+            1, ?, ?
         )
     """, (
         room_id, room_code, user["id"], req.title,
         ", ".join(req.subjects), ", ".join(req.chapters or []), req.difficulty,
         json.dumps(question_ids), actual_q_count, req.duration_minutes,
         now_iso, json.dumps(req.subjects), json.dumps(req.chapters or []), req.exam_type,
-        neg_marks, base_marks, test_id
+        neg_marks, base_marks, test_id, now_iso
     ))
 
     # Insert into scheduled_tests
@@ -444,11 +444,19 @@ def start_scheduled_test(
     room_id = test["room_id"]
     room_code = test["room_code"]
 
+    now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+
+    # Ensure associated room status is IN_PROGRESS
+    c.execute("""
+        UPDATE rooms
+        SET status = 'IN_PROGRESS', started_at = COALESCE(started_at, ?)
+        WHERE id = ? AND status != 'IN_PROGRESS'
+    """, (now_iso, room_id))
+
     # Check if participant row exists, if not, create it
     c.execute("SELECT * FROM room_participants WHERE room_id = ? AND user_id = ?", (room_id, user["id"]))
     p_row = c.fetchone()
 
-    now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
     if not p_row:
         c.execute("""
             INSERT INTO room_participants (
@@ -460,14 +468,28 @@ def start_scheduled_test(
             )
         """, (room_id, user["id"], now_iso))
         conn.commit()
+    else:
+        # If participant exists and question_started_at is not set, set it now
+        p_dict = dict(p_row) if hasattr(p_row, "keys") else {}
+        if not p_dict.get("question_started_at"):
+            c.execute("""
+                UPDATE room_participants
+                SET question_started_at = ?
+                WHERE room_id = ? AND user_id = ? AND question_started_at IS NULL
+            """, (now_iso, room_id, user["id"]))
+            conn.commit()
 
     conn.close()
+
+    # Retrieve full room state to launch directly into MockTestView
+    room_state = get_room_state(room_code, user)
 
     return {
         "status": "ok",
         "room_code": room_code,
         "test_id": test_id,
-        "title": test["title"]
+        "title": test["title"],
+        "room": room_state.dict() if hasattr(room_state, "dict") else room_state
     }
 
 

@@ -642,14 +642,18 @@ async def join_room(req: RoomJoinRequest, user: dict = Depends(get_current_user)
     existing = c.fetchone()
 
     if not existing:
-        if room["status"] not in ("LOBBY", "IN_PROGRESS"):
+        if not room.get("is_scheduled") and room["status"] not in ("LOBBY", "IN_PROGRESS"):
             conn.close()
             raise HTTPException(status_code=400, detail="This match has already completed.")
 
+        now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
         c.execute("""
-            INSERT INTO room_participants (room_id, user_id, current_question_index, score, marks, answers, is_finished)
-            VALUES (?, ?, 0, 0, 0.0, '{}', 0)
-        """, (room_id, user["id"]))
+            INSERT INTO room_participants (
+                room_id, user_id, current_question_index, score, marks, answers,
+                is_finished, question_started_at, is_late
+            )
+            VALUES (?, ?, 0, 0, 0.0, '{}', 0, ?, 0)
+        """, (room_id, user["id"], now_iso))
         conn.commit()
 
     conn.close()
@@ -878,16 +882,38 @@ def get_room_state(code: str, user: dict) -> RoomState:
     time_rem_sec = None
     started_at_str = room.get("started_at")
     now_iso = datetime.datetime.utcnow().isoformat()
-    if in_progress and started_at_str:
-        try:
-            started_dt = datetime.datetime.fromisoformat(started_at_str.replace("Z", "+00:00")).replace(tzinfo=None)
-            now_dt = datetime.datetime.utcnow()
-            elapsed_total = int((now_dt - started_dt).total_seconds())
-
-            if is_mock:
-                total_sec = (room.get("total_duration_minutes") or 60) * 60
-                time_rem_sec = max(0, total_sec - elapsed_total)
-            else:
+    if in_progress:
+        if is_mock:
+            total_sec = (room.get("total_duration_minutes") or 60) * 60
+            if room.get("is_scheduled"):
+                my_p = next((p for p in part_rows if p["user_id"] == user["id"]), None)
+                p_start = my_p.get("question_started_at") if my_p else None
+                if p_start:
+                    try:
+                        p_start_dt = datetime.datetime.fromisoformat(p_start.replace("Z", "+00:00")).replace(tzinfo=None)
+                        now_dt = datetime.datetime.utcnow()
+                        p_elapsed = int((now_dt - p_start_dt).total_seconds())
+                        time_rem_sec = max(0, total_sec - p_elapsed)
+                        started_at_str = p_start
+                    except Exception:
+                        time_rem_sec = total_sec
+                        started_at_str = p_start or now_iso
+                else:
+                    time_rem_sec = total_sec
+                    started_at_str = now_iso
+            elif started_at_str:
+                try:
+                    started_dt = datetime.datetime.fromisoformat(started_at_str.replace("Z", "+00:00")).replace(tzinfo=None)
+                    now_dt = datetime.datetime.utcnow()
+                    elapsed_total = int((now_dt - started_dt).total_seconds())
+                    time_rem_sec = max(0, total_sec - elapsed_total)
+                except Exception:
+                    time_rem_sec = None
+        elif started_at_str:
+            try:
+                started_dt = datetime.datetime.fromisoformat(started_at_str.replace("Z", "+00:00")).replace(tzinfo=None)
+                now_dt = datetime.datetime.utcnow()
+                elapsed_total = int((now_dt - started_dt).total_seconds())
                 # Speed Duel: compute remaining time on current question for this player
                 my_p = next((p for p in part_rows if p["user_id"] == user["id"]), None)
                 if my_p and not my_p.get("is_finished"):
@@ -899,8 +925,8 @@ def get_room_state(code: str, user: dict) -> RoomState:
                 else:
                     total_duel_sec = room["total_questions"] * (room.get("time_per_question") or 90)
                     time_rem_sec = max(0, total_duel_sec - elapsed_total)
-        except Exception:
-            time_rem_sec = None
+            except Exception:
+                time_rem_sec = None
 
     return RoomState(
         id=room["id"],
@@ -1291,6 +1317,22 @@ async def start_room(code: str, user: dict = Depends(get_current_user)):
                 raise HTTPException(status_code=403, detail="Only the room host can start the battle.")
 
     if room["status"] != "LOBBY":
+        # If this is a scheduled test room or mock test already in progress/active, smoothly ensure participant and return state
+        if room.get("is_scheduled") or room.get("mode") == "MOCK_TEST":
+            now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+            c.execute("SELECT 1 FROM room_participants WHERE room_id = ? AND user_id = ?", (room_id, user["id"]))
+            if not c.fetchone():
+                c.execute("""
+                    INSERT INTO room_participants (
+                        room_id, user_id, current_question_index, score, marks, answers,
+                        is_finished, question_started_at, is_late
+                    )
+                    VALUES (?, ?, 0, 0, 0.0, '{}', 0, ?, 0)
+                """, (room_id, user["id"], now_iso))
+                conn.commit()
+            conn.close()
+            return get_room_state(code, user)
+
         conn.close()
         raise HTTPException(status_code=400, detail="Match has already started or completed.")
 
@@ -1536,13 +1578,14 @@ async def submit_bulk_mock(
             pass
 
     # Check if everyone finished
-    c.execute("SELECT COUNT(*) as unfinished FROM room_participants WHERE room_id = ? AND is_finished = 0", (room_id,))
-    unfinished_count = c.fetchone()["unfinished"]
-
     match_completed = False
-    if unfinished_count == 0:
-        c.execute("UPDATE rooms SET status = 'COMPLETED', completed_at = ? WHERE id = ?", (now, room_id))
-        match_completed = True
+    if not room.get("is_scheduled"):
+        c.execute("SELECT COUNT(*) as unfinished FROM room_participants WHERE room_id = ? AND is_finished = 0", (room_id,))
+        unfinished_count = c.fetchone()["unfinished"]
+
+        if unfinished_count == 0:
+            c.execute("UPDATE rooms SET status = 'COMPLETED', completed_at = ? WHERE id = ?", (now, room_id))
+            match_completed = True
 
         c.execute("""
             SELECT p.user_id, p.score, u.overall_elo, u.physics_elo, u.chemistry_elo, u.math_elo, u.gold_medals
@@ -1731,7 +1774,7 @@ async def submit_bulk_mock(
     return {
         "score": total_score,
         "marks": total_marks,
-        "match_completed": match_completed,
+        "match_completed": True if room.get("is_scheduled") else match_completed,
         "calibration_factor": calib_factor,
         "calibration_reason": calib_reason,
         "is_full_syllabus": is_full_syllabus

@@ -392,10 +392,24 @@ export default function App() {
 
     setCurrentRoom(room);
     setActiveTab('arena');
+
+    const myPart = room.participants?.find((p) => String(p.user_id) === String(user?.id) || p.username === user?.username);
+
+    // Scheduled test: bypass lobby directly to CBT mock examination or results
+    if (room.is_scheduled || room.scheduled_test_id) {
+      setActiveMatch(room);
+      setActiveTestRoom(user?.id, room.code);
+      if (myPart?.is_finished) {
+        setRoomViewMode('results');
+      } else {
+        setRoomViewMode('battle');
+      }
+      return;
+    }
+
     if (room.status === 'IN_PROGRESS') {
       setActiveMatch(room);
       setActiveTestRoom(user?.id, room.code);
-      const myPart = room.participants?.find((p) => String(p.user_id) === String(user?.id) || p.username === user?.username);
       if (myPart?.is_finished) {
         setRoomViewMode('waiting');
       } else {
@@ -540,7 +554,7 @@ export default function App() {
                 user={user}
                 onMatchComplete={async (bulkRes) => {
                   const isSolo = !currentRoom.participants || currentRoom.participants.length <= 1;
-                  if (isSolo || bulkRes?.match_completed) {
+                  if (isSolo || bulkRes?.match_completed || currentRoom.is_scheduled || currentRoom.scheduled_test_id) {
                     setRoomViewMode('results');
                     refreshUser();
                     return;
