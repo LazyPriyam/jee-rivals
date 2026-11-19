@@ -267,7 +267,20 @@ def get_scheduled_tests_catalog(user: Optional[dict] = Depends(get_optional_user
 
     # Fetch attempts made by the current user across all rooms
     user_attempts_map = {}
+    deleted_test_ids = set()
     if user_id:
+        try:
+            c.execute("SELECT test_id, room_id FROM user_deleted_tests WHERE user_id = ?", (user_id,))
+            for dr in c.fetchall():
+                t_id = dr["test_id"] if hasattr(dr, "__getitem__") else dr[0]
+                r_id = dr["room_id"] if hasattr(dr, "__getitem__") else dr[1]
+                if t_id:
+                    deleted_test_ids.add(str(t_id))
+                if r_id:
+                    deleted_test_ids.add(str(r_id))
+        except Exception:
+            pass
+
         c.execute("""
             SELECT rp.room_id, rp.marks, rp.score, rp.is_finished, rp.finished_at, rp.is_late,
                    rp.current_question_index, rp.answers
@@ -311,6 +324,10 @@ def get_scheduled_tests_catalog(user: Optional[dict] = Depends(get_optional_user
             "deadline_time": r[13], "assigned_user_ids": r[14], "created_by_user_id": r[15],
             "status": r[16], "created_at": r[17], "room_code": r[18]
         }
+
+        # If deleted/hidden for this user account, do not include in tests catalog
+        if str(t["id"]) in deleted_test_ids or str(t["room_id"]) in deleted_test_ids:
+            continue
 
         # Parse assigned users
         try:
@@ -627,3 +644,70 @@ def get_scheduled_test_leaderboard(
         "total_official": len(official_list),
         "total_late": len(late_list)
     }
+
+
+@router.delete("/{test_id}")
+def delete_or_unschedule_test(
+    test_id: str,
+    user: dict = Depends(get_current_user)
+):
+    """
+    1. If the calling user is the CREATOR:
+       Allows unscheduling and permanently deleting the test before release (or if unattempted).
+       Marks scheduled_test as DELETED, marks room as DELETED, wipes unreleased room.
+    2. If the calling user is an ASSIGNED ASPIRANT:
+       Removes the test for this account (hiding it from their tests catalog and wiping any participant history).
+    """
+    conn = get_connection()
+    c = conn.cursor()
+
+    c.execute("SELECT * FROM scheduled_tests WHERE id = ?", (test_id,))
+    row = c.fetchone()
+    if not row:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Scheduled test not found.")
+
+    test = dict(row) if hasattr(row, "keys") else {
+        "id": row[0], "room_id": row[1], "title": row[2], "scheduled_start_time": row[12],
+        "created_by_user_id": row[15], "status": row[16]
+    }
+    room_id = test["room_id"]
+    user_id = str(user["id"])
+    now_dt = datetime.datetime.now(datetime.timezone.utc)
+    is_creator = str(test.get("created_by_user_id")) == user_id
+    now_iso = now_dt.isoformat()
+
+    if is_creator:
+        # Creator unscheduling / deleting before it releases or managing their test
+        c.execute("UPDATE scheduled_tests SET status = 'DELETED' WHERE id = ?", (test_id,))
+        c.execute("UPDATE rooms SET status = 'DELETED' WHERE id = ?", (room_id,))
+        c.execute("DELETE FROM room_participants WHERE room_id = ? AND is_finished = 0", (room_id,))
+        try:
+            c.execute("DELETE FROM user_notifications WHERE link LIKE ?", (f"%{test_id}%",))
+        except Exception:
+            pass
+        c.execute("""
+            INSERT OR REPLACE INTO user_deleted_tests (user_id, test_id, room_id, deleted_at)
+            VALUES (?, ?, ?, ?)
+        """, (user_id, test_id, room_id, now_iso))
+        conn.commit()
+        conn.close()
+        return {
+            "status": "success",
+            "action": "unscheduled",
+            "message": f"Scheduled test '{test['title']}' has been unscheduled and deleted."
+        }
+    else:
+        # Assigned aspirant removing the test for their account
+        c.execute("""
+            INSERT OR REPLACE INTO user_deleted_tests (user_id, test_id, room_id, deleted_at)
+            VALUES (?, ?, ?, ?)
+        """, (user_id, test_id, room_id, now_iso))
+        c.execute("DELETE FROM room_participants WHERE room_id = ? AND user_id = ?", (room_id, user_id))
+        conn.commit()
+        conn.close()
+        return {
+            "status": "success",
+            "action": "removed_for_account",
+            "message": f"Test '{test['title']}' has been removed from your tests and history."
+        }

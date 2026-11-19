@@ -195,6 +195,7 @@ export default function TestHistoryView({ user, inspectUsername, onSelectTest, o
         sessionStorage.removeItem(`jee_cached_results_${testItem.code.toUpperCase()}`);
       } catch (_) {}
       window.dispatchEvent(new CustomEvent('jee_user_updated', { detail: user }));
+      window.dispatchEvent(new CustomEvent('jee_test_deleted', { detail: { code: testItem.code, room_id: testItem.room_id } }));
       setDeleteConfirmModal(null);
     } catch (err) {
       alert(err.message || 'Failed to remove test from records.');

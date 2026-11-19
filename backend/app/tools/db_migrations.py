@@ -902,6 +902,29 @@ def migration_016_fix_scheduled_test_room_status(conn: sqlite3.Connection):
     """)
 
 
+def migration_017_user_deleted_tests(conn: sqlite3.Connection):
+    """
+    Creates user_deleted_tests table to track tests hidden or deleted from test history
+    or tests catalog for specific accounts without altering other users' records.
+    """
+    c = conn.cursor()
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS user_deleted_tests (
+            user_id TEXT NOT NULL,
+            test_id TEXT NOT NULL,
+            room_id TEXT,
+            deleted_at TEXT NOT NULL,
+            PRIMARY KEY (user_id, test_id)
+        )
+    """)
+    c.execute("""
+        CREATE INDEX IF NOT EXISTS idx_user_deleted_tests_user_id ON user_deleted_tests(user_id)
+    """)
+    c.execute("""
+        CREATE INDEX IF NOT EXISTS idx_user_deleted_tests_room_id ON user_deleted_tests(room_id)
+    """)
+
+
 # Master migration registry (ordered sequentially)
 MIGRATIONS: List[Dict[str, Any]] = [
     {
@@ -983,6 +1006,11 @@ MIGRATIONS: List[Dict[str, Any]] = [
         "version": 16,
         "name": "fix_scheduled_test_room_status",
         "func": migration_016_fix_scheduled_test_room_status,
+    },
+    {
+        "version": 17,
+        "name": "user_deleted_tests",
+        "func": migration_017_user_deleted_tests,
     },
 ]
 

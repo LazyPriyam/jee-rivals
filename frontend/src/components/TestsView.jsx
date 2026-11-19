@@ -27,7 +27,8 @@ import {
   Search,
   ExternalLink,
   Hourglass,
-  BookOpen
+  BookOpen,
+  Trash2
 } from 'lucide-react';
 
 const CANONICAL_SUBJECTS = ['Physics', 'Chemistry', 'Mathematics'];
@@ -38,6 +39,10 @@ export default function TestsView({ user, onStartTest, onSelectTest, onOpenAuth 
   const [error, setError] = useState('');
   const [activeTab, setActiveTab] = useState('ALL'); // 'ALL', 'ACTIVE', 'UPCOMING', 'PENDING', 'COMPLETED'
   const [searchQuery, setSearchQuery] = useState('');
+
+  // Unschedule / Delete Confirmation Modal State
+  const [deleteConfirmTest, setDeleteConfirmTest] = useState(null);
+  const [deletingTestId, setDeletingTestId] = useState(null);
 
   // Two-Tier Leaderboard Modal State
   const [leaderboardModalTestId, setLeaderboardModalTestId] = useState(null);
@@ -110,7 +115,60 @@ export default function TestsView({ user, onStartTest, onSelectTest, onOpenAuth 
 
   useEffect(() => {
     fetchCatalog();
+    const handleRefresh = () => fetchCatalog();
+    window.addEventListener('jee_user_updated', handleRefresh);
+    window.addEventListener('jee_test_deleted', handleRefresh);
+    return () => {
+      window.removeEventListener('jee_user_updated', handleRefresh);
+      window.removeEventListener('jee_test_deleted', handleRefresh);
+    };
   }, [user?.id]);
+
+  const handleDeleteOrUnscheduleTest = async (test) => {
+    if (!test?.id) return;
+    setDeletingTestId(test.id);
+    try {
+      sound?.click?.();
+      await api.scheduledTests.delete(test.id);
+      // Remove from catalog immediately
+      setCatalog((prev) => {
+        const filterFn = (t) => t.id !== test.id && t.room_code !== test.room_code;
+        return {
+          all: (prev.all || []).filter(filterFn),
+          upcoming: (prev.upcoming || []).filter(filterFn),
+          active: (prev.active || []).filter(filterFn),
+          pending: (prev.pending || []).filter(filterFn),
+          completed: (prev.completed || []).filter(filterFn),
+        };
+      });
+      // Invalidate test history cache in sessionStorage and dispatch event
+      const targetUser = user?.username || 'me';
+      const cacheKeys = [
+        `jee_cached_history_${targetUser}`,
+        'jee_cached_history_me',
+        ...(user?.username ? [`jee_cached_history_${user.username}`] : [])
+      ];
+      try {
+        for (const key of cacheKeys) {
+          const stored = sessionStorage.getItem(key);
+          if (stored) {
+            const list = JSON.parse(stored).filter((h) => h.code !== test.room_code && h.room_id !== test.room_id);
+            sessionStorage.setItem(key, JSON.stringify(list));
+          }
+        }
+        if (test.room_code) {
+          sessionStorage.removeItem(`jee_cached_results_${test.room_code.toUpperCase()}`);
+        }
+      } catch (_) {}
+      window.dispatchEvent(new CustomEvent('jee_user_updated', { detail: user }));
+      window.dispatchEvent(new CustomEvent('jee_test_deleted', { detail: { code: test.room_code, room_id: test.room_id } }));
+      setDeleteConfirmTest(null);
+    } catch (err) {
+      alert(err.message || 'Failed to remove test.');
+    } finally {
+      setDeletingTestId(null);
+    }
+  };
 
   const openLeaderboard = (testId) => {
     try { sound?.click?.(); } catch (_) {}
@@ -451,6 +509,7 @@ export default function TestsView({ user, onStartTest, onSelectTest, onOpenAuth 
             const isUpcoming = test.is_upcoming;
             const isLateAttempt = test.is_past_deadline && !isCompleted;
             const isActiveWindow = test.is_active_window && !isCompleted;
+            const isCreator = user && String(test.created_by_user_id) === String(user.id);
 
             return (
               <div
@@ -588,13 +647,35 @@ export default function TestsView({ user, onStartTest, onSelectTest, onOpenAuth 
 
                 {/* Bottom Actions */}
                 <div className="pt-3 border-t border-slate-800/80 flex items-center justify-between gap-2">
-                  <button
-                    onClick={() => openLeaderboard(test.id)}
-                    className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold transition flex items-center gap-1.5 cursor-pointer"
-                  >
-                    <Trophy className="w-3.5 h-3.5 text-amber-400" />
-                    Standings ({test.participants_count})
-                  </button>
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      onClick={() => openLeaderboard(test.id)}
+                      className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold transition flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <Trophy className="w-3.5 h-3.5 text-amber-400" />
+                      Standings ({test.participants_count})
+                    </button>
+
+                    {/* Unschedule (Creator before release) or Delete / Remove (Account) */}
+                    {isCreator && isUpcoming ? (
+                      <button
+                        onClick={() => setDeleteConfirmTest(test)}
+                        title="Unschedule and permanently cancel this test before it releases"
+                        className="px-2.5 py-1.5 rounded-xl bg-rose-950/40 hover:bg-rose-900/60 text-rose-300 hover:text-rose-200 border border-rose-500/30 text-xs font-bold transition flex items-center gap-1.5 cursor-pointer"
+                      >
+                        <Trash2 className="w-3.5 h-3.5 text-rose-400" />
+                        <span className="hidden sm:inline">Unschedule</span>
+                      </button>
+                    ) : (isCreator || isCompleted) ? (
+                      <button
+                        onClick={() => setDeleteConfirmTest(test)}
+                        title="Remove this test from your account records"
+                        className="p-1.5 rounded-xl bg-slate-800/60 hover:bg-rose-950/40 text-slate-400 hover:text-rose-300 border border-slate-700/60 hover:border-rose-500/30 text-xs font-bold transition flex items-center gap-1 cursor-pointer"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    ) : null}
+                  </div>
 
                   <div>
                     {isCompleted ? (
@@ -790,6 +871,57 @@ export default function TestsView({ user, onStartTest, onSelectTest, onOpenAuth 
                   ))}
                 </div>
               )}
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
+
+      {/* UNSCHEDULE & DELETE CONFIRMATION MODAL */}
+      {deleteConfirmTest && typeof document !== 'undefined' && createPortal(
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-fadeIn">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-md w-full p-6 shadow-2xl flex flex-col gap-4">
+            <div className="w-12 h-12 rounded-xl bg-rose-950/60 border border-rose-500/40 text-rose-400 flex items-center justify-center mx-auto">
+              <Trash2 className="w-6 h-6" />
+            </div>
+            <div className="text-center">
+              <h3 className="text-lg font-black text-white mb-1">
+                {user && String(deleteConfirmTest.created_by_user_id) === String(user.id) && deleteConfirmTest.is_upcoming
+                  ? 'Unschedule & Cancel Test?'
+                  : 'Remove Test from Account?'}
+              </h3>
+              <p className="text-xs text-slate-400 leading-relaxed">
+                {user && String(deleteConfirmTest.created_by_user_id) === String(user.id) && deleteConfirmTest.is_upcoming
+                  ? `Are you sure you want to unschedule "${deleteConfirmTest.title}" before it releases? This will cancel the test and remove it for all aspirants.`
+                  : `Are you sure you want to remove "${deleteConfirmTest.title}"? It will be removed from your Tests catalog and Test History for this account.`}
+              </p>
+            </div>
+            <div className="flex items-center justify-end gap-3 pt-2 border-t border-slate-800">
+              <button
+                type="button"
+                disabled={Boolean(deletingTestId)}
+                onClick={() => setDeleteConfirmTest(null)}
+                className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-bold text-slate-300 transition cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={Boolean(deletingTestId)}
+                onClick={() => handleDeleteOrUnscheduleTest(deleteConfirmTest)}
+                className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-xs font-black text-white transition flex items-center gap-1.5 shadow-lg shadow-rose-600/30 cursor-pointer disabled:opacity-50"
+              >
+                {deletingTestId ? (
+                  <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <Trash2 className="w-3.5 h-3.5" />
+                )}
+                <span>
+                  {user && String(deleteConfirmTest.created_by_user_id) === String(user.id) && deleteConfirmTest.is_upcoming
+                    ? 'Unschedule & Delete'
+                    : 'Remove Test'}
+                </span>
+              </button>
             </div>
           </div>
         </div>,

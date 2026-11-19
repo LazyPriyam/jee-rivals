@@ -752,6 +752,35 @@ def delete_test_room(code: str, user: dict = Depends(get_current_user)):
         # Delete user's participation record
         c.execute("DELETE FROM room_participants WHERE room_id = ? AND user_id = ?", (room_id, user_id))
 
+        # Check if room is associated with a scheduled test
+        c.execute("SELECT id, created_by_user_id FROM scheduled_tests WHERE room_id = ?", (room_id,))
+        st_row = c.fetchone()
+        now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+
+        if st_row:
+            st_id = st_row["id"] if hasattr(st_row, "__getitem__") else st_row[0]
+            st_creator = str(st_row["created_by_user_id"] if hasattr(st_row, "__getitem__") else st_row[1])
+            is_creator = (st_creator == user_id or str(room["host_id"]) == user_id)
+
+            # Record in user_deleted_tests so it is removed from tests for this account
+            c.execute("""
+                INSERT OR REPLACE INTO user_deleted_tests (user_id, test_id, room_id, deleted_at)
+                VALUES (?, ?, ?, ?)
+            """, (user_id, st_id, room_id, now_iso))
+
+            if is_creator:
+                # If creator deleted it: permanently delete scheduled test and room
+                c.execute("UPDATE scheduled_tests SET status = 'DELETED' WHERE id = ?", (st_id,))
+                c.execute("DELETE FROM room_participants WHERE room_id = ?", (room_id,))
+                c.execute("UPDATE rooms SET status = 'DELETED' WHERE id = ?", (room_id,))
+                c.execute("DELETE FROM rooms WHERE id = ?", (room_id,))
+        else:
+            # Standard room / solo mock test deletion: record dismissal
+            c.execute("""
+                INSERT OR REPLACE INTO user_deleted_tests (user_id, test_id, room_id, deleted_at)
+                VALUES (?, ?, ?, ?)
+            """, (user_id, room_id, room_id, now_iso))
+
         # Check remaining participants
         c.execute("SELECT COUNT(*) as cnt FROM room_participants WHERE room_id = ?", (room_id,))
         cnt_row = c.fetchone()
