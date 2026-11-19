@@ -26,8 +26,11 @@ import {
   Flame,
   Search,
   ExternalLink,
-  Hourglass
+  Hourglass,
+  BookOpen
 } from 'lucide-react';
+
+const CANONICAL_SUBJECTS = ['Physics', 'Chemistry', 'Mathematics'];
 
 export default function TestsView({ user, onStartTest, onSelectTest, onOpenAuth }) {
   const [catalog, setCatalog] = useState({ all: [], upcoming: [], active: [], pending: [], completed: [] });
@@ -47,6 +50,16 @@ export default function TestsView({ user, onStartTest, onSelectTest, onOpenAuth 
   const [aspirantsList, setAspirantsList] = useState([]);
   const [loadingAspirants, setLoadingAspirants] = useState(false);
   const [creating, setCreating] = useState(false);
+
+  // Syllabus & Chapter Selector State
+  const [syllabusScope, setSyllabusScope] = useState('FULL'); // 'FULL' or 'CUSTOM'
+  const [selectedSubjects, setSelectedSubjects] = useState(['Physics', 'Chemistry', 'Mathematics']);
+  const [chaptersMap, setChaptersMap] = useState({});
+  const [selectedChapters, setSelectedChapters] = useState([]);
+  const [activeSubjectTab, setActiveSubjectTab] = useState('Physics');
+  const [chapterSearch, setChapterSearch] = useState('');
+  const [loadingChapters, setLoadingChapters] = useState(false);
+
   const [createForm, setCreateForm] = useState({
     title: '',
     description: '',
@@ -55,6 +68,7 @@ export default function TestsView({ user, onStartTest, onSelectTest, onOpenAuth 
     duration_minutes: 60,
     total_questions: 25,
     subjects: ['Physics', 'Chemistry', 'Mathematics'],
+    chapters: [],
     scheduled_start_time: '',
     deadline_time: '',
     assigned_user_ids: ['*'], // '*' means all
@@ -125,7 +139,116 @@ export default function TestsView({ user, onStartTest, onSelectTest, onOpenAuth 
       .then((list) => setAspirantsList(list || []))
       .catch((err) => console.warn('Failed to load aspirants roster:', err))
       .finally(() => setLoadingAspirants(false));
+
+    if (Object.keys(chaptersMap).length === 0) {
+      setLoadingChapters(true);
+      api.questions.getChapters()
+        .then((data) => setChaptersMap(data || {}))
+        .catch((err) => console.warn('Failed to load chapters map:', err))
+        .finally(() => setLoadingChapters(false));
+    }
   };
+
+  const toggleSubject = (subj) => {
+    try { sound?.click?.(); } catch (_) {}
+    setSelectedSubjects((prev) => {
+      if (prev.includes(subj)) {
+        if (prev.length === 1) return prev;
+        return prev.filter((s) => s !== subj);
+      }
+      return [...prev, subj];
+    });
+  };
+
+  const toggleChapter = (chapterName) => {
+    try { sound?.click?.(); } catch (_) {}
+    setSelectedChapters((prev) => {
+      if (prev.includes(chapterName)) {
+        return prev.filter((c) => c !== chapterName);
+      }
+      return [...prev, chapterName];
+    });
+  };
+
+  const handleSelectAllInSubject = (subjName) => {
+    try { sound?.click?.(); } catch (_) {}
+    const chList = (chaptersMap[subjName] || []).map((c) => c.chapter);
+    setSelectedChapters((prev) => {
+      const allSelected = chList.every((c) => prev.includes(c));
+      if (allSelected) {
+        return prev.filter((c) => !chList.includes(c));
+      }
+      const toAdd = chList.filter((c) => !prev.includes(c));
+      return [...prev, ...toAdd];
+    });
+  };
+
+  const handleClearAllInSubject = (subjName) => {
+    try { sound?.click?.(); } catch (_) {}
+    const chList = (chaptersMap[subjName] || []).map((c) => c.chapter);
+    setSelectedChapters((prev) => prev.filter((c) => !chList.includes(c)));
+  };
+
+  const handleSelectAllInUnit = (unitChapters) => {
+    try { sound?.click?.(); } catch (_) {}
+    const chNames = unitChapters.map((c) => c.chapter);
+    setSelectedChapters((prev) => {
+      const allSelected = chNames.every((c) => prev.includes(c));
+      if (allSelected) {
+        return prev.filter((c) => !chNames.includes(c));
+      }
+      const toAdd = chNames.filter((c) => !prev.includes(c));
+      return [...prev, ...toAdd];
+    });
+  };
+
+  const handleClearAllChapters = () => {
+    try { sound?.click?.(); } catch (_) {}
+    setSelectedChapters([]);
+  };
+
+  const unitsInActiveSubject = useMemo(() => {
+    const list = chaptersMap[activeSubjectTab] || [];
+    const query = chapterSearch.trim().toLowerCase();
+    const filtered = query
+      ? list.filter((c) => c.chapter.toLowerCase().includes(query) || (c.unit || '').toLowerCase().includes(query))
+      : list;
+    const groups = {};
+    for (const item of filtered) {
+      const unit = item.unit || 'General';
+      if (!groups[unit]) groups[unit] = [];
+      groups[unit].push(item);
+    }
+    return groups;
+  }, [chaptersMap, activeSubjectTab, chapterSearch]);
+
+  const activeCustomSubjects = useMemo(() => {
+    if (selectedChapters.length === 0) return selectedSubjects;
+    const found = new Set();
+    for (const ch of selectedChapters) {
+      for (const subj of CANONICAL_SUBJECTS) {
+        if ((chaptersMap[subj] || []).some((item) => item.chapter === ch)) {
+          found.add(subj);
+          break;
+        }
+      }
+    }
+    return found.size > 0 ? Array.from(found) : selectedSubjects;
+  }, [selectedChapters, chaptersMap, selectedSubjects]);
+
+  const totalAvailableInSelected = useMemo(() => {
+    let tot = 0;
+    for (const ch of selectedChapters) {
+      for (const subj of CANONICAL_SUBJECTS) {
+        const match = (chaptersMap[subj] || []).find((c) => c.chapter === ch);
+        if (match) {
+          tot += match.count || 0;
+          break;
+        }
+      }
+    }
+    return tot;
+  }, [selectedChapters, chaptersMap]);
 
   const handleStartTest = async (test) => {
     try { sound?.click?.(); } catch (_) {}
@@ -150,17 +273,31 @@ export default function TestsView({ user, onStartTest, onSelectTest, onOpenAuth 
       alert('Please enter a test title.');
       return;
     }
+    if (syllabusScope === 'CUSTOM' && selectedChapters.length === 0) {
+      alert('Please select at least one chapter for custom syllabus or switch to Full Syllabus.');
+      return;
+    }
     setCreating(true);
     try {
+      const effSubjects = syllabusScope === 'CUSTOM'
+        ? (activeCustomSubjects.length > 0 ? activeCustomSubjects : selectedSubjects)
+        : selectedSubjects;
+      const effChapters = syllabusScope === 'CUSTOM' ? selectedChapters : [];
+
       const payload = {
         ...createForm,
+        subjects: effSubjects,
+        chapters: effChapters,
         scheduled_start_time: new Date(createForm.scheduled_start_time).toISOString(),
         deadline_time: new Date(createForm.deadline_time).toISOString(),
       };
       await api.scheduledTests.create(payload);
       try { sound?.play?.('correct') || sound?.click?.(); } catch (_) {}
       setShowCreateModal(false);
+      setSelectedChapters([]);
+      setSyllabusScope('FULL');
       fetchCatalog();
+      alert('Scheduled test successfully generated and assigned!');
     } catch (err) {
       alert('Error creating test: ' + err.message);
     } finally {
@@ -386,8 +523,26 @@ export default function TestsView({ user, onStartTest, onSelectTest, onOpenAuth 
                     {test.title}
                   </h3>
                   {test.description && (
-                    <p className="text-xs text-slate-400 line-clamp-2 mb-3">{test.description}</p>
+                    <p className="text-xs text-slate-400 line-clamp-2 mb-2">{test.description}</p>
                   )}
+
+                  {/* Syllabus / Chapters Scope Badge */}
+                  <div className="mb-2.5">
+                    {test.chapters && test.chapters.length > 0 ? (
+                      <div className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-purple-950/70 border border-purple-500/40 text-purple-300 text-[10px] font-medium max-w-full">
+                        <Filter className="w-3 h-3 text-purple-400 shrink-0" />
+                        <span className="font-bold shrink-0">{test.chapters.length} Ch Custom:</span>
+                        <span className="truncate text-slate-300">
+                          {test.chapters.slice(0, 2).join(', ')}{test.chapters.length > 2 ? ` +${test.chapters.length - 2} more` : ''}
+                        </span>
+                      </div>
+                    ) : (
+                      <div className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-slate-900 border border-slate-800 text-slate-400 text-[10px] font-medium">
+                        <BookOpen className="w-3 h-3 text-indigo-400 shrink-0" />
+                        <span>Full Syllabus ({(test.subjects || []).join(' + ')})</span>
+                      </div>
+                    )}
+                  </div>
 
                   {/* Meta Strip */}
                   <div className="grid grid-cols-4 gap-2 bg-slate-950/60 rounded-xl p-2.5 border border-slate-800/80 text-center my-3">
@@ -643,7 +798,7 @@ export default function TestsView({ user, onStartTest, onSelectTest, onOpenAuth 
       {/* CREATE SCHEDULED TEST MODAL (PORTAL TO DOCUMENT.BODY) */}
       {showCreateModal && typeof document !== 'undefined' && createPortal(
         <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-fadeIn">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-xl w-full max-h-[90vh] flex flex-col overflow-hidden shadow-2xl">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-3xl w-full max-h-[92vh] flex flex-col overflow-hidden shadow-2xl">
             {/* Header */}
             <div className="p-5 border-b border-slate-800 flex items-center justify-between">
               <div>
@@ -745,6 +900,268 @@ export default function TestsView({ user, onStartTest, onSelectTest, onOpenAuth 
                     <option value={75}>75 Questions</option>
                   </select>
                 </div>
+              </div>
+
+              {/* Syllabus Scope & Custom Chapters Section */}
+              <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-3.5 space-y-3">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <div>
+                    <label className="text-xs font-bold text-white flex items-center gap-1.5">
+                      <BookOpen className="w-4 h-4 text-indigo-400" /> Syllabus Scope & Target Chapters
+                    </label>
+                    <p className="text-[10px] text-slate-400">
+                      Choose full syllabus or cherry-pick custom chapters for part-syllabus minor tests
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-1 bg-slate-900 p-0.5 rounded-lg border border-slate-800 self-start sm:self-auto">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        try { sound?.click?.(); } catch (_) {}
+                        setSyllabusScope('FULL');
+                      }}
+                      className={`px-2.5 py-1 rounded-md text-[11px] font-bold transition cursor-pointer flex items-center gap-1 ${
+                        syllabusScope === 'FULL'
+                          ? 'bg-indigo-600 text-white shadow-sm'
+                          : 'text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      <Layers className="w-3 h-3" /> Full Syllabus
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        try { sound?.click?.(); } catch (_) {}
+                        setSyllabusScope('CUSTOM');
+                      }}
+                      className={`px-2.5 py-1 rounded-md text-[11px] font-bold transition cursor-pointer flex items-center gap-1 ${
+                        syllabusScope === 'CUSTOM'
+                          ? 'bg-indigo-600 text-white shadow-sm'
+                          : 'text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      <Filter className="w-3 h-3" /> Custom Chapters {selectedChapters.length > 0 && `(${selectedChapters.length})`}
+                    </button>
+                  </div>
+                </div>
+
+                {syllabusScope === 'FULL' ? (
+                  /* Full Syllabus: Subject Toggles */
+                  <div className="space-y-1.5">
+                    <div className="text-[10px] text-slate-400 font-medium">Included Subjects:</div>
+                    <div className="grid grid-cols-3 gap-2">
+                      {CANONICAL_SUBJECTS.map((name) => {
+                        const isSelected = selectedSubjects.includes(name);
+                        return (
+                          <button
+                            key={name}
+                            type="button"
+                            onClick={() => toggleSubject(name)}
+                            className={`p-2.5 rounded-xl border text-center transition cursor-pointer ${
+                              isSelected
+                                ? 'border-indigo-500 bg-indigo-950/40 text-white shadow-sm'
+                                : 'border-slate-800 bg-slate-900/60 text-slate-500 hover:border-slate-700'
+                            }`}
+                          >
+                            <span className="font-black text-xs block">{name}</span>
+                            <span className="text-[9px] text-slate-400 mt-0.5 block font-mono">
+                              {isSelected ? '✓ Included' : '+ Excluded'}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ) : (
+                  /* Custom Chapters: Subject Tabs, Search & Chapter Checkboxes */
+                  <div className="space-y-3 pt-1">
+                    {/* Subject Tabs */}
+                    <div className="flex items-center gap-1.5 border-b border-slate-800 pb-2 overflow-x-auto">
+                      {CANONICAL_SUBJECTS.map((subj) => {
+                        const isActive = activeSubjectTab === subj;
+                        const chList = chaptersMap[subj] || [];
+                        const selCount = chList.filter((c) => selectedChapters.includes(c.chapter)).length;
+                        return (
+                          <button
+                            key={subj}
+                            type="button"
+                            onClick={() => {
+                              try { sound?.click?.(); } catch (_) {}
+                              setActiveSubjectTab(subj);
+                            }}
+                            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 shrink-0 cursor-pointer border ${
+                              isActive
+                                ? 'bg-indigo-600 text-white border-indigo-500 shadow-sm'
+                                : 'bg-slate-900 text-slate-300 border-slate-800 hover:border-slate-700'
+                            }`}
+                          >
+                            <span>{subj}</span>
+                            <span className={`text-[10px] font-mono px-1.5 py-0.2 rounded-full ${
+                              isActive ? 'bg-indigo-950 text-indigo-200' : 'bg-slate-800 text-slate-400'
+                            }`}>
+                              {selCount > 0 ? `${selCount}/${chList.length}` : `${chList.length}`}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    {/* Search & Bulk Select Controls */}
+                    <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2">
+                      <div className="relative flex-1">
+                        <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2" />
+                        <input
+                          type="text"
+                          placeholder={`Search ${activeSubjectTab} chapters (e.g. Kinematics, Equilibrium)...`}
+                          value={chapterSearch}
+                          onChange={(e) => setChapterSearch(e.target.value)}
+                          className="w-full pl-8 pr-7 py-1.5 bg-slate-900 border border-slate-800 rounded-lg text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500"
+                        />
+                        {chapterSearch && (
+                          <button
+                            type="button"
+                            onClick={() => setChapterSearch('')}
+                            className="absolute right-2 top-1.5 text-slate-400 hover:text-white"
+                          >
+                            <X className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                      </div>
+
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => handleSelectAllInSubject(activeSubjectTab)}
+                          className="px-2.5 py-1.5 bg-slate-900 hover:bg-slate-800 border border-slate-800 text-[11px] font-bold text-slate-300 hover:text-white rounded-lg transition cursor-pointer"
+                        >
+                          Select All {activeSubjectTab}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleClearAllInSubject(activeSubjectTab)}
+                          className="px-2.5 py-1.5 bg-slate-900 hover:bg-slate-800 border border-slate-800 text-[11px] font-bold text-slate-400 hover:text-red-300 rounded-lg transition cursor-pointer"
+                        >
+                          Clear
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Categorized Chapters Grid */}
+                    <div className="space-y-2.5 max-h-[220px] overflow-y-auto pr-1">
+                      {loadingChapters ? (
+                        <div className="py-6 text-center text-xs text-slate-500">Loading syllabus chapters...</div>
+                      ) : Object.keys(unitsInActiveSubject).length === 0 ? (
+                        <div className="py-6 text-center text-xs text-slate-500 font-mono">
+                          No chapters matching "{chapterSearch}" in {activeSubjectTab}.
+                        </div>
+                      ) : (
+                        Object.entries(unitsInActiveSubject).map(([unitName, chList]) => {
+                          const allUnitSelected = chList.every((c) => selectedChapters.includes(c.chapter));
+                          return (
+                            <div key={unitName} className="bg-slate-900/70 border border-slate-800/80 rounded-xl p-2.5">
+                              {/* Unit Header */}
+                              <div className="flex items-center justify-between pb-1.5 mb-1.5 border-b border-slate-800/60">
+                                <div className="flex items-center gap-1.5">
+                                  <span className="w-1.5 h-1.5 rounded-full bg-indigo-400"></span>
+                                  <span className="text-[11px] font-bold text-slate-200 uppercase tracking-wider">{unitName}</span>
+                                  <span className="text-[10px] text-slate-500 font-mono">({chList.length})</span>
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => handleSelectAllInUnit(chList)}
+                                  className="text-[10px] text-indigo-400 hover:underline font-bold cursor-pointer"
+                                >
+                                  {allUnitSelected ? 'Deselect Unit' : 'Select Unit'}
+                                </button>
+                              </div>
+
+                              {/* Chapters Grid */}
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                                {chList.map((ch) => {
+                                  const isSelected = selectedChapters.includes(ch.chapter);
+                                  return (
+                                    <button
+                                      key={ch.chapter}
+                                      type="button"
+                                      onClick={() => toggleChapter(ch.chapter)}
+                                      className={`p-2 rounded-lg border text-left transition cursor-pointer flex items-center justify-between gap-1.5 ${
+                                        isSelected
+                                          ? 'border-indigo-500 bg-indigo-950/40 text-white shadow-sm'
+                                          : 'border-slate-800/60 bg-slate-950/60 text-slate-300 hover:border-slate-700'
+                                      }`}
+                                    >
+                                      <div className="flex items-center gap-1.5 overflow-hidden flex-1 min-w-0">
+                                        <div className={`w-3.5 h-3.5 rounded border flex items-center justify-center shrink-0 transition ${
+                                          isSelected
+                                            ? 'bg-indigo-600 border-indigo-600 text-white'
+                                            : 'border-slate-700 bg-slate-900'
+                                        }`}>
+                                          {isSelected && <Check className="w-2.5 h-2.5 stroke-[3]" />}
+                                        </div>
+                                        <span className="text-[11px] font-medium truncate">{ch.chapter}</span>
+                                      </div>
+                                      <span className="text-[9px] font-mono text-slate-500 px-1 py-0.2 rounded bg-black/30 shrink-0">
+                                        {ch.count} Qs
+                                      </span>
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          );
+                        })
+                      )}
+                    </div>
+
+                    {/* Selected Chapters Summary Pill Bar */}
+                    <div className="pt-2 border-t border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
+                      <div className="flex items-center gap-1.5">
+                        <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                        <span className="font-bold text-white text-[11px]">
+                          {selectedChapters.length === 0
+                            ? 'No chapters selected yet (click above to add)'
+                            : `${selectedChapters.length} Chapter${selectedChapters.length > 1 ? 's' : ''} Selected (${activeCustomSubjects.join(', ')})`}
+                        </span>
+                        {selectedChapters.length > 0 && totalAvailableInSelected > 0 && (
+                          <span className="text-[10px] font-mono text-indigo-400">
+                            • {totalAvailableInSelected} Qs in bank
+                          </span>
+                        )}
+                      </div>
+
+                      {selectedChapters.length > 0 && (
+                        <button
+                          type="button"
+                          onClick={handleClearAllChapters}
+                          className="text-[11px] text-red-400 hover:text-red-300 font-bold transition cursor-pointer self-start sm:self-auto"
+                        >
+                          Clear All ({selectedChapters.length})
+                        </button>
+                      )}
+                    </div>
+
+                    {/* Selected Tag Cloud */}
+                    {selectedChapters.length > 0 && (
+                      <div className="flex flex-wrap gap-1 max-h-16 overflow-y-auto pt-1">
+                        {selectedChapters.map((chName) => (
+                          <span
+                            key={chName}
+                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-indigo-950/60 border border-indigo-500/40 text-indigo-300 text-[10px] font-medium"
+                          >
+                            <span className="truncate max-w-[160px]">{chName}</span>
+                            <button
+                              type="button"
+                              onClick={() => toggleChapter(chName)}
+                              className="hover:text-white"
+                            >
+                              <X className="w-2.5 h-2.5" />
+                            </button>
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
 
               {/* Scheduled Start & Deadline */}

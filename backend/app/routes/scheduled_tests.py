@@ -113,15 +113,24 @@ def create_scheduled_test(
 
     if not sampled_qs or len(sampled_qs) == 0:
         # Fallback to random approved questions from DB if mock selector is constrained
+        params = list(req.subjects)
         subj_placeholders = ",".join(["?"] * len(req.subjects))
+        chap_filter = ""
+        if req.chapters and len(req.chapters) > 0:
+            chap_placeholders = ",".join(["?"] * len(req.chapters))
+            chap_filter = f" AND chapter IN ({chap_placeholders})"
+            params.extend(req.chapters)
+        params.append(req.total_questions)
+
         c.execute(f"""
             SELECT id FROM questions
             WHERE subject IN ({subj_placeholders})
+            {chap_filter}
             AND validation_status = 'VALIDATED'
             AND (has_diagram = 0 OR (diagram_paths IS NOT NULL AND diagram_paths != '[]'))
             ORDER BY RANDOM()
             LIMIT ?
-        """, (*req.subjects, req.total_questions))
+        """, tuple(params))
         fb_rows = c.fetchall()
         sampled_qs = [{"id": r[0]} for r in fb_rows]
 
@@ -333,6 +342,12 @@ def get_scheduled_tests_catalog(user: Optional[dict] = Depends(get_optional_user
         except Exception:
             parsed_subjects = ["Physics", "Chemistry", "Mathematics"]
 
+        parsed_chapters = []
+        try:
+            parsed_chapters = json.loads(t["chapters"]) if isinstance(t["chapters"], str) else (t["chapters"] or [])
+        except Exception:
+            parsed_chapters = []
+
         test_item = {
             "id": t["id"],
             "room_id": t["room_id"],
@@ -345,6 +360,7 @@ def get_scheduled_tests_catalog(user: Optional[dict] = Depends(get_optional_user
             "total_questions": t["total_questions"],
             "total_marks": t["total_marks"],
             "subjects": parsed_subjects,
+            "chapters": parsed_chapters,
             "scheduled_start_time": t["scheduled_start_time"],
             "deadline_time": t["deadline_time"],
             "assigned_user_ids": assigned_ids,
