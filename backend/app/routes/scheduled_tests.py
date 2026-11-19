@@ -33,7 +33,7 @@ class CreateScheduledTestRequest(BaseModel):
     title: str = Field(..., min_length=3, max_length=120)
     description: Optional[str] = ""
     exam_type: str = Field(default="MAIN")  # "MAIN" or "ADVANCED"
-    difficulty: str = Field(default="BALANCED")  # "EASY", "BALANCED", "HARD", "TITAN"
+    difficulty: Optional[str] = Field(default="STRICT")  # Strictly calibrated to NTA/IIT standard
     duration_minutes: int = Field(default=60, ge=5, le=360)
     total_questions: int = Field(default=25, ge=3, le=90)
     subjects: List[str] = Field(default=["Physics", "Chemistry", "Mathematics"])
@@ -96,6 +96,9 @@ def create_scheduled_test(
     conn = get_connection()
     c = conn.cursor()
 
+    # Strict Standardized Difficulty: strictly calibrated to authentic NTA / IIT standards
+    strict_difficulty = "HARD" if req.exam_type == "ADVANCED" else "BALANCED"
+
     # Pre-generate frozen question paper using authentic JEE mock selector
     try:
         sampled_qs = select_mock_and_room_questions(
@@ -104,7 +107,7 @@ def create_scheduled_test(
             filter_subjects=req.subjects,
             filter_chapters=req.chapters if req.chapters else None,
             target_exam=req.exam_type,
-            difficulty_tier=req.difficulty,
+            difficulty_tier=strict_difficulty,
             mode="MOCK_TEST"
         )
     except Exception as e:
@@ -168,7 +171,7 @@ def create_scheduled_test(
         )
     """, (
         room_id, room_code, user["id"], req.title,
-        ", ".join(req.subjects), ", ".join(req.chapters or []), req.difficulty,
+        ", ".join(req.subjects), ", ".join(req.chapters or []), strict_difficulty,
         json.dumps(question_ids), actual_q_count, req.duration_minutes,
         now_iso, json.dumps(req.subjects), json.dumps(req.chapters or []), req.exam_type,
         neg_marks, base_marks, test_id, now_iso
@@ -188,7 +191,7 @@ def create_scheduled_test(
             ?, ?, 'ACTIVE', ?
         )
     """, (
-        test_id, room_id, req.title, req.description, req.exam_type, req.difficulty,
+        test_id, room_id, req.title, req.description, req.exam_type, strict_difficulty,
         req.duration_minutes, actual_q_count, total_marks, json.dumps(question_ids),
         json.dumps(req.subjects), json.dumps(req.chapters or []),
         start_dt.isoformat(), deadline_dt.isoformat(),

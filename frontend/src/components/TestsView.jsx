@@ -64,7 +64,7 @@ export default function TestsView({ user, onStartTest, onSelectTest, onOpenAuth 
     title: '',
     description: '',
     exam_type: 'MAIN',
-    difficulty: 'BALANCED',
+    difficulty: 'STRICT',
     duration_minutes: 60,
     total_questions: 25,
     subjects: ['Physics', 'Chemistry', 'Mathematics'],
@@ -483,8 +483,9 @@ export default function TestsView({ user, onStartTest, onSelectTest, onOpenAuth 
                       >
                         JEE {test.exam_type}
                       </span>
-                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-slate-800 text-slate-300 border border-slate-700 uppercase">
-                        {test.difficulty}
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-slate-800 text-slate-300 border border-slate-700 flex items-center gap-1">
+                        <Shield className="w-2.5 h-2.5 text-indigo-400" />
+                        {test.exam_type === 'ADVANCED' ? 'Strict IIT Standard' : 'Strict NTA Standard'}
                       </span>
                       {test.is_assigned && (
                         <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-emerald-950/80 text-emerald-300 border border-emerald-800/60 flex items-center gap-1">
@@ -851,7 +852,7 @@ export default function TestsView({ user, onStartTest, onSelectTest, onOpenAuth 
                   <label className="text-xs font-bold text-slate-300 block mb-1">Format</label>
                   <select
                     value={createForm.exam_type}
-                    onChange={(e) => setCreateForm({ ...createForm, exam_type: e.target.value })}
+                    onChange={(e) => setCreateForm({ ...createForm, exam_type: e.target.value, difficulty: 'STRICT' })}
                     className="w-full bg-slate-950 border border-slate-800 rounded-xl px-2.5 py-2 text-xs text-white focus:outline-none focus:border-indigo-500"
                   >
                     <option value="MAIN">JEE Main</option>
@@ -860,17 +861,13 @@ export default function TestsView({ user, onStartTest, onSelectTest, onOpenAuth 
                 </div>
 
                 <div>
-                  <label className="text-xs font-bold text-slate-300 block mb-1">Difficulty</label>
-                  <select
-                    value={createForm.difficulty}
-                    onChange={(e) => setCreateForm({ ...createForm, difficulty: e.target.value })}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-2.5 py-2 text-xs text-white focus:outline-none focus:border-indigo-500"
-                  >
-                    <option value="BALANCED">Balanced</option>
-                    <option value="EASY">Easy</option>
-                    <option value="HARD">Hard</option>
-                    <option value="TITAN">Titan</option>
-                  </select>
+                  <label className="text-xs font-bold text-slate-300 block mb-1">Standard Calibration</label>
+                  <div className="w-full bg-slate-950/80 border border-slate-800 rounded-xl px-2.5 py-2 text-xs text-indigo-300 font-bold flex items-center gap-1.5 select-none" title="Strict NTA/IIT examination difficulty calibration">
+                    <Shield className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
+                    <span className="truncate">
+                      {createForm.exam_type === 'ADVANCED' ? 'Strict IIT Standard' : 'Strict NTA Standard'}
+                    </span>
+                  </div>
                 </div>
 
                 <div>
