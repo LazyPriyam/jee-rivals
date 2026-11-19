@@ -61,30 +61,6 @@ export default function MockTestView({ room, user, onMatchComplete, onExitToDash
     return sorted[savedProgress?.currentIndex || 0]?.subject || sorted[0]?.subject || 'Physics';
   });
 
-  // 3-2-1 Countdown Timer before authentic NTA examination starts
-  useEffect(() => {
-    if (countdown === null) return;
-
-    if (countdown === 3 || countdown === 2 || countdown === 1) {
-      sound.countdown();
-      const timer = setTimeout(() => {
-        setCountdown((prev) => (prev && prev > 1 ? prev - 1 : 0));
-      }, 1000);
-      return () => clearTimeout(timer);
-    }
-
-    if (countdown === 0) {
-      sound.start();
-      const timer = setTimeout(() => {
-        startTimeRef.current = Date.now();
-        deadlineRef.current = Date.now() + initialDuration * 1000;
-        setTimeRemaining(initialDuration);
-        setCountdown(null);
-      }, 750);
-      return () => clearTimeout(timer);
-    }
-  }, [countdown, initialDuration]);
-
   // Exam Duration in seconds (e.g. 60 min -> 3600s, or room.total_duration_minutes)
   const initialDuration = (room.total_duration_minutes || 60) * 60;
 
@@ -150,6 +126,7 @@ export default function MockTestView({ room, user, onMatchComplete, onExitToDash
   const startTimeRef = useRef(getInitialStartTime());
   const currentIndexRef = useRef(currentIndex);
   const questionsRef = useRef(questions);
+  const timerRef = useRef(null);
 
   useEffect(() => {
     currentIndexRef.current = currentIndex;
@@ -159,7 +136,29 @@ export default function MockTestView({ room, user, onMatchComplete, onExitToDash
     questionsRef.current = questions;
   }, [questions]);
 
-  const timerRef = useRef(null);
+  // 3-2-1 Countdown Timer before authentic NTA examination starts
+  useEffect(() => {
+    if (countdown === null) return;
+
+    if (countdown === 3 || countdown === 2 || countdown === 1) {
+      sound.countdown();
+      const timer = setTimeout(() => {
+        setCountdown((prev) => (prev && prev > 1 ? prev - 1 : 0));
+      }, 1000);
+      return () => clearTimeout(timer);
+    }
+
+    if (countdown === 0) {
+      sound.start();
+      const timer = setTimeout(() => {
+        startTimeRef.current = Date.now();
+        deadlineRef.current = Date.now() + initialDuration * 1000;
+        setTimeRemaining(initialDuration);
+        setCountdown(null);
+      }, 750);
+      return () => clearTimeout(timer);
+    }
+  }, [countdown, initialDuration]);
 
   // Intercept browser back button and trigger exit warning modal
   useEffect(() => {
@@ -457,8 +456,36 @@ export default function MockTestView({ room, user, onMatchComplete, onExitToDash
 
   if (!currentQ) {
     return (
-      <div className="max-w-4xl mx-auto px-4 py-20 text-center font-mono">
-        <h2 className="text-xl font-bold text-white">Loading Official NTA Examination Question Paper...</h2>
+      <div className="min-h-screen bg-[#0c101a] flex flex-col items-center justify-center p-6 text-center select-none font-mono">
+        {countdown !== null && typeof document !== 'undefined' && createPortal(
+          <div className="fixed inset-0 z-[99999] bg-[#0c101a]/95 backdrop-blur-md flex flex-col items-center justify-center p-6 text-center select-none">
+            <div className="mb-6 inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-orange-950/80 border border-orange-500/40 text-orange-400 text-xs font-mono font-bold tracking-widest uppercase shadow-lg">
+              <span className="w-2 h-2 rounded-full bg-orange-400 animate-ping" />
+              <span>NTA CBT Terminal Ready</span>
+            </div>
+            <div className="relative flex items-center justify-center mb-8">
+              <div className={`w-36 h-36 sm:w-44 sm:h-44 rounded-full border-4 flex items-center justify-center transition-all duration-300 shadow-2xl ${
+                countdown === 0
+                  ? 'border-emerald-500 bg-emerald-950/40 shadow-[0_0_60px_rgba(16,185,129,0.6)] scale-110'
+                  : countdown === 1
+                  ? 'border-amber-400 bg-amber-950/40 shadow-[0_0_60px_rgba(251,191,36,0.6)] scale-105'
+                  : 'border-orange-500 bg-orange-950/40 shadow-[0_0_60px_rgba(249,115,22,0.6)] scale-100'
+              }`}>
+                <span className={`font-mono font-black transition-all duration-300 transform ${
+                  countdown === 0
+                    ? 'text-3xl sm:text-4xl text-emerald-300 animate-pulse'
+                    : 'text-6xl sm:text-7xl text-white'
+                }`}>
+                  {countdown === 0 ? 'START!' : countdown}
+                </span>
+              </div>
+            </div>
+          </div>,
+          document.body
+        )}
+        <div className="w-10 h-10 border-4 border-orange-500 border-t-transparent rounded-full animate-spin mb-4" />
+        <h2 className="text-base font-bold text-white tracking-wide">Loading Official NTA Examination Question Paper...</h2>
+        <p className="text-xs text-slate-400 mt-2">Preparing questions and authentic CBT interface</p>
       </div>
     );
   }

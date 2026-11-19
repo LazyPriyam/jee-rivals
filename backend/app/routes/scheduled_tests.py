@@ -510,13 +510,16 @@ def start_scheduled_test(
 
     # Retrieve full room state to launch directly into MockTestView
     room_state = get_room_state(room_code, user)
+    room_dict = room_state.dict() if hasattr(room_state, "dict") else dict(room_state)
+    room_dict["is_scheduled"] = True
+    room_dict["scheduled_test_id"] = test_id
 
     return {
         "status": "ok",
         "room_code": room_code,
         "test_id": test_id,
         "title": test["title"],
-        "room": room_state.dict() if hasattr(room_state, "dict") else room_state
+        "room": room_dict
     }
 
 

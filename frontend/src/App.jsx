@@ -390,6 +390,16 @@ export default function App() {
     }
     if (!room) return;
 
+    // Ensure all_questions is loaded if room mode is MOCK_TEST
+    if (room.mode === 'MOCK_TEST' && (!room.all_questions || room.all_questions.length === 0)) {
+      try {
+        const fullRoom = await api.rooms.get(room.code);
+        if (fullRoom?.all_questions && fullRoom.all_questions.length > 0) {
+          room = { ...room, ...fullRoom };
+        }
+      } catch (_) {}
+    }
+
     setCurrentRoom(room);
     setActiveTab('arena');
 
@@ -548,53 +558,67 @@ export default function App() {
               }}
             />
           ) : roomViewMode === 'battle' && currentRoom ? (
-            currentRoom.mode === 'MOCK_TEST' ? (
-              <MockTestView
-                room={currentRoom}
-                user={user}
-                onMatchComplete={async (bulkRes) => {
-                  const isSolo = !currentRoom.participants || currentRoom.participants.length <= 1;
-                  if (isSolo || bulkRes?.match_completed || currentRoom.is_scheduled || currentRoom.scheduled_test_id) {
+            <ErrorBoundary
+              onNavigateArena={() => {
+                setRoomViewMode(null);
+                setActiveTab('arena');
+              }}
+              onReset={() => {
+                if (currentRoom?.code) {
+                  api.rooms.get(currentRoom.code).then((r) => {
+                    setCurrentRoom(r);
+                  }).catch(() => {});
+                }
+              }}
+            >
+              {currentRoom.mode === 'MOCK_TEST' ? (
+                <MockTestView
+                  room={currentRoom}
+                  user={user}
+                  onMatchComplete={async (bulkRes) => {
+                    const isSolo = !currentRoom.participants || currentRoom.participants.length <= 1;
+                    if (isSolo || bulkRes?.match_completed || currentRoom.is_scheduled || currentRoom.scheduled_test_id) {
+                      setRoomViewMode('results');
+                      refreshUser();
+                      return;
+                    }
+                    try {
+                      const latest = await api.rooms.get(currentRoom.code);
+                      const allFinished = latest.status === 'COMPLETED' || (latest.participants && latest.participants.every((p) => p.is_finished));
+                      if (allFinished) {
+                        setRoomViewMode('results');
+                      } else {
+                        setRoomViewMode('waiting');
+                      }
+                    } catch (_) {
+                      setRoomViewMode('results');
+                    }
+                    refreshUser();
+                  }}
+                  onExitToDashboard={() => {
+                    setRoomViewMode(null);
+                    setActiveTab('arena');
+                    fetchActiveMatch();
+                  }}
+                />
+              ) : (
+                <SpeedDuelView
+                  room={currentRoom}
+                  user={user}
+                  onPlayerFinished={() => setRoomViewMode('waiting')}
+                  onMatchComplete={() => {
                     setRoomViewMode('results');
                     refreshUser();
-                    return;
-                  }
-                  try {
-                    const latest = await api.rooms.get(currentRoom.code);
-                    const allFinished = latest.status === 'COMPLETED' || (latest.participants && latest.participants.every((p) => p.is_finished));
-                    if (allFinished) {
-                      setRoomViewMode('results');
-                    } else {
-                      setRoomViewMode('waiting');
-                    }
-                  } catch (_) {
-                    setRoomViewMode('results');
-                  }
-                  refreshUser();
-                }}
-                onExitToDashboard={() => {
-                  setRoomViewMode(null);
-                  setActiveTab('arena');
-                  fetchActiveMatch();
-                }}
-              />
-            ) : (
-              <SpeedDuelView
-                room={currentRoom}
-                user={user}
-                onPlayerFinished={() => setRoomViewMode('waiting')}
-                onMatchComplete={() => {
-                  setRoomViewMode('results');
-                  refreshUser();
-                }}
-                onExitToDashboard={() => {
-                  setRoomViewMode(null);
-                  setActiveTab('arena');
-                  fetchActiveMatch();
-                }}
-                onForfeit={handleForfeitMatch}
-              />
-            )
+                  }}
+                  onExitToDashboard={() => {
+                    setRoomViewMode(null);
+                    setActiveTab('arena');
+                    fetchActiveMatch();
+                  }}
+                  onForfeit={handleForfeitMatch}
+                />
+              )}
+            </ErrorBoundary>
           ) : roomViewMode === 'waiting' && currentRoom ? (
             <WaitingRoomView
               room={currentRoom}

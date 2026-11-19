@@ -958,7 +958,9 @@ def get_room_state(code: str, user: dict) -> RoomState:
         started_at=started_at_str,
         server_time=now_iso,
         tournament_id=room.get("tournament_id"),
-        tournament_match_id=room.get("tournament_match_id")
+        tournament_match_id=room.get("tournament_match_id"),
+        is_scheduled=bool(room.get("is_scheduled", 0)),
+        scheduled_test_id=room.get("scheduled_test_id")
     )
 
 

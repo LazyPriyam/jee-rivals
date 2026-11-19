@@ -247,6 +247,8 @@ class RoomState(BaseModel):
     server_time: Optional[str] = None
     tournament_id: Optional[str] = None
     tournament_match_id: Optional[str] = None
+    is_scheduled: bool = False
+    scheduled_test_id: Optional[str] = None
 
 class TournamentCreateRequest(BaseModel):
     title: str
