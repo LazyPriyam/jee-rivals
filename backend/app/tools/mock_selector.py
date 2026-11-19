@@ -749,7 +749,7 @@ def compute_exam_tier_targets(
         subj_targets[s] = base_subj_q + (1 if i < rem_subj else 0)
 
     diff_f = (difficulty_tier or "MIXED").strip().upper()
-    if diff_f not in ("ALL", "MIXED", ""):
+    if diff_f not in ("ALL", "MIXED", "BALANCED", "STANDARD", "CANONICAL", ""):
         target_t = "ANCHOR" if diff_f in ("EASY", "ANCHOR") else (
             "PEAK" if diff_f in ("HARD", "PEAK") else "FRONTIER"
         )
@@ -916,7 +916,7 @@ def select_mock_and_room_questions(
 
     # Difficulty filter
     diff_f = (difficulty_tier or "MIXED").strip().upper()
-    has_diff_filter = diff_f not in ("ALL", "MIXED", "")
+    has_diff_filter = diff_f not in ("ALL", "MIXED", "BALANCED", "STANDARD", "CANONICAL", "")
 
     # Pre-group all non-quarantined questions by subject
     by_subject_raw: Dict[str, List[dict]] = {s: [] for s in active_subjects}

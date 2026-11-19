@@ -50,6 +50,19 @@ def test_compute_exam_tier_targets():
     r25 = compute_exam_tier_targets(25, ["Physics"], is_jee_advanced=False)
     assert r25["Physics"] == {"ANCHOR": 10, "FRONTIER": 11, "PEAK": 4}
 
+    # JEE Advanced 25% / 50% / 25% split (54 Qs paper, 18 per subject)
+    r_adv54 = compute_exam_tier_targets(54, ["Physics", "Chemistry", "Mathematics"], is_jee_advanced=True, difficulty_tier="BALANCED")
+    totals_adv = {"ANCHOR": 0, "FRONTIER": 0, "PEAK": 0}
+    for s, td in r_adv54.items():
+        assert sum(td.values()) == 18, f"Subject {s} should have 18 questions"
+        for k, v in td.items():
+            totals_adv[k] += v
+    # 25% of 54 = 13.5 (13-14), 50% of 54 = 27
+    assert totals_adv["FRONTIER"] == 27, f"Expected 27 Medium in Advanced, got {totals_adv['FRONTIER']}"
+    assert totals_adv["ANCHOR"] + totals_adv["PEAK"] == 27
+    assert totals_adv["ANCHOR"] in (13, 14)
+    assert totals_adv["PEAK"] in (13, 14)
+
 
 def test_jee_main_75q_strict_distribution(db_cursor):
     """Verify that a full 75Q mock generates exactly 30 Easy (40%), 34 Medium (45.3%), 11 Hard (14.7%)."""

@@ -97,7 +97,14 @@ def create_scheduled_test(
     c = conn.cursor()
 
     # Strict Standardized Difficulty: strictly calibrated to authentic NTA / IIT standards
-    strict_difficulty = "HARD" if req.exam_type == "ADVANCED" else "BALANCED"
+    strict_difficulty = "BALANCED"
+
+    # Determine user IDs to factor into anti-repetition / seen-questions filter
+    target_user_ids = []
+    if req.assigned_user_ids and req.assigned_user_ids != ["*"]:
+        target_user_ids = [uid for uid in req.assigned_user_ids if uid and uid != "*"]
+    if not target_user_ids and user and user.get("id"):
+        target_user_ids = [user["id"]]
 
     # Pre-generate frozen question paper using authentic JEE mock selector
     try:
@@ -108,7 +115,8 @@ def create_scheduled_test(
             filter_chapters=req.chapters if req.chapters else None,
             target_exam=req.exam_type,
             difficulty_tier=strict_difficulty,
-            mode="MOCK_TEST"
+            mode="MOCK_TEST",
+            user_ids=target_user_ids
         )
     except Exception as e:
         logger.error(f"Error sampling questions for scheduled test: {e}")
