@@ -97,6 +97,18 @@ class SoundSynthesizer {
     this.playTone(587.33, 0.08, 'sine', 0);     // D5
     this.playTone(880.00, 0.16, 'sine', 0.08);  // A5
   }
+
+  play(name = 'click') {
+    try {
+      if (name === 'correct' || name === 'levelUp' || name === 'confirm') this.correct();
+      else if (name === 'wrong' || name === 'incorrect') this.wrong();
+      else if (name === 'start') this.start();
+      else if (name === 'victory') this.victory();
+      else if (name === 'notif') this.notif();
+      else if (name === 'tick' || name === 'countdown') this.tick();
+      else this.click();
+    } catch (_) {}
+  }
 }
 
 export const sound = new SoundSynthesizer();

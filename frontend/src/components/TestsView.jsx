@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import { api } from '../utils/api';
 import { sound } from '../utils/sound';
 import { formatIST, formatISTDate } from '../utils/dateUtils';
@@ -62,11 +63,9 @@ export default function TestsView({ user, onStartTest, onSelectTest, onOpenAuth 
   // Calculate default dates for create form
   useEffect(() => {
     const now = new Date();
-    // Start tomorrow at 09:00 AM local
     const tomorrow = new Date(now.getTime() + 24 * 60 * 60 * 1000);
     tomorrow.setHours(9, 0, 0, 0);
 
-    // Deadline 48 hours after start
     const deadline = new Date(tomorrow.getTime() + 48 * 60 * 60 * 1000);
     deadline.setHours(23, 59, 0, 0);
 
@@ -99,46 +98,42 @@ export default function TestsView({ user, onStartTest, onSelectTest, onOpenAuth 
     fetchCatalog();
   }, [user?.id]);
 
-  const openLeaderboard = async (testId) => {
+  const openLeaderboard = (testId) => {
+    try { sound?.click?.(); } catch (_) {}
     setLeaderboardModalTestId(testId);
     setLoadingLeaderboard(true);
     setLbActiveTier('OFFICIAL');
-    try {
-      sound.play('click');
-      const data = await api.scheduledTests.getLeaderboard(testId);
-      setLeaderboardData(data);
-    } catch (err) {
-      alert('Could not load leaderboard: ' + err.message);
-      setLeaderboardModalTestId(null);
-    } finally {
-      setLoadingLeaderboard(false);
-    }
+    api.scheduledTests.getLeaderboard(testId)
+      .then((data) => setLeaderboardData(data))
+      .catch((err) => {
+        alert('Could not load leaderboard: ' + err.message);
+        setLeaderboardModalTestId(null);
+      })
+      .finally(() => setLoadingLeaderboard(false));
   };
 
-  const openCreateModal = async () => {
+  const openCreateModal = () => {
+    try { sound?.click?.(); } catch (_) {}
     if (!user) {
       if (onOpenAuth) onOpenAuth();
+      else alert('Please sign in or register an aspirant nickname to create scheduled exams.');
       return;
     }
-    sound.play('click');
     setShowCreateModal(true);
     setLoadingAspirants(true);
-    try {
-      const list = await api.scheduledTests.getAspirants();
-      setAspirantsList(list || []);
-    } catch (err) {
-      console.warn('Failed to load aspirants roster:', err);
-    } finally {
-      setLoadingAspirants(false);
-    }
+    api.scheduledTests.getAspirants()
+      .then((list) => setAspirantsList(list || []))
+      .catch((err) => console.warn('Failed to load aspirants roster:', err))
+      .finally(() => setLoadingAspirants(false));
   };
 
   const handleStartTest = async (test) => {
+    try { sound?.click?.(); } catch (_) {}
     if (!user) {
       if (onOpenAuth) onOpenAuth();
+      else alert('Please sign in to attempt this test.');
       return;
     }
-    sound.play('confirm');
     try {
       const res = await api.scheduledTests.start(test.id);
       if (res && res.room_code && onStartTest) {
@@ -163,7 +158,7 @@ export default function TestsView({ user, onStartTest, onSelectTest, onOpenAuth 
         deadline_time: new Date(createForm.deadline_time).toISOString(),
       };
       await api.scheduledTests.create(payload);
-      sound.play('levelUp');
+      try { sound?.play?.('correct') || sound?.click?.(); } catch (_) {}
       setShowCreateModal(false);
       fetchCatalog();
     } catch (err) {
@@ -175,11 +170,11 @@ export default function TestsView({ user, onStartTest, onSelectTest, onOpenAuth 
 
   // Filtered tests based on tab and search
   const displayedTests = useMemo(() => {
-    let list = catalog.all;
-    if (activeTab === 'ACTIVE') list = catalog.active;
-    else if (activeTab === 'UPCOMING') list = catalog.upcoming;
-    else if (activeTab === 'PENDING') list = catalog.pending;
-    else if (activeTab === 'COMPLETED') list = catalog.completed;
+    let list = catalog.all || [];
+    if (activeTab === 'ACTIVE') list = catalog.active || [];
+    else if (activeTab === 'UPCOMING') list = catalog.upcoming || [];
+    else if (activeTab === 'PENDING') list = catalog.pending || [];
+    else if (activeTab === 'COMPLETED') list = catalog.completed || [];
 
     if (!searchQuery.trim()) return list;
     const q = searchQuery.toLowerCase().trim();
@@ -238,7 +233,7 @@ export default function TestsView({ user, onStartTest, onSelectTest, onOpenAuth 
           </button>
           <button
             onClick={openCreateModal}
-            className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-500 hover:to-blue-500 text-white font-bold text-xs flex items-center gap-2 shadow-lg shadow-indigo-600/30 hover:scale-105 active:scale-95 transition"
+            className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-500 hover:to-blue-500 text-white font-bold text-xs flex items-center gap-2 shadow-lg shadow-indigo-600/30 hover:scale-105 active:scale-95 transition cursor-pointer"
           >
             <Plus className="w-4 h-4" />
             Create Scheduled Test
@@ -251,23 +246,23 @@ export default function TestsView({ user, onStartTest, onSelectTest, onOpenAuth 
         {/* Tabs */}
         <div className="flex items-center gap-1.5 p-1 bg-slate-900/90 border border-slate-800 rounded-xl overflow-x-auto max-w-full">
           {[
-            { id: 'ALL', label: `All (${catalog.all.length})` },
-            { id: 'ACTIVE', label: `⚡ Active Now (${catalog.active.length})` },
-            { id: 'UPCOMING', label: `⏳ Upcoming (${catalog.upcoming.length})` },
+            { id: 'ALL', label: `All (${catalog.all?.length || 0})` },
+            { id: 'ACTIVE', label: `⚡ Active Now (${catalog.active?.length || 0})` },
+            { id: 'UPCOMING', label: `⏳ Upcoming (${catalog.upcoming?.length || 0})` },
             {
               id: 'PENDING',
-              label: `⚠️ Pending (${catalog.pending.length})`,
-              badge: catalog.pending.length > 0,
+              label: `⚠️ Pending (${catalog.pending?.length || 0})`,
+              badge: (catalog.pending?.length || 0) > 0,
             },
-            { id: 'COMPLETED', label: `✅ Completed (${catalog.completed.length})` },
+            { id: 'COMPLETED', label: `✅ Completed (${catalog.completed?.length || 0})` },
           ].map((tab) => (
             <button
               key={tab.id}
               onClick={() => {
-                sound.play('click');
+                try { sound?.click?.(); } catch (_) {}
                 setActiveTab(tab.id);
               }}
-              className={`px-3 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap transition flex items-center gap-1.5 ${
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap transition flex items-center gap-1.5 cursor-pointer ${
                 activeTab === tab.id
                   ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/30'
                   : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
@@ -439,7 +434,7 @@ export default function TestsView({ user, onStartTest, onSelectTest, onOpenAuth 
                 <div className="pt-3 border-t border-slate-800/80 flex items-center justify-between gap-2">
                   <button
                     onClick={() => openLeaderboard(test.id)}
-                    className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold transition flex items-center gap-1.5"
+                    className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold transition flex items-center gap-1.5 cursor-pointer"
                   >
                     <Trophy className="w-3.5 h-3.5 text-amber-400" />
                     Standings ({test.participants_count})
@@ -451,7 +446,7 @@ export default function TestsView({ user, onStartTest, onSelectTest, onOpenAuth 
                         onClick={() => {
                           if (onSelectTest) onSelectTest(test.room_code);
                         }}
-                        className="px-4 py-1.5 rounded-xl bg-indigo-600/30 hover:bg-indigo-600 text-indigo-300 hover:text-white border border-indigo-500/40 text-xs font-bold transition flex items-center gap-1.5 shadow-md"
+                        className="px-4 py-1.5 rounded-xl bg-indigo-600/30 hover:bg-indigo-600 text-indigo-300 hover:text-white border border-indigo-500/40 text-xs font-bold transition flex items-center gap-1.5 shadow-md cursor-pointer"
                       >
                         <FileText className="w-3.5 h-3.5" />
                         Solutions & Review
@@ -467,7 +462,7 @@ export default function TestsView({ user, onStartTest, onSelectTest, onOpenAuth 
                     ) : isLateAttempt ? (
                       <button
                         onClick={() => handleStartTest(test)}
-                        className="px-4 py-1.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-white text-xs font-black transition flex items-center gap-1.5 shadow-md shadow-amber-600/20"
+                        className="px-4 py-1.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-white text-xs font-black transition flex items-center gap-1.5 shadow-md shadow-amber-600/20 cursor-pointer"
                       >
                         <Hourglass className="w-3.5 h-3.5" />
                         Start Late Attempt
@@ -475,7 +470,7 @@ export default function TestsView({ user, onStartTest, onSelectTest, onOpenAuth 
                     ) : (
                       <button
                         onClick={() => handleStartTest(test)}
-                        className="px-4 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-black transition flex items-center gap-1.5 shadow-lg shadow-emerald-600/30 hover:scale-105 active:scale-95"
+                        className="px-4 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-black transition flex items-center gap-1.5 shadow-lg shadow-emerald-600/30 hover:scale-105 active:scale-95 cursor-pointer"
                       >
                         <ArrowRight className="w-3.5 h-3.5" />
                         Start Exam Now
@@ -489,9 +484,9 @@ export default function TestsView({ user, onStartTest, onSelectTest, onOpenAuth 
         </div>
       )}
 
-      {/* TWO-TIER LEADERBOARD MODAL */}
-      {leaderboardModalTestId && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-fadeIn">
+      {/* TWO-TIER LEADERBOARD MODAL (PORTAL TO DOCUMENT.BODY) */}
+      {leaderboardModalTestId && typeof document !== 'undefined' && createPortal(
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-fadeIn">
           <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-2xl w-full max-h-[85vh] flex flex-col overflow-hidden shadow-2xl">
             {/* Modal Header */}
             <div className="p-5 border-b border-slate-800 flex items-center justify-between">
@@ -506,7 +501,7 @@ export default function TestsView({ user, onStartTest, onSelectTest, onOpenAuth 
               </div>
               <button
                 onClick={() => setLeaderboardModalTestId(null)}
-                className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition"
+                className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition cursor-pointer"
               >
                 <X className="w-5 h-5" />
               </button>
@@ -516,7 +511,7 @@ export default function TestsView({ user, onStartTest, onSelectTest, onOpenAuth 
             <div className="flex border-b border-slate-800 bg-slate-950/60 p-1">
               <button
                 onClick={() => setLbActiveTier('OFFICIAL')}
-                className={`flex-1 py-2 text-xs font-bold rounded-lg transition flex items-center justify-center gap-2 ${
+                className={`flex-1 py-2 text-xs font-bold rounded-lg transition flex items-center justify-center gap-2 cursor-pointer ${
                   lbActiveTier === 'OFFICIAL'
                     ? 'bg-indigo-600 text-white shadow-md'
                     : 'text-slate-400 hover:text-slate-200'
@@ -527,7 +522,7 @@ export default function TestsView({ user, onStartTest, onSelectTest, onOpenAuth 
               </button>
               <button
                 onClick={() => setLbActiveTier('LATE')}
-                className={`flex-1 py-2 text-xs font-bold rounded-lg transition flex items-center justify-center gap-2 ${
+                className={`flex-1 py-2 text-xs font-bold rounded-lg transition flex items-center justify-center gap-2 cursor-pointer ${
                   lbActiveTier === 'LATE'
                     ? 'bg-amber-600 text-white shadow-md'
                     : 'text-slate-400 hover:text-slate-200'
@@ -641,12 +636,13 @@ export default function TestsView({ user, onStartTest, onSelectTest, onOpenAuth 
               )}
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
-      {/* CREATE SCHEDULED TEST MODAL */}
-      {showCreateModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-fadeIn">
+      {/* CREATE SCHEDULED TEST MODAL (PORTAL TO DOCUMENT.BODY) */}
+      {showCreateModal && typeof document !== 'undefined' && createPortal(
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-fadeIn">
           <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-xl w-full max-h-[90vh] flex flex-col overflow-hidden shadow-2xl">
             {/* Header */}
             <div className="p-5 border-b border-slate-800 flex items-center justify-between">
@@ -658,8 +654,9 @@ export default function TestsView({ user, onStartTest, onSelectTest, onOpenAuth 
                 <p className="text-xs text-slate-400">Pre-generate paper and assign to target cohort</p>
               </div>
               <button
+                type="button"
                 onClick={() => setShowCreateModal(false)}
-                className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition"
+                className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition cursor-pointer"
               >
                 <X className="w-5 h-5" />
               </button>
@@ -796,7 +793,7 @@ export default function TestsView({ user, onStartTest, onSelectTest, onOpenAuth 
                         setCreateForm({ ...createForm, assigned_user_ids: ['*'] });
                       }
                     }}
-                    className="text-[11px] text-indigo-400 hover:text-indigo-300 font-bold"
+                    className="text-[11px] text-indigo-400 hover:text-indigo-300 font-bold cursor-pointer"
                   >
                     {createForm.assigned_user_ids.includes('*') ? 'Unselect All (Custom)' : 'Select All Registered'}
                   </button>
@@ -848,7 +845,7 @@ export default function TestsView({ user, onStartTest, onSelectTest, onOpenAuth 
                 <button
                   type="submit"
                   disabled={creating}
-                  className="w-full py-2.5 rounded-xl bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-500 hover:to-blue-500 text-white font-black text-xs flex items-center justify-center gap-2 shadow-lg shadow-indigo-600/30 transition disabled:opacity-50"
+                  className="w-full py-2.5 rounded-xl bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-500 hover:to-blue-500 text-white font-black text-xs flex items-center justify-center gap-2 shadow-lg shadow-indigo-600/30 transition disabled:opacity-50 cursor-pointer"
                 >
                   {creating ? (
                     <>
@@ -865,7 +862,8 @@ export default function TestsView({ user, onStartTest, onSelectTest, onOpenAuth 
               </div>
             </form>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );
