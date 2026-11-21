@@ -464,13 +464,17 @@ export default function MockTestView({ room, user, onMatchComplete, onExitToDash
               <span>NTA CBT Terminal Ready</span>
             </div>
             <div className="relative flex items-center justify-center mb-8">
-              <div className={`w-36 h-36 sm:w-44 sm:h-44 rounded-full border-4 flex items-center justify-center transition-all duration-300 shadow-2xl ${
-                countdown === 0
-                  ? 'border-emerald-500 bg-emerald-950/40 shadow-[0_0_60px_rgba(16,185,129,0.6)] scale-110'
-                  : countdown === 1
-                  ? 'border-amber-400 bg-amber-950/40 shadow-[0_0_60px_rgba(251,191,36,0.6)] scale-105'
-                  : 'border-orange-500 bg-orange-950/40 shadow-[0_0_60px_rgba(249,115,22,0.6)] scale-100'
-              }`}>
+              <div className="absolute inset-0 rounded-full border-2 border-orange-400 animate-ping opacity-25 pointer-events-none" />
+              <div
+                key={countdown}
+                className={`w-36 h-36 sm:w-44 sm:h-44 rounded-full border-4 flex items-center justify-center transition-all duration-300 shadow-2xl animate-countdown-bloom ${
+                  countdown === 0
+                    ? 'border-emerald-500 bg-emerald-950/60 shadow-[0_0_80px_rgba(16,185,129,0.7)] scale-110'
+                    : countdown === 1
+                    ? 'border-amber-400 bg-amber-950/60 shadow-[0_0_80px_rgba(251,191,36,0.7)] scale-105'
+                    : 'border-orange-500 bg-orange-950/60 shadow-[0_0_80px_rgba(249,115,22,0.7)] scale-100'
+                }`}
+              >
                 <span className={`font-mono font-black transition-all duration-300 transform ${
                   countdown === 0
                     ? 'text-3xl sm:text-4xl text-emerald-300 animate-pulse'
@@ -514,11 +518,19 @@ export default function MockTestView({ room, user, onMatchComplete, onExitToDash
           {/* Candidate Details & Timer Box */}
           <div className="flex items-center gap-2 sm:gap-4 shrink-0">
             {/* Real NTA Time Left Box (Permanently Pinned) */}
-            <div className="flex items-center gap-1.5 sm:gap-2 bg-[#0f172a] border border-orange-500/90 px-2.5 sm:px-3.5 py-1.5 rounded-lg text-white font-mono shadow-inner shrink-0">
-              <Clock className="w-4 h-4 text-orange-400 shrink-0" />
+            <div className={`flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-3.5 py-1.5 rounded-lg text-white font-mono shadow-inner shrink-0 transition-all duration-300 ${
+              timeRemaining < 60
+                ? 'bg-rose-950/90 border-2 border-rose-500 animate-pulse-urgent shadow-[0_0_20px_rgba(244,63,94,0.5)]'
+                : timeRemaining < 300
+                ? 'bg-amber-950/80 border-2 border-amber-500 shadow-[0_0_15px_rgba(245,158,11,0.35)]'
+                : 'bg-[#0f172a] border border-orange-500/90'
+            }`}>
+              <Clock className={`w-4 h-4 shrink-0 ${timeRemaining < 60 ? 'text-rose-400 animate-spin-slow' : 'text-orange-400'}`} />
               <div className="text-left">
                 <span className="text-[8px] sm:text-[9px] uppercase tracking-wider block text-slate-400 font-bold leading-none mb-0.5">Time Left</span>
-                <span className={`text-xs sm:text-sm font-black tracking-wider block leading-none ${timeRemaining < 300 ? 'text-red-400 animate-pulse' : 'text-orange-400'}`}>
+                <span className={`text-xs sm:text-sm font-black tracking-wider block leading-none ${
+                  timeRemaining < 60 ? 'text-rose-300 font-black' : timeRemaining < 300 ? 'text-amber-300 font-bold' : 'text-orange-400'
+                }`}>
                   {formatTime(timeRemaining)}
                 </span>
               </div>
@@ -861,11 +873,19 @@ export default function MockTestView({ room, user, onMatchComplete, onExitToDash
                 </div>
               </div>
 
-              <div className="flex items-center gap-2 bg-[#1e293b] border border-orange-500/80 px-2.5 py-1.5 rounded-md font-mono shrink-0">
-                <Clock className="w-4 h-4 text-orange-400 shrink-0" />
+              <div className={`flex items-center gap-2 px-2.5 py-1.5 rounded-md font-mono shrink-0 transition-all duration-300 ${
+                timeRemaining < 60
+                  ? 'bg-rose-950/90 border-2 border-rose-500 animate-pulse-urgent shadow-[0_0_15px_rgba(244,63,94,0.5)]'
+                  : timeRemaining < 300
+                  ? 'bg-amber-950/80 border border-amber-500 shadow-[0_0_10px_rgba(245,158,11,0.35)]'
+                  : 'bg-[#1e293b] border border-orange-500/80'
+              }`}>
+                <Clock className={`w-4 h-4 shrink-0 ${timeRemaining < 60 ? 'text-rose-400' : 'text-orange-400'}`} />
                 <div className="text-right">
                   <span className="text-[8px] uppercase tracking-wider block text-slate-400 font-bold leading-none mb-0.5">Time Left</span>
-                  <span className={`text-xs sm:text-sm font-black tracking-wider block leading-none ${timeRemaining < 300 ? 'text-red-400 animate-pulse' : 'text-orange-400'}`}>
+                  <span className={`text-xs sm:text-sm font-black tracking-wider block leading-none ${
+                    timeRemaining < 60 ? 'text-rose-300 font-black' : timeRemaining < 300 ? 'text-amber-300 font-bold' : 'text-orange-400'
+                  }`}>
                     {formatTime(timeRemaining)}
                   </span>
                 </div>
@@ -1207,13 +1227,17 @@ export default function MockTestView({ room, user, onMatchComplete, onExitToDash
 
           {/* Big Countdown Number Circle */}
           <div className="relative flex items-center justify-center mb-8">
-            <div className={`w-36 h-36 sm:w-44 sm:h-44 rounded-full border-4 flex items-center justify-center transition-all duration-300 shadow-2xl ${
-              countdown === 0
-                ? 'border-emerald-500 bg-emerald-950/40 shadow-[0_0_60px_rgba(16,185,129,0.6)] scale-110'
-                : countdown === 1
-                ? 'border-amber-400 bg-amber-950/40 shadow-[0_0_60px_rgba(251,191,36,0.6)] scale-105'
-                : 'border-orange-500 bg-orange-950/40 shadow-[0_0_60px_rgba(249,115,22,0.6)] scale-100'
-            }`}>
+            <div className="absolute inset-0 rounded-full border-2 border-orange-400 animate-ping opacity-25 pointer-events-none" />
+            <div
+              key={countdown}
+              className={`w-36 h-36 sm:w-44 sm:h-44 rounded-full border-4 flex items-center justify-center transition-all duration-300 shadow-2xl animate-countdown-bloom ${
+                countdown === 0
+                  ? 'border-emerald-500 bg-emerald-950/60 shadow-[0_0_80px_rgba(16,185,129,0.7)] scale-110'
+                  : countdown === 1
+                  ? 'border-amber-400 bg-amber-950/60 shadow-[0_0_80px_rgba(251,191,36,0.7)] scale-105'
+                  : 'border-orange-500 bg-orange-950/60 shadow-[0_0_80px_rgba(249,115,22,0.7)] scale-100'
+              }`}
+            >
               <span className={`font-mono font-black transition-all duration-300 transform ${
                 countdown === 0
                   ? 'text-3xl sm:text-4xl text-emerald-300 animate-pulse'

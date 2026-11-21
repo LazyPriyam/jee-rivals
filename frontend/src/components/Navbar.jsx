@@ -32,6 +32,7 @@ import NotificationPanel from './NotificationPanel';
 import UpdateToast from './UpdateToast';
 import WhatsNewModal from './WhatsNewModal';
 import StreakModal from './StreakModal';
+import AnimatedCounter from './animations/AnimatedCounter';
 
 export const getDivisionBaseTier = (div) => {
   if (!div) return 'BRONZE';
@@ -232,13 +233,13 @@ export default function Navbar({
                     setStreakModalOpen(true);
                   }}
                   title={`Daily Study Streak: ${user.current_streak || 0} Days`}
-                  className={`flex items-center gap-0.5 px-1 py-0.5 rounded text-[9px] font-bold border transition cursor-pointer ${
+                  className={`flex items-center gap-0.5 px-1 py-0.5 rounded text-[9px] font-bold border transition cursor-pointer btn-tactile ${
                     user.is_streak_active_today
-                      ? 'bg-orange-500/25 text-orange-400 border-orange-500/40'
+                      ? 'bg-orange-500/25 text-orange-400 border-orange-500/40 shadow-[0_0_10px_rgba(249,115,22,0.3)]'
                       : 'bg-amber-500/15 text-amber-300 border-amber-500/30 animate-pulse'
                   }`}
                 >
-                  <Flame className="w-2.5 h-2.5 fill-current" />
+                  <Flame className="w-2.5 h-2.5 fill-current animate-flame-pulse" />
                   <span>{user.current_streak || 0}</span>
                 </button>
               )}
@@ -247,7 +248,7 @@ export default function Navbar({
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-1.5 min-w-0">
                       <span className="text-xs font-bold text-white truncate max-w-[90px]">{user.username}</span>
-                      <span className={`text-[8px] font-extrabold px-1 py-0.2 rounded border ${divStyle}`}>
+                      <span className={`text-[8px] font-extrabold px-1 py-0.2 rounded border shadow-sm relative overflow-hidden ${divStyle}`}>
                         {user.current_division}
                       </span>
                     </div>
@@ -258,15 +259,15 @@ export default function Navbar({
                         if (onOpenAuth) onOpenAuth();
                       }}
                       title="Switch / Change Account"
-                      className="text-[9px] text-orange-300 hover:text-white px-1.5 py-0.5 rounded bg-orange-950/80 hover:bg-orange-600/50 border border-orange-500/30 transition cursor-pointer font-bold shrink-0"
+                      className="text-[9px] text-orange-300 hover:text-white px-1.5 py-0.5 rounded bg-orange-950/80 hover:bg-orange-600/50 border border-orange-500/30 transition cursor-pointer font-bold shrink-0 btn-tactile"
                     >
                       Switch
                     </button>
                   </div>
                   <div className="flex items-center justify-between text-[10px] text-slate-400 font-mono mt-0.5">
                     <div>
-                      <span className="text-orange-400 font-bold">{Math.round(user.overall_elo)}</span> Elo •{' '}
-                      <span className="text-amber-400 font-bold">{user.weekly_rp}</span> RP
+                      <AnimatedCounter value={user.overall_elo} className="text-orange-400 font-bold" /> Elo •{' '}
+                      <AnimatedCounter value={user.weekly_rp} className="text-amber-400 font-bold" /> RP
                     </div>
                     <button
                       type="button"
@@ -276,13 +277,13 @@ export default function Navbar({
                         setStreakModalOpen(true);
                       }}
                       title="Daily Study Streak & Milestones"
-                      className={`flex items-center gap-1 px-1.5 py-0.2 rounded-full border transition cursor-pointer font-bold shrink-0 ${
+                      className={`flex items-center gap-1 px-1.5 py-0.2 rounded-full border transition cursor-pointer font-bold shrink-0 btn-tactile ${
                         user.is_streak_active_today
-                          ? 'bg-orange-500/20 text-orange-400 border-orange-500/40 hover:bg-orange-500/30'
+                          ? 'bg-orange-500/20 text-orange-400 border-orange-500/40 hover:bg-orange-500/30 shadow-[0_0_12px_rgba(249,115,22,0.25)]'
                           : 'bg-amber-500/10 text-amber-300 border-amber-500/30 animate-pulse hover:bg-amber-500/20'
                       }`}
                     >
-                      <Flame className="w-2.5 h-2.5 fill-current" />
+                      <Flame className="w-2.5 h-2.5 fill-current animate-flame-pulse" />
                       <span>{user.current_streak || 0}</span>
                     </button>
                   </div>
@@ -380,10 +381,10 @@ export default function Navbar({
         {/* Brand on Mobile Header */}
         <div
           onClick={() => handleTabClick('arena')}
-          className="flex items-center gap-2.5 cursor-pointer"
+          className="flex items-center gap-2.5 cursor-pointer btn-tactile"
         >
-          <div className="flex items-center justify-center w-8 h-8 rounded-xl bg-gradient-to-br from-orange-500 via-orange-600 to-amber-500 text-white shadow-md">
-            <Flame className="w-4 h-4 fill-current" />
+          <div className="flex items-center justify-center w-8 h-8 rounded-xl bg-gradient-to-br from-orange-500 via-orange-600 to-amber-500 text-white shadow-md glow-orange-subtle">
+            <Flame className="w-4 h-4 fill-current animate-flame-pulse" />
           </div>
           <div className="font-black text-lg tracking-tight text-white">
             <span>JEE</span>
@@ -401,14 +402,14 @@ export default function Navbar({
                 sound.click();
                 setStreakModalOpen(true);
               }}
-              className={`px-2 py-1 rounded-lg text-xs font-bold border transition flex items-center gap-1 cursor-pointer ${
+              className={`px-2 py-1 rounded-lg text-xs font-bold border transition flex items-center gap-1 cursor-pointer btn-tactile ${
                 user.is_streak_active_today
-                  ? 'bg-orange-500/20 text-orange-400 border-orange-500/40'
+                  ? 'bg-orange-500/20 text-orange-400 border-orange-500/40 shadow-[0_0_10px_rgba(249,115,22,0.3)]'
                   : 'bg-amber-500/10 text-amber-300 border-amber-500/30 animate-pulse'
               }`}
               title={`Daily Study Streak: ${user.current_streak || 0} Days`}
             >
-              <Flame className="w-3.5 h-3.5 fill-current" />
+              <Flame className="w-3.5 h-3.5 fill-current animate-flame-pulse" />
               <span>{user.current_streak || 0}</span>
             </button>
           )}

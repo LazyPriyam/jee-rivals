@@ -3,6 +3,8 @@ import confetti from 'canvas-confetti';
 import { api } from '../utils/api';
 import MathRenderer from './MathRenderer';
 import OnDemandDerivationBox from './OnDemandDerivationBox';
+import AnimatedCounter from './animations/AnimatedCounter';
+import HoloSheen from './animations/HoloSheen';
 import { Trophy, Crown, ArrowLeft, RefreshCw, CheckCircle2, XCircle, BookOpen, AlertTriangle, Lightbulb, Image as ImageIcon, Flame } from 'lucide-react';
 
 export default function ResultsView({ roomCode, room, user, onReturnArena, onRematch, onViewProfile }) {
@@ -18,6 +20,20 @@ export default function ResultsView({ roomCode, room, user, onReturnArena, onRem
         spread: 75,
         origin: { y: 0.6 },
       });
+      setTimeout(() => {
+        confetti({
+          particleCount: 50,
+          angle: 60,
+          spread: 60,
+          origin: { x: 0, y: 0.7 },
+        });
+        confetti({
+          particleCount: 50,
+          angle: 120,
+          spread: 60,
+          origin: { x: 1, y: 0.7 },
+        });
+      }, 350);
     } catch (_) {}
 
     let isMounted = true;
@@ -177,121 +193,151 @@ export default function ResultsView({ roomCode, room, user, onReturnArena, onRem
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-10 max-w-3xl mx-auto items-end">
             {/* 2nd Place */}
             {participants[1] ? (
-              <div className="order-2 md:order-1 bg-[#101524] border border-white/10 rounded-2xl p-5 text-center shadow-lg">
-                {participants[1].avatar_image_url ? (
-                  <div className="w-11 h-11 rounded-xl mx-auto mb-2 overflow-hidden border border-slate-400 shadow">
-                    <img src={participants[1].avatar_image_url} alt={participants[1].username} className="w-full h-full object-cover" />
-                  </div>
-                ) : (
-                  <span className="text-2xl mb-1 block">🥈</span>
-                )}
-                <span className="text-xs font-mono font-bold text-slate-400">RANK #2</span>
-                <h3 
-                  onClick={() => onViewProfile && onViewProfile(participants[1].username)}
-                  className="text-base font-bold text-white truncate mt-1 hover:text-orange-400 hover:underline cursor-pointer transition-colors"
-                  title={`View ${participants[1].username}'s profile`}
-                >
-                  {participants[1].username}
-                </h3>
-                {results.mode === 'MOCK_TEST' ? (
-                  <>
-                    <div className="font-mono font-black text-xl text-orange-400 mt-2">
-                      {participants[1].marks >= 0 ? '+' : ''}{participants[1].marks} Marks
+              <HoloSheen interactive intensity="subtle" rounded="rounded-2xl" className="order-2 md:order-1 card-hover-lift">
+                <div className="bg-[#101524] border border-white/10 rounded-2xl p-5 text-center shadow-lg h-full">
+                  {participants[1].avatar_image_url ? (
+                    <div className="w-11 h-11 rounded-xl mx-auto mb-2 overflow-hidden border border-slate-400 shadow">
+                      <img src={participants[1].avatar_image_url} alt={participants[1].username} className="w-full h-full object-cover" />
                     </div>
-                    <span className="text-xs text-slate-400 block font-mono">
-                      {participants[1].accuracy !== undefined ? `${participants[1].accuracy}% Accuracy` : `${participants[1].score} pts`}
-                    </span>
-                  </>
-                ) : (
-                  <>
-                    <div className="font-mono font-black text-xl text-slate-200 mt-2">
-                      {participants[1].score} pts
-                    </div>
-                    <span className="text-xs text-slate-400 block font-mono">
-                      {participants[1].marks} Marks
-                    </span>
-                  </>
-                )}
-              </div>
+                  ) : (
+                    <span className="text-2xl mb-1 block">🥈</span>
+                  )}
+                  <span className="text-xs font-mono font-bold text-slate-400">RANK #2</span>
+                  <h3 
+                    onClick={() => onViewProfile && onViewProfile(participants[1].username)}
+                    className="text-base font-bold text-white truncate mt-1 hover:text-orange-400 hover:underline cursor-pointer transition-colors"
+                    title={`View ${participants[1].username}'s profile`}
+                  >
+                    {participants[1].username}
+                  </h3>
+                  {results.mode === 'MOCK_TEST' ? (
+                    <>
+                      <div className="font-mono font-black text-xl text-orange-400 mt-2">
+                        <AnimatedCounter
+                          value={participants[1].marks}
+                          prefix={participants[1].marks >= 0 ? '+' : ''}
+                          suffix=" Marks"
+                        />
+                      </div>
+                      <span className="text-xs text-slate-400 block font-mono">
+                        {participants[1].accuracy !== undefined ? (
+                          <AnimatedCounter value={participants[1].accuracy} suffix="% Accuracy" />
+                        ) : (
+                          `${participants[1].score} pts`
+                        )}
+                      </span>
+                    </>
+                  ) : (
+                    <>
+                      <div className="font-mono font-black text-xl text-slate-200 mt-2">
+                        <AnimatedCounter value={participants[1].score} suffix=" pts" />
+                      </div>
+                      <span className="text-xs text-slate-400 block font-mono">
+                        {participants[1].marks} Marks
+                      </span>
+                    </>
+                  )}
+                </div>
+              </HoloSheen>
             ) : <div className="hidden md:block"></div>}
 
             {/* 1st Place */}
             {winner && (
-              <div className="order-1 md:order-2 bg-gradient-to-b from-[#182136] to-[#101524] border-2 border-orange-500 rounded-3xl p-6 text-center shadow-2xl shadow-orange-950/50 -translate-y-2 glow-orange-subtle">
-                <span className="text-4xl mb-1 block">👑</span>
-                {winner.avatar_image_url && (
-                  <div className="w-14 h-14 rounded-2xl mx-auto mb-2 overflow-hidden border-2 border-amber-400 shadow-md">
-                    <img src={winner.avatar_image_url} alt={winner.username} className="w-full h-full object-cover" />
-                  </div>
-                )}
-                <span className="text-xs font-mono font-bold text-amber-400">CHAMPION #1</span>
-                <h3 
-                  onClick={() => onViewProfile && onViewProfile(winner.username)}
-                  className="text-lg font-black text-white truncate mt-1 hover:text-orange-400 hover:underline cursor-pointer transition-colors"
-                  title={`View ${winner.username}'s profile`}
-                >
-                  {winner.username}
-                </h3>
-                {results.mode === 'MOCK_TEST' ? (
-                  <>
-                    <div className="font-mono font-black text-3xl text-orange-400 mt-2">
-                      {winner.marks >= 0 ? '+' : ''}{winner.marks} Marks
+              <HoloSheen continuous intensity="vibrant" rounded="rounded-3xl" className="order-1 md:order-2 -translate-y-2 card-hover-lift">
+                <div className="bg-gradient-to-b from-[#182136] to-[#101524] border-2 border-orange-500 rounded-3xl p-6 text-center shadow-2xl shadow-orange-950/50 glow-orange-subtle h-full">
+                  <span className="text-4xl mb-1 block">👑</span>
+                  {winner.avatar_image_url && (
+                    <div className="w-14 h-14 rounded-2xl mx-auto mb-2 overflow-hidden border-2 border-amber-400 shadow-md">
+                      <img src={winner.avatar_image_url} alt={winner.username} className="w-full h-full object-cover" />
                     </div>
-                    <span className="text-xs text-amber-200/80 block font-mono">
-                      {winner.accuracy !== undefined ? `${winner.accuracy}% Accuracy` : `${winner.score} pts`}
-                    </span>
-                  </>
-                ) : (
-                  <>
-                    <div className="font-mono font-black text-3xl text-orange-400 mt-2">
-                      {winner.score} pts
-                    </div>
-                    <span className="text-xs text-amber-200/80 block font-mono">
-                      {winner.marks} Marks
-                    </span>
-                  </>
-                )}
-              </div>
+                  )}
+                  <span className="text-xs font-mono font-bold text-amber-400">CHAMPION #1</span>
+                  <h3 
+                    onClick={() => onViewProfile && onViewProfile(winner.username)}
+                    className="text-lg font-black text-white truncate mt-1 hover:text-orange-400 hover:underline cursor-pointer transition-colors"
+                    title={`View ${winner.username}'s profile`}
+                  >
+                    {winner.username}
+                  </h3>
+                  {results.mode === 'MOCK_TEST' ? (
+                    <>
+                      <div className="font-mono font-black text-3xl text-orange-400 mt-2">
+                        <AnimatedCounter
+                          value={winner.marks}
+                          prefix={winner.marks >= 0 ? '+' : ''}
+                          suffix=" Marks"
+                        />
+                      </div>
+                      <span className="text-xs text-amber-200/80 block font-mono">
+                        {winner.accuracy !== undefined ? (
+                          <AnimatedCounter value={winner.accuracy} suffix="% Accuracy" />
+                        ) : (
+                          `${winner.score} pts`
+                        )}
+                      </span>
+                    </>
+                  ) : (
+                    <>
+                      <div className="font-mono font-black text-3xl text-orange-400 mt-2">
+                        <AnimatedCounter value={winner.score} suffix=" pts" />
+                      </div>
+                      <span className="text-xs text-amber-200/80 block font-mono">
+                        {winner.marks} Marks
+                      </span>
+                    </>
+                  )}
+                </div>
+              </HoloSheen>
             )}
 
             {/* 3rd Place */}
             {participants[2] ? (
-              <div className="order-3 bg-[#101524] border border-white/10 rounded-2xl p-5 text-center shadow-lg">
-                {participants[2].avatar_image_url ? (
-                  <div className="w-11 h-11 rounded-xl mx-auto mb-2 overflow-hidden border border-amber-700 shadow">
-                    <img src={participants[2].avatar_image_url} alt={participants[2].username} className="w-full h-full object-cover" />
-                  </div>
-                ) : (
-                  <span className="text-2xl mb-1 block">🥉</span>
-                )}
-                <span className="text-xs font-mono font-bold text-slate-400">RANK #3</span>
-                <h3 
-                  onClick={() => onViewProfile && onViewProfile(participants[2].username)}
-                  className="text-base font-bold text-white truncate mt-1 hover:text-orange-400 hover:underline cursor-pointer transition-colors"
-                  title={`View ${participants[2].username}'s profile`}
-                >
-                  {participants[2].username}
-                </h3>
-                {results.mode === 'MOCK_TEST' ? (
-                  <>
-                    <div className="font-mono font-black text-xl text-orange-400 mt-2">
-                      {participants[2].marks >= 0 ? '+' : ''}{participants[2].marks} Marks
+              <HoloSheen interactive intensity="subtle" rounded="rounded-2xl" className="order-3 card-hover-lift">
+                <div className="bg-[#101524] border border-white/10 rounded-2xl p-5 text-center shadow-lg h-full">
+                  {participants[2].avatar_image_url ? (
+                    <div className="w-11 h-11 rounded-xl mx-auto mb-2 overflow-hidden border border-amber-700 shadow">
+                      <img src={participants[2].avatar_image_url} alt={participants[2].username} className="w-full h-full object-cover" />
                     </div>
-                    <span className="text-xs text-slate-400 block font-mono">
-                      {participants[2].accuracy !== undefined ? `${participants[2].accuracy}% Accuracy` : `${participants[2].score} pts`}
-                    </span>
-                  </>
-                ) : (
-                  <>
-                    <div className="font-mono font-black text-xl text-slate-200 mt-2">
-                      {participants[2].score} pts
-                    </div>
-                    <span className="text-xs text-slate-400 block font-mono">
-                      {participants[2].marks} Marks
-                    </span>
-                  </>
-                )}
-              </div>
+                  ) : (
+                    <span className="text-2xl mb-1 block">🥉</span>
+                  )}
+                  <span className="text-xs font-mono font-bold text-slate-400">RANK #3</span>
+                  <h3 
+                    onClick={() => onViewProfile && onViewProfile(participants[2].username)}
+                    className="text-base font-bold text-white truncate mt-1 hover:text-orange-400 hover:underline cursor-pointer transition-colors"
+                    title={`View ${participants[2].username}'s profile`}
+                  >
+                    {participants[2].username}
+                  </h3>
+                  {results.mode === 'MOCK_TEST' ? (
+                    <>
+                      <div className="font-mono font-black text-xl text-orange-400 mt-2">
+                        <AnimatedCounter
+                          value={participants[2].marks}
+                          prefix={participants[2].marks >= 0 ? '+' : ''}
+                          suffix=" Marks"
+                        />
+                      </div>
+                      <span className="text-xs text-slate-400 block font-mono">
+                        {participants[2].accuracy !== undefined ? (
+                          <AnimatedCounter value={participants[2].accuracy} suffix="% Accuracy" />
+                        ) : (
+                          `${participants[2].score} pts`
+                        )}
+                      </span>
+                    </>
+                  ) : (
+                    <>
+                      <div className="font-mono font-black text-xl text-slate-200 mt-2">
+                        <AnimatedCounter value={participants[2].score} suffix=" pts" />
+                      </div>
+                      <span className="text-xs text-slate-400 block font-mono">
+                        {participants[2].marks} Marks
+                      </span>
+                    </>
+                  )}
+                </div>
+              </HoloSheen>
             ) : <div className="hidden md:block"></div>}
           </div>
 

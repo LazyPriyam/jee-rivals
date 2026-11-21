@@ -4,6 +4,7 @@ import { ChevronRight, Target, CheckCircle2, X, Sliders, Sparkles, Award } from 
 import { api, setCachedUser } from '../utils/api';
 import { sound } from '../utils/sound';
 import Dialog from './Dialog';
+import AnimatedCounter from './animations/AnimatedCounter';
 
 // Custom sleek silhouette SVGs matching the runner progression theme
 const CrouchRunnerIcon = ({ className = 'w-4 h-4' }) => (
@@ -166,7 +167,7 @@ export default function DailyGoalCard({ user, onUpdateUser, onNavigateTab }) {
   return (
     <>
       {/* Sleek Daily Goal Card matching user uploaded reference */}
-      <div className="bg-[#161c28]/95 border border-slate-700/60 hover:border-slate-600/80 rounded-2xl px-5 py-4 mb-8 shadow-xl transition-all duration-300 relative overflow-hidden group">
+      <div className="bg-[#161c28]/95 border border-slate-700/60 hover:border-slate-600/80 rounded-2xl px-5 py-4 mb-8 shadow-xl transition-all duration-300 relative overflow-hidden group card-hover-lift">
         <div className="flex flex-col sm:flex-row items-center justify-between gap-5">
           {/* Left Title & Status */}
           <div
@@ -178,8 +179,8 @@ export default function DailyGoalCard({ user, onUpdateUser, onNavigateTab }) {
               <span className="text-sm sm:text-base font-bold text-slate-100 group-hover/title:text-white transition">
                 Your Daily Goal
               </span>
-              <span className="text-sm sm:text-base font-semibold font-mono text-slate-400 group-hover/title:text-orange-400 transition">
-                ({solvedToday}/{currentGoal} Qs)
+              <span className="text-sm sm:text-base font-semibold font-mono text-slate-400 group-hover/title:text-orange-400 transition flex items-center">
+                (<AnimatedCounter value={solvedToday} />/{currentGoal} Qs)
               </span>
             </div>
 

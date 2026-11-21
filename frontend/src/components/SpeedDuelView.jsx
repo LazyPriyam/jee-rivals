@@ -675,21 +675,25 @@ export default function SpeedDuelView({
 
         {/* Instant Feedback Splash Overlay */}
         {feedback && (
-          <div className="absolute inset-0 z-30 bg-black/75 backdrop-blur-sm rounded-3xl flex items-center justify-center animate-in fade-in duration-150">
-            <div className="text-center p-6 rounded-2xl bg-[#262c3c] border border-white/20 shadow-2xl">
+          <div className="absolute inset-0 z-30 bg-black/80 backdrop-blur-md rounded-3xl flex items-center justify-center animate-in fade-in duration-150">
+            <div className={`text-center p-8 rounded-3xl border shadow-2xl ${
+              feedback.isCorrect
+                ? 'bg-[#15241f] border-emerald-500/50 glow-emerald shadow-[0_0_60px_rgba(16,185,129,0.4)] animate-rating-pop'
+                : 'bg-[#29171d] border-rose-500/50 glow-rose shadow-[0_0_60px_rgba(244,63,94,0.4)] animate-impact-shake'
+            }`}>
               {feedback.isCorrect ? (
                 <>
-                  <CheckCircle2 className="w-16 h-16 text-emerald-400 mx-auto mb-2 animate-bounce" />
-                  <h3 className="text-2xl font-black text-emerald-400">CORRECT!</h3>
-                  <p className="text-lg font-mono font-extrabold text-amber-400 mt-1">
+                  <CheckCircle2 className="w-16 h-16 text-emerald-400 mx-auto mb-2 animate-bounce drop-shadow-[0_0_15px_rgba(52,211,153,0.8)]" />
+                  <h3 className="text-3xl font-black text-emerald-400 tracking-wider">CORRECT!</h3>
+                  <p className="text-xl font-mono font-black text-amber-400 mt-1.5 drop-shadow">
                     +{feedback.deltaScore} Points
                   </p>
                 </>
               ) : (
                 <>
-                  <XCircle className="w-16 h-16 text-rose-500 mx-auto mb-2" />
-                  <h3 className="text-2xl font-black text-rose-500">INCORRECT</h3>
-                  <p className="text-lg font-mono font-extrabold text-rose-400 mt-1">
+                  <XCircle className="w-16 h-16 text-rose-500 mx-auto mb-2 drop-shadow-[0_0_15px_rgba(244,63,94,0.8)]" />
+                  <h3 className="text-3xl font-black text-rose-500 tracking-wider">INCORRECT</h3>
+                  <p className="text-xl font-mono font-black text-rose-400 mt-1.5">
                     {feedback.deltaScore} Points
                   </p>
                 </>
@@ -708,7 +712,7 @@ export default function SpeedDuelView({
             type="button"
             disabled={!selectedOption || submitting}
             onClick={() => doSubmit(selectedOption)}
-            className="w-full sm:w-auto px-8 py-3.5 bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-400 hover:to-amber-400 text-white font-black rounded-xl transition shadow-lg shadow-orange-950/50 flex items-center justify-center gap-2 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ml-auto glow-orange-subtle"
+            className="w-full sm:w-auto px-8 py-3.5 bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-400 hover:to-amber-400 text-white font-black rounded-xl transition shadow-lg shadow-orange-950/50 flex items-center justify-center gap-2 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ml-auto glow-orange-subtle btn-tactile hover:scale-[1.02]"
           >
             {submitting ? (
               <span className="animate-pulse">Locking in...</span>

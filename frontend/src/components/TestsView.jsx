@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { api } from '../utils/api';
 import { sound } from '../utils/sound';
 import { formatIST, formatISTDate } from '../utils/dateUtils';
+import ConicBorder from './animations/ConicBorder';
 import {
   FileText,
   Clock,
@@ -457,7 +458,7 @@ export default function TestsView({ user, onStartTest, onSelectTest, onOpenAuth 
                 try { sound?.click?.(); } catch (_) {}
                 setActiveTab(tab.id);
               }}
-              className={`px-3 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap transition flex items-center gap-1.5 cursor-pointer ${
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap transition flex items-center gap-1.5 cursor-pointer btn-tactile ${
                 activeTab === tab.id
                   ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/30'
                   : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
@@ -512,19 +513,24 @@ export default function TestsView({ user, onStartTest, onSelectTest, onOpenAuth 
             const isCreator = user && String(test.created_by_user_id) === String(user.id);
 
             return (
-              <div
+              <ConicBorder
                 key={test.id}
-                className="bg-slate-900/90 rounded-2xl border border-slate-800 hover:border-slate-700 p-5 shadow-xl transition-all duration-200 flex flex-col justify-between relative overflow-hidden group hover:shadow-2xl"
+                active={isActiveWindow}
+                color="cyan"
+                speed="5s"
+                rounded="rounded-2xl"
+                className="card-hover-lift h-full"
+                innerClassName="bg-slate-900/90 rounded-2xl border border-slate-800 hover:border-slate-700 p-5 shadow-xl transition-all duration-200 flex flex-col justify-between relative overflow-hidden group h-full"
               >
                 {/* Status Indicator Bar */}
                 <div
-                  className={`absolute top-0 left-0 right-0 h-1 ${
+                  className={`absolute top-0 left-0 right-0 h-1.5 ${
                     isCompleted
                       ? 'bg-emerald-500'
                       : isUpcoming
                       ? 'bg-indigo-500'
                       : isActiveWindow
-                      ? 'bg-blue-500 animate-pulse'
+                      ? 'bg-cyan-400 animate-pulse'
                       : 'bg-amber-500'
                   }`}
                 />
@@ -707,7 +713,7 @@ export default function TestsView({ user, onStartTest, onSelectTest, onOpenAuth 
                     ) : (
                       <button
                         onClick={() => handleStartTest(test)}
-                        className="px-4 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-black transition flex items-center gap-1.5 shadow-lg shadow-emerald-600/30 hover:scale-105 active:scale-95 cursor-pointer"
+                        className="px-4 py-1.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-500 hover:from-emerald-500 hover:to-teal-400 text-white text-xs font-black transition flex items-center gap-1.5 shadow-lg shadow-emerald-600/30 btn-tactile hover:scale-105 cursor-pointer glow-emerald"
                       >
                         <ArrowRight className="w-3.5 h-3.5" />
                         Start Exam Now
@@ -715,7 +721,7 @@ export default function TestsView({ user, onStartTest, onSelectTest, onOpenAuth 
                     )}
                   </div>
                 </div>
-              </div>
+              </ConicBorder>
             );
           })}
         </div>

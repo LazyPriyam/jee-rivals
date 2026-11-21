@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { Play, Swords, BookOpen, Clock, AlertTriangle, X, ShieldAlert, Users, Trophy, Flame, ArrowRight } from 'lucide-react';
 import { sound } from '../utils/sound';
 import { ConfirmDialog } from './Dialog';
+import ConicBorder from './animations/ConicBorder';
 
 export default function OngoingMatchCard({
   match,
@@ -127,7 +128,13 @@ export default function OngoingMatchCard({
 
   return (
     <>
-      <div className="relative mb-8 bg-gradient-to-r from-[#171d2b] via-[#1c2438] to-[#151a27] border-2 border-orange-500/70 rounded-3xl p-5 sm:p-6 shadow-2xl glow-orange overflow-hidden animate-in fade-in duration-300">
+      <ConicBorder
+        color="orange"
+        speed="4.5s"
+        rounded="rounded-3xl"
+        className="mb-8 card-hover-lift"
+        innerClassName="bg-gradient-to-r from-[#171d2b] via-[#1c2438] to-[#151a27] p-5 sm:p-6 relative overflow-hidden"
+      >
         {/* Subtle decorative glowing background accents */}
         <div className="absolute top-0 right-0 w-80 h-80 bg-orange-500/10 rounded-full blur-3xl pointer-events-none -z-10" />
         <div className="absolute bottom-0 left-1/3 w-60 h-60 bg-amber-500/10 rounded-full blur-3xl pointer-events-none -z-10" />
@@ -260,7 +267,7 @@ export default function OngoingMatchCard({
                   if (onResume) onResume(match);
                 }}
                 disabled={loading}
-                className="flex-1 sm:flex-initial px-6 py-3 bg-gradient-to-r from-orange-500 via-amber-500 to-orange-500 hover:from-orange-400 hover:to-amber-400 text-white font-black text-sm rounded-2xl transition shadow-xl shadow-orange-950/60 flex items-center justify-center gap-2 cursor-pointer glow-orange active:scale-95"
+                className="flex-1 sm:flex-initial px-6 py-3 bg-gradient-to-r from-orange-500 via-amber-500 to-orange-500 hover:from-orange-400 hover:to-amber-400 text-white font-black text-sm rounded-2xl transition shadow-xl shadow-orange-950/60 flex items-center justify-center gap-2 cursor-pointer glow-orange btn-tactile hover:scale-[1.02]"
               >
                 <Play className="w-4 h-4 fill-current" />
                 <span>Resume Battle</span>
@@ -269,7 +276,7 @@ export default function OngoingMatchCard({
             </div>
           </div>
         </div>
-      </div>
+      </ConicBorder>
 
       {/* Unified Forfeit Confirmation Dialog */}
       <ConfirmDialog

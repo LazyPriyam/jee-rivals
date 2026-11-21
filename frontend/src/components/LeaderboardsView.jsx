@@ -3,6 +3,8 @@ import { api } from '../utils/api';
 import { Trophy, Shield, Clock, Flame, Crown, RefreshCw, Zap, Users, UserPlus, HelpCircle, Sparkles, ArrowUpRight } from 'lucide-react';
 import DivisionGuideModal from './DivisionGuideModal';
 import { formatLastOnline, formatTimeRemaining } from '../utils/dateUtils';
+import AnimatedCounter from './animations/AnimatedCounter';
+import HoloSheen from './animations/HoloSheen';
 
 export const getDivisionBaseTier = (div) => {
   if (!div) return 'BRONZE';
@@ -373,10 +375,11 @@ export default function LeaderboardsView({ user, onViewProfile, onNavigateTab, i
 
           {/* User's Personal League Advancement Status Card */}
           {user && myDivisionData?.division && (
-            <div className="bg-gradient-to-br from-[#1b2131] via-[#161a27] to-[#121622] border border-orange-500/30 rounded-3xl p-5 sm:p-6 mb-6 shadow-2xl relative overflow-hidden">
-              <div className="absolute top-0 right-0 w-80 h-80 bg-orange-500/5 rounded-full blur-3xl -z-10 pointer-events-none"></div>
+            <HoloSheen continuous intensity="subtle" rounded="rounded-3xl" className="mb-6 card-hover-lift">
+              <div className="bg-gradient-to-br from-[#1b2131] via-[#161a27] to-[#121622] border border-orange-500/30 rounded-3xl p-5 sm:p-6 shadow-2xl relative overflow-hidden">
+                <div className="absolute top-0 right-0 w-80 h-80 bg-orange-500/5 rounded-full blur-3xl -z-10 pointer-events-none"></div>
 
-              <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6">
+                <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6">
                 {/* Left: Division Badge & Zone */}
                 <div className="space-y-3 min-w-[240px]">
                   <div className="flex items-center gap-2">
@@ -449,7 +452,7 @@ export default function LeaderboardsView({ user, onViewProfile, onNavigateTab, i
                             Progression toward <strong className="text-amber-300">{nextTargetName}</strong>
                           </span>
                           <span className="font-mono font-bold text-orange-400">
-                            {progressPercent}%
+                            <AnimatedCounter value={progressPercent} suffix="%" />
                           </span>
                         </div>
 
@@ -508,7 +511,8 @@ export default function LeaderboardsView({ user, onViewProfile, onNavigateTab, i
                 </div>
               </div>
             </div>
-          )}
+          </HoloSheen>
+        )}
 
           {/* Leaderboard Table */}
           <div className="bg-[#262c3c] border border-white/10 rounded-3xl p-6 shadow-xl overflow-hidden">
