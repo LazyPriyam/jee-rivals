@@ -475,6 +475,20 @@ def start_scheduled_test(
             detail=f"Test is locked. Unlocks at {start_dt.strftime('%b %d, %Y %I:%M %p UTC')}."
         )
 
+    # Verify deadline time: CBT mode is closed once the examination reaches its deadline
+    deadline_dt = _parse_iso(test["deadline_time"])
+    if now_dt > deadline_dt:
+        # Check if candidate had already finished before the deadline
+        c.execute("SELECT is_finished FROM room_participants WHERE room_id = ? AND user_id = ?", (test["room_id"], user["id"]))
+        p_row = c.fetchone()
+        is_finished = bool(p_row[0]) if p_row else False
+        if not is_finished:
+            conn.close()
+            raise HTTPException(
+                status_code=403,
+                detail="The deadline for this examination has passed. Computer Based Test (CBT) mode is closed for this examination. You can download the question paper PDF to practice offline."
+            )
+
     # Check assignment
     try:
         assigned = json.loads(test["assigned_user_ids"]) if isinstance(test["assigned_user_ids"], str) else test["assigned_user_ids"]
@@ -537,6 +551,140 @@ def start_scheduled_test(
         "test_id": test_id,
         "title": test["title"],
         "room": room_dict
+    }
+
+
+@router.get("/{test_id}/paper")
+def get_scheduled_test_paper(
+    test_id: str,
+    user: Optional[dict] = Depends(get_optional_user)
+):
+    """
+    Returns the complete question paper and solution answer key for an unlocked scheduled test.
+    Used for offline practice and printable PDF export when CBT mode is finished or expired.
+    """
+    conn = get_connection()
+    c = conn.cursor()
+
+    c.execute("""
+        SELECT st.*, r.code as room_code
+        FROM scheduled_tests st
+        JOIN rooms r ON st.room_id = r.id
+        WHERE st.id = ? AND st.status != 'DELETED'
+    """, (test_id,))
+    row = c.fetchone()
+    if not row:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Scheduled test not found.")
+
+    test = dict(row) if hasattr(row, "keys") else {
+        "id": row[0], "room_id": row[1], "title": row[2], "description": row[3],
+        "exam_type": row[4], "difficulty": row[5], "duration_minutes": row[6],
+        "total_questions": row[7], "total_marks": row[8], "question_ids": row[9],
+        "subjects": row[10], "chapters": row[11], "scheduled_start_time": row[12],
+        "deadline_time": row[13], "assigned_user_ids": row[14], "created_by_user_id": row[15],
+        "status": row[16], "created_at": row[17], "room_code": row[18]
+    }
+
+    # Verify start time: paper cannot be accessed before scheduled start time
+    now_dt = datetime.datetime.now(datetime.timezone.utc)
+    start_dt = _parse_iso(test["scheduled_start_time"])
+    if now_dt < start_dt:
+        conn.close()
+        raise HTTPException(
+            status_code=403,
+            detail=f"Question paper is sealed. It unlocks on {start_dt.strftime('%b %d, %Y %I:%M %p UTC')}."
+        )
+
+    # Check assignment
+    try:
+        assigned = json.loads(test["assigned_user_ids"]) if isinstance(test["assigned_user_ids"], str) else test["assigned_user_ids"]
+    except Exception:
+        assigned = ["*"]
+
+    user_id = user.get("id") if user else None
+    if assigned != ["*"] and user_id and user_id not in assigned:
+        conn.close()
+        raise HTTPException(status_code=403, detail="You are not assigned to this examination.")
+
+    # Parse questions
+    try:
+        q_ids = json.loads(test["question_ids"]) if isinstance(test["question_ids"], str) else test["question_ids"]
+    except Exception:
+        q_ids = []
+
+    from backend.app.tools.question_cache import get_questions_cached_batch
+    from backend.app.routes.questions import row_to_question_out
+    q_batch_map = get_questions_cached_batch(q_ids, cursor=c)
+
+    raw_list = []
+    for q_id in q_ids:
+        qd = q_batch_map.get(str(q_id))
+        if qd:
+            raw_list.append(qd)
+
+    subj_sort = {"physics": 1, "chemistry": 2, "mathematics": 3, "maths": 3}
+    raw_list.sort(key=lambda q: (subj_sort.get((q.get("subject") or "").lower(), 99), str(q.get("id"))))
+
+    exam_type = str(test.get("exam_type", "MAIN")).upper()
+    correct_mark = 4
+    incorrect_mark = -1 if exam_type == "MAIN" else -2
+
+    questions_out = []
+    answer_key = []
+
+    for idx, qd in enumerate(raw_list, start=1):
+        q_out = row_to_question_out(qd)
+        q_dict = q_out.dict() if hasattr(q_out, "dict") else dict(q_out)
+        q_dict["qnum"] = idx
+        q_dict["correct_mark"] = correct_mark
+        q_dict["incorrect_mark"] = 0 if q_dict.get("question_type") == "NUMERICAL" else incorrect_mark
+        questions_out.append(q_dict)
+
+        corr_ans = str(qd.get("correct_answer") or "").strip()
+        answer_key.append({
+            "qnum": idx,
+            "subject": q_dict.get("subject"),
+            "question_type": q_dict.get("question_type"),
+            "correct_answer": corr_ans,
+            "solution_text": qd.get("solution_text") or ""
+        })
+
+    conn.close()
+
+    parsed_subjects = []
+    try:
+        parsed_subjects = json.loads(test["subjects"]) if isinstance(test["subjects"], str) else test["subjects"]
+    except Exception:
+        parsed_subjects = ["Physics", "Chemistry", "Mathematics"]
+
+    parsed_chapters = []
+    try:
+        parsed_chapters = json.loads(test["chapters"]) if isinstance(test["chapters"], str) else (test["chapters"] or [])
+    except Exception:
+        parsed_chapters = []
+
+    return {
+        "status": "ok",
+        "test_id": test_id,
+        "room_code": test["room_code"],
+        "title": test["title"],
+        "description": test["description"] or "",
+        "exam_type": test["exam_type"],
+        "duration_minutes": test["duration_minutes"],
+        "total_questions": len(questions_out),
+        "total_marks": test["total_marks"],
+        "subjects": parsed_subjects,
+        "chapters": parsed_chapters,
+        "scheduled_start_time": test["scheduled_start_time"],
+        "deadline_time": test["deadline_time"],
+        "marking_scheme": {
+            "correct": correct_mark,
+            "incorrect": incorrect_mark,
+            "numerical_incorrect": 0
+        },
+        "questions": questions_out,
+        "answer_key": answer_key
     }
 
 

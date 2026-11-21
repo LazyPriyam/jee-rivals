@@ -641,6 +641,35 @@ async def join_room(req: RoomJoinRequest, user: dict = Depends(get_current_user)
     c.execute("SELECT * FROM room_participants WHERE room_id = ? AND user_id = ?", (room_id, user["id"]))
     existing = c.fetchone()
 
+    # Block CBT entry if scheduled examination has passed its deadline
+    if room.get("is_scheduled") or room.get("scheduled_test_id"):
+        st_id = room.get("scheduled_test_id")
+        c.execute("SELECT deadline_time FROM scheduled_tests WHERE id = ? OR room_id = ?", (st_id, room_id))
+        st_dl = c.fetchone()
+        if st_dl:
+            dl_str = st_dl[0] if isinstance(st_dl, (tuple, list)) else st_dl["deadline_time"]
+            if dl_str:
+                try:
+                    clean_dl = str(dl_str).strip().replace("Z", "+00:00")
+                    dl_dt = datetime.datetime.fromisoformat(clean_dl)
+                    if dl_dt.tzinfo is None:
+                        dl_dt = dl_dt.replace(tzinfo=datetime.timezone.utc)
+                    now_utc = datetime.datetime.now(datetime.timezone.utc)
+                    if now_utc > dl_dt:
+                        is_fin = False
+                        if existing:
+                            is_fin = bool(existing["is_finished"] if hasattr(existing, "__getitem__") else existing[6])
+                        if not is_fin:
+                            conn.close()
+                            raise HTTPException(
+                                status_code=403,
+                                detail="The deadline for this examination has passed. CBT mode is no longer available. You can download the question paper PDF to practice offline."
+                            )
+                except HTTPException:
+                    raise
+                except Exception:
+                    pass
+
     if not existing:
         if not room.get("is_scheduled") and room["status"] not in ("LOBBY", "IN_PROGRESS"):
             conn.close()

@@ -803,6 +803,8 @@ export const api = {
       }),
     getLeaderboard: (testId) =>
       request(`/api/scheduled-tests/${testId}/leaderboard`),
+    getPaper: (testId) =>
+      request(`/api/scheduled-tests/${testId}/paper`),
     delete: (testId) =>
       request(`/api/scheduled-tests/${testId}`, {
         method: 'DELETE',

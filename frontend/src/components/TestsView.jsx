@@ -4,6 +4,7 @@ import { api } from '../utils/api';
 import { sound } from '../utils/sound';
 import { formatIST, formatISTDate } from '../utils/dateUtils';
 import ConicBorder from './animations/ConicBorder';
+import QuestionPaperModal from './QuestionPaperModal';
 import {
   FileText,
   Clock,
@@ -44,6 +45,9 @@ export default function TestsView({ user, onStartTest, onSelectTest, onOpenAuth 
   // Unschedule / Delete Confirmation Modal State
   const [deleteConfirmTest, setDeleteConfirmTest] = useState(null);
   const [deletingTestId, setDeletingTestId] = useState(null);
+
+  // Question Paper (PDF) Modal State
+  const [paperModalTest, setPaperModalTest] = useState(null);
 
   // Two-Tier Leaderboard Modal State
   const [leaderboardModalTestId, setLeaderboardModalTestId] = useState(null);
@@ -316,6 +320,11 @@ export default function TestsView({ user, onStartTest, onSelectTest, onOpenAuth 
       else alert('Please sign in to attempt this test.');
       return;
     }
+    // If examination deadline has passed, CBT mode is unavailable
+    if (test.is_past_deadline && !test.is_completed) {
+      setPaperModalTest(test);
+      return;
+    }
     try {
       const res = await api.scheduledTests.start(test.id);
       if (res && onStartTest) {
@@ -508,7 +517,7 @@ export default function TestsView({ user, onStartTest, onSelectTest, onOpenAuth 
           {displayedTests.map((test) => {
             const isCompleted = test.is_completed;
             const isUpcoming = test.is_upcoming;
-            const isLateAttempt = test.is_past_deadline && !isCompleted;
+            const isCbtExpired = test.is_past_deadline && !isCompleted;
             const isActiveWindow = test.is_active_window && !isCompleted;
             const isCreator = user && String(test.created_by_user_id) === String(user.id);
 
@@ -576,9 +585,9 @@ export default function TestsView({ user, onStartTest, onSelectTest, onOpenAuth 
                           ⚡ Live Now
                         </span>
                       ) : (
-                        <span className="text-[10px] font-black px-2 py-0.5 rounded-md bg-amber-500/20 text-amber-300 border border-amber-500/40 flex items-center gap-1">
+                        <span className="text-[10px] font-black px-2 py-0.5 rounded-md bg-slate-800 text-amber-300 border border-amber-500/40 flex items-center gap-1">
                           <AlertTriangle className="w-3 h-3" />
-                          Late Window
+                          CBT Closed • PDF Ready
                         </span>
                       )}
                     </div>
@@ -685,15 +694,25 @@ export default function TestsView({ user, onStartTest, onSelectTest, onOpenAuth 
 
                   <div>
                     {isCompleted ? (
-                      <button
-                        onClick={() => {
-                          if (onSelectTest) onSelectTest(test.room_code);
-                        }}
-                        className="px-4 py-1.5 rounded-xl bg-indigo-600/30 hover:bg-indigo-600 text-indigo-300 hover:text-white border border-indigo-500/40 text-xs font-bold transition flex items-center gap-1.5 shadow-md cursor-pointer"
-                      >
-                        <FileText className="w-3.5 h-3.5" />
-                        Solutions & Review
-                      </button>
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => setPaperModalTest(test)}
+                          title="View and download printable Question Paper PDF with Answer Key"
+                          className="px-3 py-1.5 rounded-xl bg-slate-800/90 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 text-xs font-bold transition flex items-center gap-1.5 cursor-pointer"
+                        >
+                          <FileText className="w-3.5 h-3.5 text-indigo-400" />
+                          <span>Paper (PDF)</span>
+                        </button>
+                        <button
+                          onClick={() => {
+                            if (onSelectTest) onSelectTest(test.room_code);
+                          }}
+                          className="px-3.5 py-1.5 rounded-xl bg-indigo-600/30 hover:bg-indigo-600 text-indigo-300 hover:text-white border border-indigo-500/40 text-xs font-bold transition flex items-center gap-1.5 shadow-md cursor-pointer"
+                        >
+                          <CheckCircle2 className="w-3.5 h-3.5" />
+                          Solutions & Review
+                        </button>
+                      </div>
                     ) : isUpcoming ? (
                       <button
                         disabled
@@ -702,13 +721,14 @@ export default function TestsView({ user, onStartTest, onSelectTest, onOpenAuth 
                         <Lock className="w-3.5 h-3.5" />
                         Locked
                       </button>
-                    ) : isLateAttempt ? (
+                    ) : isCbtExpired ? (
                       <button
-                        onClick={() => handleStartTest(test)}
-                        className="px-4 py-1.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-white text-xs font-black transition flex items-center gap-1.5 shadow-md shadow-amber-600/20 cursor-pointer"
+                        onClick={() => setPaperModalTest(test)}
+                        className="px-4 py-1.5 rounded-xl bg-amber-600/20 hover:bg-amber-600 text-amber-300 hover:text-white border border-amber-500/50 text-xs font-black transition flex items-center gap-1.5 shadow-md shadow-amber-600/20 cursor-pointer"
+                        title="Deadline passed: CBT mode is closed. Open official question paper to solve offline."
                       >
-                        <Hourglass className="w-3.5 h-3.5" />
-                        Start Late Attempt
+                        <FileText className="w-3.5 h-3.5" />
+                        Question Paper (PDF)
                       </button>
                     ) : (
                       <button
@@ -742,12 +762,27 @@ export default function TestsView({ user, onStartTest, onSelectTest, onOpenAuth 
                   Deadline: {leaderboardData?.test?.deadline_time ? formatIST(leaderboardData.test.deadline_time) : 'N/A'}
                 </div>
               </div>
-              <button
-                onClick={() => setLeaderboardModalTestId(null)}
-                className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition cursor-pointer"
-              >
-                <X className="w-5 h-5" />
-              </button>
+              <div className="flex items-center gap-2">
+                {leaderboardData?.test && (
+                  <button
+                    type="button"
+                    onClick={() => setPaperModalTest(leaderboardData.test)}
+                    className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-bold transition flex items-center gap-1.5 cursor-pointer"
+                    title="View and download printable Question Paper PDF"
+                  >
+                    <FileText className="w-3.5 h-3.5 text-indigo-400" />
+                    <span className="hidden sm:inline">Question Paper (PDF)</span>
+                    <span className="sm:hidden">Paper</span>
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setLeaderboardModalTestId(null)}
+                  className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition cursor-pointer"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
             </div>
 
             {/* Sub-tier Switcher Tabs */}
@@ -1416,6 +1451,14 @@ export default function TestsView({ user, onStartTest, onSelectTest, onOpenAuth 
           </div>
         </div>,
         document.body
+      )}
+      {/* QUESTION PAPER (PDF) MODAL */}
+      {paperModalTest && (
+        <QuestionPaperModal
+          testId={paperModalTest.id}
+          testTitle={paperModalTest.title}
+          onClose={() => setPaperModalTest(null)}
+        />
       )}
     </div>
   );
