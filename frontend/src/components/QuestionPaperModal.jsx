@@ -18,13 +18,18 @@ import {
   RefreshCw,
 } from 'lucide-react';
 
-export default function QuestionPaperModal({ testId, testTitle, onClose }) {
-  const [paperData, setPaperData] = useState(null);
-  const [loading, setLoading] = useState(true);
+export default function QuestionPaperModal({ testId, testTitle, paperData: directPaperData, onClose }) {
+  const [paperData, setPaperData] = useState(directPaperData || null);
+  const [loading, setLoading] = useState(!directPaperData && Boolean(testId));
   const [error, setError] = useState('');
   const [showAnswerKey, setShowAnswerKey] = useState(false);
 
   useEffect(() => {
+    if (directPaperData) {
+      setPaperData(directPaperData);
+      setLoading(false);
+      return;
+    }
     if (!testId) return;
     setLoading(true);
     setError('');
@@ -39,7 +44,7 @@ export default function QuestionPaperModal({ testId, testTitle, onClose }) {
       .finally(() => {
         setLoading(false);
       });
-  }, [testId]);
+  }, [testId, directPaperData]);
 
   const handlePrint = () => {
     window.print();
@@ -330,13 +335,13 @@ export default function QuestionPaperModal({ testId, testTitle, onClose }) {
                     </tr>
                   </thead>
                   <tbody>
-                    {paperData.answer_key.map((ak, idx) => (
+                    {(Array.isArray(paperData.answer_key) ? paperData.answer_key : Object.values(paperData.answer_key || {})).map((ak, idx) => (
                       <tr
-                        key={ak.qnum}
+                        key={ak.qnum || idx}
                         className={idx % 2 === 0 ? 'bg-white' : 'bg-slate-50'}
                       >
                         <td className="p-2 border border-slate-300 text-center font-black font-mono">
-                          {ak.qnum}
+                          {ak.qnum || idx + 1}
                         </td>
                         <td className="p-2 border border-slate-300 font-semibold text-slate-700">
                           {ak.subject}
@@ -345,7 +350,7 @@ export default function QuestionPaperModal({ testId, testTitle, onClose }) {
                           {ak.question_type === 'NUMERICAL' ? 'Numerical' : 'MCQ'}
                         </td>
                         <td className="p-2 border border-slate-300 font-mono font-black text-indigo-900">
-                          {ak.correct_answer || 'N/A'}
+                          {ak.correct_answer || ak.correct_key || 'N/A'}
                         </td>
                       </tr>
                     ))}

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { api } from '../utils/api';
 import MathRenderer from './MathRenderer';
 import OnDemandDerivationBox from './OnDemandDerivationBox';
@@ -46,6 +46,7 @@ import {
   ThumbsDown
 } from 'lucide-react';
 import ReportQuestionModal from './ReportQuestionModal';
+import QuestionPaperModal from './QuestionPaperModal';
 import { getReportedQuestions, addReportedQuestion } from '../utils/storageGuardian';
 
 export default function TestAnalysisView({
@@ -74,6 +75,7 @@ export default function TestAnalysisView({
   const [launchingDrill, setLaunchingDrill] = useState(false);
   const [roomReports, setRoomReports] = useState({});
   const [votingSubmitting, setVotingSubmitting] = useState({});
+  const [showPaperModal, setShowPaperModal] = useState(false);
 
   // Filters for Chapter Matrix (Page 5)
   const [chapterSubjFilter, setChapterSubjFilter] = useState('ALL');
@@ -511,6 +513,99 @@ export default function TestAnalysisView({
       setLaunchingDrill(false);
     }
   };
+
+  const paperDataForModal = useMemo(() => {
+    if (!data || !data.questions || !data.questions.length) return null;
+
+    const examType = data.exam_type || (data.mode?.includes('ADVANCED') ? 'ADVANCED' : 'MAIN');
+    const isAdvanced = examType === 'ADVANCED';
+    const totalQuestions = data.questions.length;
+    const durationMinutes = data.duration_minutes || 180;
+    const totalMarks = data.max_marks || totalQuestions * 4;
+
+    const formattedQuestions = [];
+    const answerKey = [];
+
+    data.questions.forEach((item, idx) => {
+      const q = item.question || item;
+      const s = item.solution || {};
+      const qnum = idx + 1;
+      const qid = String(q.id || `q_${qnum}`);
+      const isNumerical = (q.question_type || '').toUpperCase() === 'NUMERICAL';
+
+      // Parse options
+      let rawOptions = q.options;
+      if (typeof rawOptions === 'string') {
+        try {
+          rawOptions = JSON.parse(rawOptions);
+        } catch (_) {
+          rawOptions = [];
+        }
+      }
+      const formattedOptions = Array.isArray(rawOptions)
+        ? rawOptions.map((opt, oIdx) => {
+            if (typeof opt === 'string') {
+              return { key: String.fromCharCode(65 + oIdx), text: opt };
+            }
+            return {
+              key: opt.key || String.fromCharCode(65 + oIdx),
+              text: opt.text || opt.value || ''
+            };
+          })
+        : [];
+
+      // Parse diagrams
+      let diagUrls = q.diagram_urls || q.diagram_paths || [];
+      if (typeof diagUrls === 'string') {
+        try {
+          diagUrls = JSON.parse(diagUrls);
+        } catch (_) {
+          diagUrls = [];
+        }
+      }
+      if (!Array.isArray(diagUrls)) diagUrls = [];
+
+      formattedQuestions.push({
+        id: qid,
+        qnum: qnum,
+        subject: q.subject || 'General',
+        chapter: q.chapter || 'General',
+        question_type: isNumerical ? 'NUMERICAL' : 'MCQ',
+        text: q.question_text || q.text || '',
+        has_diagram: Boolean(q.has_diagram || diagUrls.length > 0),
+        diagram_urls: diagUrls,
+        correct_mark: 4,
+        incorrect_mark: isNumerical ? 0 : (isAdvanced ? -2 : -1),
+        options: formattedOptions
+      });
+
+      const corrAns = s.correct_answer || q.correct_answer || '';
+      const solText = s.solution_text || q.solution_text || '';
+
+      answerKey.push({
+        qnum: qnum,
+        subject: q.subject || 'General',
+        question_type: isNumerical ? 'NUMERICAL' : 'MCQ',
+        correct_answer: corrAns,
+        solution_text: solText
+      });
+    });
+
+    return {
+      title: data.preset_name || data.title || (data.code ? `Test Paper #${data.code}` : 'JEE Practice Mock Paper'),
+      exam_type: examType,
+      duration_minutes: durationMinutes,
+      total_questions: totalQuestions,
+      total_marks: totalMarks,
+      marking_scheme: {
+        correct: 4,
+        incorrect: isAdvanced ? -2 : -1,
+        numerical_incorrect: 0
+      },
+      answer_key: answerKey,
+      questions: formattedQuestions
+    };
+  }, [data]);
 
   if (loading) {
     return (
@@ -1182,6 +1277,18 @@ export default function TestAnalysisView({
         </button>
 
         <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={() => {
+              sound.click();
+              setShowPaperModal(true);
+            }}
+            className="px-4 py-2 rounded-xl bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-300 hover:text-white font-bold text-xs border border-indigo-500/30 shadow transition cursor-pointer flex items-center gap-2"
+            title="Open clean printable Question Paper with KaTeX math rendering, diagrams, and Answer Key"
+          >
+            <FileText className="w-3.5 h-3.5 text-indigo-400" />
+            <span>Question Paper (PDF)</span>
+          </button>
           <button
             type="button"
             onClick={handlePrint}
@@ -3122,6 +3229,15 @@ export default function TestAnalysisView({
             <X className="w-4 h-4" />
           </button>
         </div>
+      )}
+
+      {/* Clean Offline Question Paper & Answer Key Modal */}
+      {showPaperModal && paperDataForModal && (
+        <QuestionPaperModal
+          paperData={paperDataForModal}
+          testTitle={paperDataForModal.title}
+          onClose={() => setShowPaperModal(false)}
+        />
       )}
     </div>
   );
