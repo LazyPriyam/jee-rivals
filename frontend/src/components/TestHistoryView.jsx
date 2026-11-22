@@ -220,7 +220,7 @@ export default function TestHistoryView({ user, inspectUsername, onSelectTest, o
   });
 
   const chronologicalTests = [...chartFiltered]
-    .sort((a, b) => new Date(a.completed_at || a.created_at || 0) - new Date(b.completed_at || b.created_at || 0))
+    .sort((a, b) => new Date(a.finished_at || a.completed_at || a.created_at || 0) - new Date(b.finished_at || b.completed_at || b.created_at || 0))
     .slice(-15);
 
   // Extract metric values
@@ -808,7 +808,7 @@ export default function TestHistoryView({ user, inspectUsername, onSelectTest, o
                     {hoveredPoint.test.preset_name}
                   </div>
                   <div className="text-[10px] text-slate-400 mt-0.5">
-                    Room #{hoveredPoint.test.code} • {formatIST(hoveredPoint.test.completed_at || hoveredPoint.test.created_at, { fallback: 'Recent' })}
+                    Room #{hoveredPoint.test.code} • {formatIST(hoveredPoint.test.finished_at || hoveredPoint.test.completed_at || hoveredPoint.test.created_at, { fallback: 'Recent' })}
                   </div>
                   <div className="flex items-center gap-3 mt-2 pt-2 border-t border-white/10 text-[11px]">
                     <div>
@@ -1612,7 +1612,7 @@ export default function TestHistoryView({ user, inspectUsername, onSelectTest, o
             const isMock = item.mode === 'MOCK_TEST';
             const isGroup = item.is_group || (item.participant_count || 1) > 1;
             const isInProgress = item.status === 'IN_PROGRESS' && !item.is_finished;
-            const dateStr = item.completed_at || item.created_at;
+            const dateStr = item.finished_at || item.completed_at || item.created_at;
             const formattedDate = formatIST(dateStr, { fallback: 'Recent Session' });
 
             const maxMarks = item.max_marks || (item.total_questions * 4);

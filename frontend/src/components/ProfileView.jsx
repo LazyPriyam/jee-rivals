@@ -2612,7 +2612,7 @@ export default function ProfileView({
               {(data.test_history || []).filter((t) => t.status !== 'DELETED').map((t, idx) => {
                 const marksPct = t.marks_percentage || 0;
                 const scoreColor = marksPct >= 60 ? 'text-emerald-400' : marksPct >= 35 ? 'text-amber-400' : 'text-orange-400';
-                const formattedDate = formatIST(t.completed_at || t.created_at);
+                const formattedDate = formatIST(t.finished_at || t.completed_at || t.created_at);
 
                 return (
                   <div

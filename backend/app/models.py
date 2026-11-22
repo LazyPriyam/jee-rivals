@@ -225,6 +225,7 @@ class ParticipantScore(BaseModel):
     is_finished: bool
     rank: int = 1
     question_started_at: Optional[str] = None
+    finished_at: Optional[str] = None
 
 class RoomState(BaseModel):
     id: str

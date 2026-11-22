@@ -430,6 +430,7 @@ def get_user_test_history(user: dict = Depends(get_current_user), cursor=None, l
             "status": r["status"],
             "created_at": r["created_at"],
             "completed_at": r["completed_at"] or r.get("finished_at"),
+            "finished_at": r.get("finished_at"),
             "score": r["score"],
             "marks": final_marks,
             "max_marks": max_marks,
@@ -890,7 +891,8 @@ def get_room_state(code: str, user: dict) -> RoomState:
             current_question_index=p["current_question_index"],
             is_finished=bool(p["is_finished"]),
             rank=idx,
-            question_started_at=p.get("question_started_at")
+            question_started_at=p.get("question_started_at"),
+            finished_at=p.get("finished_at")
         ))
 
     # Fetch questions
@@ -2547,7 +2549,11 @@ def get_room_results(code: str, user: Optional[dict] = Depends(get_optional_user
                     "total_attempted": attempted_cnt,
                     "correct_count": corr_cnt,
                     "accuracy": acc,
-                    "is_finished": bool(p.get("is_finished"))
+                    "is_finished": bool(p.get("is_finished")),
+                    "finished_at": p.get("finished_at"),
+                    "question_started_at": p.get("question_started_at"),
+                    "is_late": bool(p.get("is_late")),
+                    "created_at": p.get("created_at") or p.get("joined_at")
                 })
             except Exception as p_err:
                 logger.warning(f"[ROOM_RESULTS] Error formatting participant {p.get('user_id')}: {p_err}")
@@ -2680,6 +2686,17 @@ def get_room_results(code: str, user: Optional[dict] = Depends(get_optional_user
         except Exception as elo_err:
             logger.warning(f"[ROOM_RESULTS] Elo analytics computation note: {elo_err}")
 
+        # Determine the user's authentic submission completion timestamp
+        user_finished_at = None
+        if user and user.get("id"):
+            u_p = next((p for p in participants_summary if str(p.get("user_id")) == str(user.get("id"))), None)
+            if u_p:
+                user_finished_at = u_p.get("finished_at")
+        if not user_finished_at and participants_summary:
+            user_finished_at = participants_summary[0].get("finished_at")
+
+        completed_timestamp = user_finished_at or room.get("completed_at")
+
         return {
             "room_code": code,
             "code": code,
@@ -2687,7 +2704,9 @@ def get_room_results(code: str, user: Optional[dict] = Depends(get_optional_user
             "preset_name": room.get("preset_name"),
             "status": room.get("status") or "COMPLETED",
             "created_at": room.get("created_at"),
-            "completed_at": room.get("completed_at"),
+            "completed_at": completed_timestamp,
+            "finished_at": user_finished_at,
+            "user_finished_at": user_finished_at,
             "total_questions": total_q,
             "max_marks": float(total_q * 4),
             "calibration_factor": calib_factor,

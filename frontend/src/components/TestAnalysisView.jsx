@@ -351,7 +351,9 @@ export default function TestAnalysisView({
                   total_attempted: attItems.length,
                   correct_count: corrCnt,
                   accuracy: acc,
-                  is_finished: Boolean(p.is_finished)
+                  is_finished: Boolean(p.is_finished),
+                  finished_at: p.finished_at,
+                  question_started_at: p.question_started_at
                 };
               });
 
@@ -362,7 +364,9 @@ export default function TestAnalysisView({
                 preset_name: roomState.preset_name,
                 status: roomState.status || 'COMPLETED',
                 created_at: roomState.created_at,
-                completed_at: roomState.completed_at,
+                completed_at: roomState.completed_at || synthesizedParts[0]?.finished_at,
+                finished_at: synthesizedParts[0]?.finished_at,
+                user_finished_at: synthesizedParts.find(p => p.user_id === user?.id)?.finished_at || synthesizedParts[0]?.finished_at,
                 total_questions: roomState.total_questions || qs.length || 1,
                 max_marks: (roomState.total_questions || qs.length || 1) * 4,
                 calibration_factor: 1.0,
@@ -1247,11 +1251,11 @@ export default function TestAnalysisView({
                   <span>Paper Ref #{data.room_code}</span>
                   <span>•</span>
                   <span>NTA JEE Scheme (+4.0 Correct / -1.0 Negative Marking)</span>
-                  {(data.completed_at || data.created_at) && (
+                  {(myParticipant?.finished_at || data.user_finished_at || data.finished_at || data.completed_at || data.created_at) && (
                     <>
                       <span>•</span>
                       <span className="text-amber-300/90 font-bold">
-                        Examined on {formatIST(data.completed_at || data.created_at)}
+                        Examined on {formatIST(myParticipant?.finished_at || data.user_finished_at || data.finished_at || data.completed_at || data.created_at)}
                       </span>
                     </>
                   )}
