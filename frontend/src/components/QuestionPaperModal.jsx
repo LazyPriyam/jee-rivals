@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { api } from '../utils/api';
 import MathRenderer from './MathRenderer';
@@ -18,11 +18,33 @@ import {
   RefreshCw,
 } from 'lucide-react';
 
+const escapeHtml = (str) =>
+  String(str || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+
 export default function QuestionPaperModal({ testId, testTitle, paperData: directPaperData, onClose }) {
   const [paperData, setPaperData] = useState(directPaperData || null);
   const [loading, setLoading] = useState(!directPaperData && Boolean(testId));
   const [error, setError] = useState('');
   const [showAnswerKey, setShowAnswerKey] = useState(false);
+  const [isDownloading, setIsDownloading] = useState(false);
+  const [downloadProgress, setDownloadProgress] = useState('');
+  const [portalNode, setPortalNode] = useState(null);
+
+  const paperRef = useRef(null);
+
+  useEffect(() => {
+    let node = document.getElementById('question-paper-portal-root');
+    if (!node) {
+      node = document.createElement('div');
+      node.id = 'question-paper-portal-root';
+      document.body.appendChild(node);
+    }
+    setPortalNode(node);
+  }, []);
 
   useEffect(() => {
     if (directPaperData) {
@@ -46,8 +68,110 @@ export default function QuestionPaperModal({ testId, testTitle, paperData: direc
       });
   }, [testId, directPaperData]);
 
+  // Direct Custom PDF Generation & Download without relying on browser print dialog
+  const handleDownloadPdf = async () => {
+    if (!paperRef.current || isDownloading) return;
+    setIsDownloading(true);
+    setDownloadProgress('Preparing...');
+
+    try {
+      setDownloadProgress('Loading PDF engine...');
+      const html2pdfModule = await import('html2pdf.js');
+      const html2pdf = html2pdfModule.default || html2pdfModule;
+
+      setDownloadProgress('Formatting document...');
+      const element = paperRef.current;
+      const safeTitle = (paperData?.title || testTitle || 'Question_Paper')
+        .replace(/[^a-zA-Z0-9_\-]/g, '_')
+        .replace(/_+/g, '_');
+      const filename = `JEE_${examType}_${safeTitle}.pdf`;
+
+      setDownloadProgress('Generating PDF pages...');
+      const opt = {
+        margin: [10, 10, 10, 10],
+        filename: filename,
+        image: { type: 'jpeg', quality: 0.98 },
+        html2canvas: {
+          scale: 2,
+          useCORS: true,
+          logging: false,
+          scrollY: 0,
+          windowWidth: 1024
+        },
+        jsPDF: {
+          unit: 'mm',
+          format: 'a4',
+          orientation: 'portrait'
+        },
+        pagebreak: {
+          mode: ['avoid-all', 'css', 'legacy']
+        }
+      };
+
+      await html2pdf().set(opt).from(element).save();
+    } catch (err) {
+      console.error('Failed to generate PDF download:', err);
+      alert('Custom PDF download encountered an issue: ' + (err.message || 'Error') + '. You can use Print / Browser PDF or Download HTML.');
+    } finally {
+      setIsDownloading(false);
+      setDownloadProgress('');
+    }
+  };
+
+  // 1-Click Offline Standalone HTML Document Download
+  const handleDownloadHtml = () => {
+    if (!paperRef.current) return;
+    const content = paperRef.current.innerHTML;
+    const safeTitle = (paperData?.title || testTitle || 'Question_Paper')
+      .replace(/[^a-zA-Z0-9_\-]/g, '_')
+      .replace(/_+/g, '_');
+
+    const htmlDoc = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>${escapeHtml(paperData?.title || testTitle || 'JEE Question Paper')}</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.css">
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@700&family=Inter:wght@400;600;700;900&display=swap');
+    body { font-family: 'Inter', system-ui, -apple-system, sans-serif; background: #fff; color: #0f172a; margin: 0; padding: 24px; line-height: 1.6; }
+    .paper-root { max-width: 56rem; margin: 0 auto; }
+    @media print {
+      body { padding: 0; margin: 0; }
+      .paper-root { max-width: 100%; }
+    }
+  </style>
+</head>
+<body>
+  <div class="paper-root">
+    ${content}
+  </div>
+</body>
+</html>`;
+
+    const blob = new Blob([htmlDoc], { type: 'text/html;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `JEE_${examType}_${safeTitle}.html`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+  // Isolated Print Dialog with guaranteed background page hiding
   const handlePrint = () => {
+    const rootEl = document.getElementById('root');
+    const prevDisplay = rootEl ? rootEl.style.display : '';
+    if (rootEl) rootEl.style.display = 'none';
+
     window.print();
+
+    setTimeout(() => {
+      if (rootEl) rootEl.style.display = prevDisplay;
+    }, 600);
   };
 
   if (typeof document === 'undefined') return null;
@@ -70,8 +194,39 @@ export default function QuestionPaperModal({ testId, testTitle, paperData: direc
     numerical_incorrect: 0,
   };
 
-  return createPortal(
+  const modalContent = (
     <div className="fixed inset-0 z-[99999] bg-[#0c101a]/95 backdrop-blur-md flex flex-col items-center justify-start overflow-y-auto p-2 sm:p-4 print:p-0 print:bg-white print:static print:overflow-visible">
+      {/* Strict CSS Isolation for Print: Hides `#root` and all background content */}
+      <style>{`
+        @media print {
+          #root {
+            display: none !important;
+          }
+          body > *:not(#question-paper-portal-root) {
+            display: none !important;
+          }
+          #question-paper-portal-root {
+            display: block !important;
+            position: static !important;
+            width: 100% !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            background: #ffffff !important;
+          }
+          html, body {
+            background: #ffffff !important;
+            color: #000000 !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            overflow: visible !important;
+          }
+          .print-avoid-break {
+            break-inside: avoid !important;
+            page-break-inside: avoid !important;
+          }
+        }
+      `}</style>
+
       {/* Top Floating Action Bar (HIDDEN IN PRINT) */}
       <div className="w-full max-w-4xl bg-[#141926]/95 border border-white/10 rounded-2xl p-3.5 mb-4 shadow-2xl flex items-center justify-between gap-3 sticky top-2 z-50 backdrop-blur-md print:hidden">
         <div className="flex items-center gap-2.5 min-w-0">
@@ -111,16 +266,43 @@ export default function QuestionPaperModal({ testId, testTitle, paperData: direc
             </button>
           )}
 
-          {/* Print / Save as PDF Button */}
+          {/* Custom Direct Download PDF Button (No Print Dialog Needed) */}
+          <button
+            type="button"
+            onClick={handleDownloadPdf}
+            disabled={loading || !!error || isDownloading}
+            className="px-4 py-2 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-black transition flex items-center gap-1.5 shadow-lg shadow-emerald-600/30 cursor-pointer disabled:opacity-50"
+            title="Download PDF directly to your device without relying on the browser print dialog"
+          >
+            {isDownloading ? (
+              <RefreshCw className="w-4 h-4 animate-spin text-emerald-200" />
+            ) : (
+              <Download className="w-4 h-4" />
+            )}
+            <span>{isDownloading ? (downloadProgress || 'Generating PDF...') : 'Download PDF'}</span>
+          </button>
+
+          {/* Print / Save as PDF Button with strict isolation */}
           <button
             type="button"
             onClick={handlePrint}
-            disabled={loading || !!error}
-            className="px-4 py-2 rounded-xl bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-500 hover:to-blue-500 text-white text-xs font-black transition flex items-center gap-1.5 shadow-lg shadow-indigo-600/30 cursor-pointer disabled:opacity-40"
-            title="Print or Save as PDF using your browser dialog"
+            disabled={loading || !!error || isDownloading}
+            className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 text-xs font-bold transition flex items-center gap-1.5 cursor-pointer disabled:opacity-40"
+            title="Print or Save via browser dialog (isolated to paper only)"
           >
-            <Printer className="w-4 h-4" />
-            <span>Print / Save as PDF</span>
+            <Printer className="w-4 h-4 text-slate-400" />
+            <span className="hidden sm:inline">Print / System PDF</span>
+          </button>
+
+          {/* Download Standalone Offline HTML */}
+          <button
+            type="button"
+            onClick={handleDownloadHtml}
+            disabled={loading || !!error || isDownloading}
+            className="p-2 rounded-xl bg-slate-800/80 hover:bg-slate-700 text-slate-400 hover:text-white border border-slate-700 transition cursor-pointer"
+            title="Download clean standalone HTML paper (opens anywhere offline)"
+          >
+            <FileText className="w-4 h-4" />
           </button>
 
           {/* Close Button */}
@@ -164,7 +346,10 @@ export default function QuestionPaperModal({ testId, testTitle, paperData: direc
 
       {/* PRINTABLE PAPER DOCUMENT BODY */}
       {!loading && !error && paperData && (
-        <div className="w-full max-w-4xl bg-white text-slate-900 rounded-3xl p-6 sm:p-10 shadow-2xl print:shadow-none print:p-0 print:m-0 print:rounded-none print:max-w-none print:w-full font-serif leading-relaxed text-sm">
+        <div
+          ref={paperRef}
+          className="w-full max-w-4xl bg-white text-slate-900 rounded-3xl p-6 sm:p-10 shadow-2xl print:shadow-none print:p-0 print:m-0 print:rounded-none print:max-w-none print:w-full font-serif leading-relaxed text-sm"
+        >
           {/* Official Cover Header */}
           <div className="border-b-2 border-slate-900 pb-5 mb-8 text-center">
             <div className="text-[11px] font-sans font-bold uppercase tracking-widest text-slate-600 mb-1">
@@ -233,7 +418,8 @@ export default function QuestionPaperModal({ testId, testTitle, paperData: direc
                     return (
                       <div
                         key={q.id}
-                        className="p-4 rounded-xl border border-slate-200 bg-white print:border-b print:border-slate-300 print:rounded-none print:p-3 print:break-inside-avoid"
+                        className="p-4 rounded-xl border border-slate-200 bg-white print:border-b print:border-slate-300 print:rounded-none print:p-3 print:break-inside-avoid print-avoid-break"
+                        style={{ breakInside: 'avoid', pageBreakInside: 'avoid' }}
                       >
                         {/* Question Meta Strip */}
                         <div className="flex items-center justify-between text-xs font-sans font-bold text-slate-500 mb-2">
@@ -366,7 +552,8 @@ export default function QuestionPaperModal({ testId, testTitle, paperData: direc
           </div>
         </div>
       )}
-    </div>,
-    document.body
+    </div>
   );
+
+  return createPortal(modalContent, portalNode || document.body);
 }
