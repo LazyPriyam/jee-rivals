@@ -856,12 +856,14 @@ DEFAULT_CHAPTER_WEIGHTAGE: Dict[str, float] = {
     "Three Dimensional Geometry": 5.0,
 }
 
-# Build fast chapter -> subject lookup map
+# Build fast chapter -> subject and chapter -> unit lookup maps
 _CHAPTER_TO_SUBJECT: Dict[str, str] = {}
+_CHAPTER_TO_UNIT: Dict[str, str] = {}
 for _subj_name, _unit_list in JEE_SYLLABUS.items():
     for _u_obj in _unit_list:
         for _ch_name in _u_obj["chapters"]:
             _CHAPTER_TO_SUBJECT[_ch_name.lower()] = _subj_name
+            _CHAPTER_TO_UNIT[_ch_name.lower()] = _u_obj.get("unit", "General")
 
 
 def get_chapter_weightage(chapter: Optional[str]) -> float:
@@ -883,6 +885,14 @@ def get_chapter_subject(chapter: Optional[str]) -> Optional[str]:
         return None
     norm = normalize_chapter_name(chapter)
     return _CHAPTER_TO_SUBJECT.get(norm.lower())
+
+
+def get_chapter_unit(chapter: Optional[str]) -> Optional[str]:
+    """Returns canonical unit for a chapter if defined in syllabus taxonomy."""
+    if not chapter:
+        return None
+    norm = normalize_chapter_name(chapter)
+    return _CHAPTER_TO_UNIT.get(norm.lower())
 
 
 def distribute_counts(total: int, keys: List[str]) -> Dict[str, int]:

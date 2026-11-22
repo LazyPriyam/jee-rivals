@@ -8,7 +8,11 @@ from fastapi import APIRouter, HTTPException, Query, Depends, Header, status
 
 logger = logging.getLogger(__name__)
 
-from backend.app.models import QuestionOut, QuestionSolutionOut, QuestionOptionModel, QuestionReportRequest, FixQuestionKeyRequest, QuestionReportVoteRequest
+from backend.app.models import (
+    QuestionOut, QuestionSolutionOut, QuestionOptionModel,
+    QuestionReportRequest, FixQuestionKeyRequest, QuestionReportVoteRequest,
+    ApproveReportRequest, ReassignChapterRequest
+)
 from backend.app.database import get_connection
 from backend.app.auth import get_current_user, get_optional_user
 from backend.app.config import ADMIN_SYNC_TOKEN
@@ -1320,19 +1324,50 @@ def dismiss_reports(question_id: str, admin: bool = Depends(verify_admin_sync)):
 
 
 @router.post("/{question_id}/approve")
-def approve_question_report(question_id: str, admin: bool = Depends(verify_admin_sync)):
+def approve_question_report(
+    question_id: str,
+    payload: Optional[ApproveReportRequest] = None,
+    admin: bool = Depends(verify_admin_sync)
+):
     """
-    Approves a question report (e.g. Out of Syllabus for a custom test session)
-    WITHOUT altering anything about the question itself.
-    - Questions table remains untouched (validation status, key, options, chapter remain intact).
-    - Question reports status is marked 'APPROVED'.
-    - Provisional student Elo credit is permanently finalized (no clawback).
-    - Dispatches confirmation notification to affected student(s).
+    Approves a question report (e.g. Out of Syllabus for a custom test session).
+    If payload.new_chapter is supplied:
+      - Updates the question's chapter (and associated unit & subject) in the questions bank.
+      - Invalidates question bank cache so tests and generators reflect the new chapter.
+      - Marks pending question reports as 'APPROVED'.
+      - Finalizes provisional student Elo credit and notifies reporter of the chapter correction.
+      - Reconciles affected room test scorecards with +4 dropped marks.
+    If payload.new_chapter is omitted:
+      - Approves the report while keeping the question bank untouched (test-scoped approval).
     """
     conn = get_connection()
     c = conn.cursor()
     now = datetime.datetime.utcnow().isoformat()
     resolver = "Admin (GUI)"
+
+    # 1. Check if chapter reassignment is requested
+    norm_ch = None
+    norm_subj = None
+    norm_unit = None
+    if payload and payload.new_chapter and payload.new_chapter.strip():
+        from backend.app.tools.jee_syllabus import normalize_chapter_name, get_chapter_subject, get_chapter_unit
+        norm_ch = normalize_chapter_name(payload.new_chapter.strip())
+        norm_subj = payload.new_subject or get_chapter_subject(norm_ch)
+        norm_unit = get_chapter_unit(norm_ch)
+        
+        c.execute("""
+            UPDATE questions
+            SET chapter = ?,
+                subject = COALESCE(?, subject),
+                unit = COALESCE(?, unit)
+            WHERE id = ?
+        """, (norm_ch, norm_subj, norm_unit, question_id))
+        
+        try:
+            from backend.app.tools.question_cache import invalidate_question_cache
+            invalidate_question_cache()
+        except Exception:
+            pass
 
     # Fetch pending reports for this question
     c.execute("""
@@ -1361,15 +1396,23 @@ def approve_question_report(question_id: str, admin: bool = Depends(verify_admin
             notif_id = f"notif_{uuid.uuid4().hex[:12]}"
             notif_title = f"✅ Report Approved: Question #{question_id[:8]}"
             reason_label = "Out of Syllabus for Test" if "SYLLABUS" in str(rep_reason).upper() else "Issue Verified"
-            notif_msg = (
-                f"Your report for Question #{question_id[:8]} ({reason_label}) "
-                f"has been approved by moderators. The question has been marked out-of-syllabus for your test, "
-                f"and your score/rating safeguard is finalized."
-            )
+            if norm_ch:
+                notif_msg = (
+                    f"Your report for Question #{question_id[:8]} ({reason_label}) "
+                    f"has been approved by moderators. The question has been reassigned to '{norm_ch}' ({norm_subj or 'JEE Syllabus'}), "
+                    f"and your score/rating safeguard is finalized."
+                )
+            else:
+                notif_msg = (
+                    f"Your report for Question #{question_id[:8]} ({reason_label}) "
+                    f"has been approved by moderators. The question has been marked out-of-syllabus for your test, "
+                    f"and your score/rating safeguard is finalized."
+                )
             details_json = json.dumps({
                 "question_id": question_id,
                 "action": "APPROVED_OUT_OF_SYLLABUS",
-                "finalized_elo": val
+                "finalized_elo": val,
+                "reassigned_chapter": norm_ch
             })
             c.execute("""
                 INSERT INTO user_notifications (id, user_id, type, title, message, details, is_read, created_at)
@@ -1440,12 +1483,36 @@ def approve_question_report(question_id: str, admin: bool = Depends(verify_admin
     conn.commit()
     conn.close()
 
+    msg = (
+        f"Question {question_id} reassigned to '{norm_ch}' and report approved."
+        if norm_ch else
+        f"Report for question {question_id} approved as out of syllabus (question bank unchanged)."
+    )
+
     return {
+        "status": "ok",
         "success": True,
-        "message": f"Report for question {question_id} approved as out of syllabus (question bank unchanged).",
+        "message": msg,
+        "new_chapter": norm_ch,
+        "new_subject": norm_subj,
+        "new_unit": norm_unit,
         "approved_count": len(pending_reports),
         "reconciled_rooms": len(affected_rooms)
     }
+
+
+@router.post("/{question_id}/reassign-chapter")
+def reassign_question_chapter(
+    question_id: str,
+    payload: ReassignChapterRequest,
+    admin: bool = Depends(verify_admin_sync)
+):
+    """
+    Dedicated endpoint to assign a reported or miscategorized question to its correct chapter
+    and automatically approve any open out-of-syllabus reports.
+    """
+    approve_req = ApproveReportRequest(new_chapter=payload.chapter, new_subject=payload.subject)
+    return approve_question_report(question_id, approve_req, admin)
 
 
 @router.post("/{question_id}/restore")
@@ -1494,6 +1561,20 @@ def fix_question_key(question_id: str, payload: FixQuestionKeyRequest, admin: bo
         opts_val = json.dumps(payload.options) if not isinstance(payload.options, str) else payload.options
         update_clauses.append("options = ?")
         params.append(opts_val)
+
+    if payload.chapter is not None and payload.chapter.strip():
+        from backend.app.tools.jee_syllabus import normalize_chapter_name, get_chapter_subject, get_chapter_unit
+        norm_ch = normalize_chapter_name(payload.chapter.strip())
+        norm_subj = payload.subject or get_chapter_subject(norm_ch)
+        norm_unit = get_chapter_unit(norm_ch)
+        update_clauses.append("chapter = ?")
+        params.append(norm_ch)
+        if norm_subj:
+            update_clauses.append("subject = ?")
+            params.append(norm_subj)
+        if norm_unit:
+            update_clauses.append("unit = ?")
+            params.append(norm_unit)
 
     params.append(question_id)
     c.execute(f"UPDATE questions SET {', '.join(update_clauses)} WHERE id = ?", tuple(params))

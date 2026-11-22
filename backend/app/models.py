@@ -156,11 +156,21 @@ class QuestionReportRequest(BaseModel):
 class QuestionReportVoteRequest(BaseModel):
     vote: str  # "AGREE" or "DISAGREE"
 
+class ApproveReportRequest(BaseModel):
+    new_chapter: Optional[str] = None
+    new_subject: Optional[str] = None
+
+class ReassignChapterRequest(BaseModel):
+    chapter: str
+    subject: Optional[str] = None
+
 class FixQuestionKeyRequest(BaseModel):
     correct_answer: str
     solution_text: Optional[str] = None
     question_text: Optional[str] = None
     options: Optional[Any] = None
+    chapter: Optional[str] = None
+    subject: Optional[str] = None
 
 class RoomCreateRequest(BaseModel):
     mode: str = "SPEED_DUEL"  # "SPEED_DUEL" or "MOCK_TEST"

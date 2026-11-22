@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { api } from '../utils/api';
 import { sound } from '../utils/sound';
-import { formatIST, formatISTDate } from '../utils/dateUtils';
+import { formatIST, formatISTDate, parseDate } from '../utils/dateUtils';
 import ConicBorder from './animations/ConicBorder';
 import QuestionPaperModal from './QuestionPaperModal';
 import {
@@ -765,7 +765,7 @@ export default function TestsView({ user, onStartTest, onSelectTest, onOpenAuth 
                 </div>
               </div>
               <div className="flex items-center gap-2">
-                {leaderboardData?.test && (leaderboardData.test.is_past_deadline || (leaderboardData.test.deadline_time && new Date() > new Date(leaderboardData.test.deadline_time))) && (
+                {leaderboardData?.test && Boolean(leaderboardData.test.is_past_deadline || (leaderboardData.test.deadline_time && parseDate(leaderboardData.test.deadline_time) && new Date() > parseDate(leaderboardData.test.deadline_time))) && (
                   <button
                     type="button"
                     onClick={() => setPaperModalTest(leaderboardData.test)}
