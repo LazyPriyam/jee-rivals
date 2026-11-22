@@ -356,9 +356,16 @@ def get_scheduled_tests_catalog(user: Optional[dict] = Depends(get_optional_user
         if is_completed and user_attempt.get("answers"):
             try:
                 ans_data = json.loads(user_attempt["answers"]) if isinstance(user_attempt["answers"], str) else user_attempt["answers"]
-                corr = sum(1 for a in ans_data.values() if a.get("is_correct"))
-                tot = len(ans_data)
-                acc_pct = round((corr / tot) * 100, 1) if tot > 0 else 0.0
+                if isinstance(ans_data, dict):
+                    att_items = [
+                        v for k, v in ans_data.items()
+                        if not str(k).startswith("__")
+                        and isinstance(v, dict)
+                        and v.get("selected") not in ("NONE", "SKIPPED", "", None)
+                        and v.get("attempted") is not False
+                    ]
+                    corr = sum(1 for a in att_items if bool(a.get("correct") or a.get("is_correct") or a.get("is_dropped")))
+                    acc_pct = round((corr / len(att_items)) * 100, 1) if att_items else 0.0
             except Exception:
                 acc_pct = 0.0
 
@@ -749,17 +756,25 @@ def get_scheduled_test_leaderboard(
             "user_title": att[10]
         }
 
-        # Calculate accuracy and correct count
+        # Calculate accuracy, correct count, and attempted count
         correct_cnt = 0
-        total_ans = 0
+        attempted_cnt = 0
         try:
             ans_map = json.loads(a["answers"]) if isinstance(a["answers"], str) else a["answers"]
-            correct_cnt = sum(1 for item in ans_map.values() if item.get("is_correct"))
-            total_ans = len(ans_map)
+            if isinstance(ans_map, dict):
+                att_items = [
+                    v for k, v in ans_map.items()
+                    if not str(k).startswith("__")
+                    and isinstance(v, dict)
+                    and v.get("selected") not in ("NONE", "SKIPPED", "", None)
+                    and v.get("attempted") is not False
+                ]
+                attempted_cnt = len(att_items)
+                correct_cnt = sum(1 for v in att_items if bool(v.get("correct") or v.get("is_correct") or v.get("is_dropped")))
         except Exception:
             pass
 
-        acc_pct = round((correct_cnt / total_ans) * 100, 1) if total_ans > 0 else 0.0
+        acc_pct = round((correct_cnt / attempted_cnt) * 100, 1) if attempted_cnt > 0 else 0.0
 
         item = {
             "user_id": a["user_id"],
@@ -771,7 +786,7 @@ def get_scheduled_test_leaderboard(
             "marks": a["marks"],
             "accuracy": acc_pct,
             "correct_count": correct_cnt,
-            "attempted_count": total_ans,
+            "attempted_count": attempted_cnt,
             "finished_at": a["finished_at"],
             "is_late": bool(a["is_late"])
         }
