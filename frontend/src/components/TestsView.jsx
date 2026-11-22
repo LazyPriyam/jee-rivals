@@ -695,14 +695,16 @@ export default function TestsView({ user, onStartTest, onSelectTest, onOpenAuth 
                   <div>
                     {isCompleted ? (
                       <div className="flex items-center gap-2">
-                        <button
-                          onClick={() => setPaperModalTest(test)}
-                          title="View and download printable Question Paper PDF with Answer Key"
-                          className="px-3 py-1.5 rounded-xl bg-slate-800/90 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 text-xs font-bold transition flex items-center gap-1.5 cursor-pointer"
-                        >
-                          <FileText className="w-3.5 h-3.5 text-indigo-400" />
-                          <span>Paper (PDF)</span>
-                        </button>
+                        {test.is_past_deadline && (
+                          <button
+                            onClick={() => setPaperModalTest(test)}
+                            title="View and download printable Question Paper PDF with Answer Key"
+                            className="px-3 py-1.5 rounded-xl bg-slate-800/90 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 text-xs font-bold transition flex items-center gap-1.5 cursor-pointer"
+                          >
+                            <FileText className="w-3.5 h-3.5 text-indigo-400" />
+                            <span>Paper (PDF)</span>
+                          </button>
+                        )}
                         <button
                           onClick={() => {
                             if (onSelectTest) onSelectTest(test.room_code);
@@ -763,7 +765,7 @@ export default function TestsView({ user, onStartTest, onSelectTest, onOpenAuth 
                 </div>
               </div>
               <div className="flex items-center gap-2">
-                {leaderboardData?.test && (
+                {leaderboardData?.test && (leaderboardData.test.is_past_deadline || (leaderboardData.test.deadline_time && new Date() > new Date(leaderboardData.test.deadline_time))) && (
                   <button
                     type="button"
                     onClick={() => setPaperModalTest(leaderboardData.test)}

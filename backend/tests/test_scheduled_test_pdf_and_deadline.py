@@ -14,8 +14,9 @@ def test_deadline_blocks_cbt_and_provides_question_paper_pdf():
     Verify:
     1. Once an exam deadline passes, CBT mode is blocked with HTTP 403 for unfinished students.
     2. Room join also blocks CBT entry after deadline with HTTP 403.
-    3. The Question Paper PDF endpoint /api/scheduled-tests/{test_id}/paper is available for offline solving.
-    4. Paper endpoint is sealed (403) before the scheduled start time.
+    3. The Question Paper PDF endpoint /api/scheduled-tests/{test_id}/paper is available ONLY AFTER deadline.
+    4. Active ongoing test (start < now < deadline): Question Paper PDF is STRICTLY SEALED with 403.
+    5. Future test (now < start): Question Paper PDF is sealed with 403.
     """
     conn = get_connection()
     c = conn.cursor()
@@ -78,7 +79,7 @@ def test_deadline_blocks_cbt_and_provides_question_paper_pdf():
     assert res_join.status_code == 403, f"Expected 403 on join, got {res_join.status_code}: {res_join.text}"
     assert "deadline" in res_join.json()["detail"].lower()
 
-    # 3. Student fetches Question Paper for offline home practice -> Expect 200 OK
+    # 3. Student fetches Question Paper for offline home practice after deadline -> Expect 200 OK
     res_paper = client.get(f"/api/scheduled-tests/{test_id}/paper", headers=headers_student)
     assert res_paper.status_code == 200, res_paper.text
     paper_data = res_paper.json()
@@ -96,7 +97,39 @@ def test_deadline_blocks_cbt_and_provides_question_paper_pdf():
         assert "subject" in q
         assert "correct_mark" in q
 
-    # --- Scenario 2: Test in FUTURE (Pre-release sealed paper) ---
+    # --- Scenario 2: Active ongoing test (start < now < deadline) ---
+    active_start = now - datetime.timedelta(hours=2)
+    active_deadline = now + datetime.timedelta(hours=10)
+
+    create_active = {
+        "title": "Active Ongoing Contest",
+        "description": "Paper currently in CBT window",
+        "exam_type": "MAIN",
+        "difficulty": "STRICT",
+        "duration_minutes": 60,
+        "total_questions": 3,
+        "subjects": ["Physics"],
+        "chapters": [],
+        "scheduled_start_time": active_start.isoformat(),
+        "deadline_time": active_deadline.isoformat(),
+        "assigned_user_ids": ["*"]
+    }
+
+    res_create_act = client.post("/api/scheduled-tests/create", json=create_active, headers=headers_creator)
+    act_test_id = res_create_act.json()["test_id"]
+
+    # Student attempts to fetch PDF while exam is active before deadline -> Expect 403 Forbidden (sealed)
+    res_paper_act = client.get(f"/api/scheduled-tests/{act_test_id}/paper", headers=headers_student)
+    assert res_paper_act.status_code == 403, f"Expected 403, got {res_paper_act.status_code}: {res_paper_act.text}"
+    assert "sealed" in res_paper_act.json()["detail"].lower()
+    assert "deadline" in res_paper_act.json()["detail"].lower()
+
+    # Verify leaderboard flags is_past_deadline as False
+    res_lb_act = client.get(f"/api/scheduled-tests/{act_test_id}/leaderboard", headers=headers_student)
+    assert res_lb_act.status_code == 200
+    assert res_lb_act.json()["test"]["is_past_deadline"] is False
+
+    # --- Scenario 3: Test in FUTURE (Pre-release sealed paper) ---
     future_start = now + datetime.timedelta(days=2)
     future_deadline = now + datetime.timedelta(days=4)
 
@@ -124,6 +157,6 @@ def test_deadline_blocks_cbt_and_provides_question_paper_pdf():
 
     # Cleanup
     c.execute("DELETE FROM users WHERE id IN (?, ?)", (creator_id, student_id))
-    c.execute("DELETE FROM scheduled_tests WHERE id IN (?, ?)", (test_id, fut_test_id))
+    c.execute("DELETE FROM scheduled_tests WHERE id IN (?, ?, ?)", (test_id, act_test_id, fut_test_id))
     conn.commit()
     conn.close()

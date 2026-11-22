@@ -586,14 +586,21 @@ def get_scheduled_test_paper(
         "status": row[16], "created_at": row[17], "room_code": row[18]
     }
 
-    # Verify start time: paper cannot be accessed before scheduled start time
+    # Verify timing: paper cannot be accessed before scheduled examination deadline has passed
     now_dt = datetime.datetime.now(datetime.timezone.utc)
     start_dt = _parse_iso(test["scheduled_start_time"])
+    deadline_dt = _parse_iso(test["deadline_time"])
     if now_dt < start_dt:
         conn.close()
         raise HTTPException(
             status_code=403,
-            detail=f"Question paper is sealed. It unlocks on {start_dt.strftime('%b %d, %Y %I:%M %p UTC')}."
+            detail=f"Question paper is sealed. Examination unlocks on {start_dt.strftime('%b %d, %Y %I:%M %p UTC')}."
+        )
+    if now_dt < deadline_dt:
+        conn.close()
+        raise HTTPException(
+            status_code=403,
+            detail=f"Question paper PDF is sealed until the examination deadline has passed ({deadline_dt.strftime('%b %d, %Y %I:%M %p UTC')}). During the active window, the test must be taken in CBT mode."
         )
 
     # Check assignment
@@ -776,6 +783,9 @@ def get_scheduled_test_leaderboard(
             item["rank"] = len(late_list) + 1
             late_list.append(item)
 
+    now_dt = datetime.datetime.now(datetime.timezone.utc)
+    deadline_dt = _parse_iso(t["deadline_time"])
+
     return {
         "test": {
             "id": t["id"],
@@ -785,7 +795,8 @@ def get_scheduled_test_leaderboard(
             "total_questions": t["total_questions"],
             "total_marks": t["total_marks"],
             "scheduled_start_time": t["scheduled_start_time"],
-            "deadline_time": t["deadline_time"]
+            "deadline_time": t["deadline_time"],
+            "is_past_deadline": (now_dt > deadline_dt)
         },
         "official_standings": official_list,
         "late_standings": late_list,
