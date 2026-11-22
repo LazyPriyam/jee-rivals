@@ -43,13 +43,21 @@ class CreateScheduledTestRequest(BaseModel):
     assigned_user_ids: List[str] = Field(default=["*"])  # list of user IDs or ["*"] for all
 
 
-def _parse_iso(iso_str: str) -> datetime.datetime:
+class ExtendDeadlineRequest(BaseModel):
+    new_deadline: str
+    reason: Optional[str] = None
+
+
+def _parse_iso(iso_str: str) -> Optional[datetime.datetime]:
     """Parses ISO string to UTC datetime."""
-    clean = str(iso_str).strip().replace("Z", "+00:00")
-    dt = datetime.datetime.fromisoformat(clean)
-    if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=datetime.timezone.utc)
-    return dt
+    try:
+        clean = str(iso_str).strip().replace("Z", "+00:00")
+        dt = datetime.datetime.fromisoformat(clean)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=datetime.timezone.utc)
+        return dt
+    except Exception:
+        return None
 
 
 @router.get("/aspirants")
@@ -811,7 +819,8 @@ def get_scheduled_test_leaderboard(
             "total_marks": t["total_marks"],
             "scheduled_start_time": t["scheduled_start_time"],
             "deadline_time": t["deadline_time"],
-            "is_past_deadline": (now_dt > deadline_dt)
+            "is_past_deadline": (now_dt > deadline_dt),
+            "created_by_user_id": t.get("created_by_user_id")
         },
         "official_standings": official_list,
         "late_standings": late_list,
@@ -885,3 +894,118 @@ def delete_or_unschedule_test(
             "action": "removed_for_account",
             "message": f"Test '{test['title']}' has been removed from your tests and history."
         }
+
+
+@router.post("/{test_id}/extend-deadline")
+@router.patch("/{test_id}/extend-deadline")
+def extend_scheduled_test_deadline(
+    test_id: str,
+    payload: ExtendDeadlineRequest,
+    user: dict = Depends(get_current_user)
+):
+    """
+    Extends the examination deadline for a scheduled test.
+    Only the examination scheduler (creator) or an administrator can extend the deadline.
+    - Validates permissions (creator or admin).
+    - Validates that new_deadline is valid ISO, after scheduled_start_time, and in the future.
+    - Updates scheduled_tests.deadline_time.
+    - Re-evaluates any submissions in room_participants so that attempts submitted before the new deadline are marked as official (is_late = 0).
+    - Broadcasts an in-app notification to all enrolled candidates informing them of the extension.
+    """
+    conn = get_connection()
+    c = conn.cursor()
+
+    c.execute("SELECT * FROM scheduled_tests WHERE id = ? AND status != 'DELETED'", (test_id,))
+    row = c.fetchone()
+    if not row:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Scheduled test not found.")
+
+    test = dict(row) if hasattr(row, "keys") else {
+        "id": row[0], "room_id": row[1], "title": row[2], "scheduled_start_time": row[12],
+        "deadline_time": row[13], "assigned_user_ids": row[14], "created_by_user_id": row[15]
+    }
+
+    user_id = str(user["id"])
+    is_creator = str(test.get("created_by_user_id")) == user_id or bool(user.get("is_admin"))
+    if not is_creator:
+        conn.close()
+        raise HTTPException(
+            status_code=403,
+            detail="Only the examination scheduler or an administrator can extend the deadline."
+        )
+
+    new_dl_dt = _parse_iso(payload.new_deadline)
+    if not new_dl_dt:
+        conn.close()
+        raise HTTPException(status_code=400, detail="Invalid new deadline timestamp format.")
+
+    start_dt = _parse_iso(test["scheduled_start_time"])
+    if new_dl_dt <= start_dt:
+        conn.close()
+        raise HTTPException(status_code=400, detail="New deadline must be after the examination start time.")
+
+    now_dt = datetime.datetime.now(datetime.timezone.utc)
+    if new_dl_dt <= now_dt:
+        conn.close()
+        raise HTTPException(status_code=400, detail="New deadline must be set in the future.")
+
+    new_dl_iso = new_dl_dt.isoformat()
+    now_iso = now_dt.isoformat()
+
+    # Update deadline in scheduled_tests
+    c.execute("UPDATE scheduled_tests SET deadline_time = ? WHERE id = ?", (new_dl_iso, test_id))
+
+    # Re-evaluate any late attempts in room_participants that fall within the new deadline window
+    c.execute("""
+        UPDATE room_participants
+        SET is_late = 0
+        WHERE room_id = ? AND is_late = 1 AND finished_at <= ?
+    """, (test["room_id"], new_dl_iso))
+
+    # Dispatch notifications to enrolled candidates
+    try:
+        assigned_ids = []
+        try:
+            assigned_ids = json.loads(test.get("assigned_user_ids") or "[]")
+        except Exception:
+            assigned_ids = ["*"]
+
+        notif_uids = set()
+        if "*" in assigned_ids:
+            c.execute("SELECT id FROM users WHERE is_banned = 0 LIMIT 200")
+            notif_uids = {str(r[0]) for r in c.fetchall()}
+        else:
+            notif_uids = {str(uid) for uid in assigned_ids if uid and uid != "*"}
+
+        c.execute("SELECT user_id FROM room_participants WHERE room_id = ?", (test["room_id"],))
+        for r in c.fetchall():
+            notif_uids.add(str(r[0]))
+
+        notif_uids.discard(user_id)
+
+        reason_note = f" Note: {payload.reason.strip()}." if payload.reason and payload.reason.strip() else ""
+        for target_uid in notif_uids:
+            notif_id = f"notif_ext_{test_id[:8]}_{target_uid[:8]}_{int(new_dl_dt.timestamp())}"
+            notif_title = f"⏰ Examination Deadline Extended: {test['title']}"
+            notif_msg = f"The deadline for '{test['title']}' has been extended to {new_dl_iso}.{reason_note} CBT mode is open for candidates to submit their papers."
+            details_json = json.dumps({"test_id": test_id, "room_id": test["room_id"], "new_deadline": new_dl_iso})
+            try:
+                c.execute("""
+                    INSERT OR IGNORE INTO user_notifications (id, user_id, type, title, message, details, is_read, created_at)
+                    VALUES (?, ?, 'DEADLINE_EXTENDED', ?, ?, ?, 0, ?)
+                """, (notif_id, target_uid, notif_title, notif_msg, details_json, now_iso))
+            except Exception:
+                pass
+    except Exception as notif_err:
+        logger.warning(f"[EXTEND_DEADLINE] Notification dispatch note: {notif_err}")
+
+    conn.commit()
+    conn.close()
+
+    return {
+        "status": "success",
+        "message": f"Deadline successfully extended to {new_dl_iso}.",
+        "test_id": test_id,
+        "new_deadline": new_dl_iso
+    }

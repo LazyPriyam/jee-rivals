@@ -809,6 +809,11 @@ export const api = {
       request(`/api/scheduled-tests/${testId}`, {
         method: 'DELETE',
       }),
+    extendDeadline: (testId, payload) =>
+      request(`/api/scheduled-tests/${testId}/extend-deadline`, {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      }),
   },
 };
 

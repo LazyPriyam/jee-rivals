@@ -30,7 +30,8 @@ import {
   ExternalLink,
   Hourglass,
   BookOpen,
-  Trash2
+  Trash2,
+  CalendarPlus
 } from 'lucide-react';
 
 const CANONICAL_SUBJECTS = ['Physics', 'Chemistry', 'Mathematics'];
@@ -48,6 +49,14 @@ export default function TestsView({ user, onStartTest, onSelectTest, onOpenAuth 
 
   // Question Paper (PDF) Modal State
   const [paperModalTest, setPaperModalTest] = useState(null);
+
+  // Extend Deadline Modal State
+  const [extendDeadlineTest, setExtendDeadlineTest] = useState(null);
+  const [extendDeadlineNewDate, setExtendDeadlineNewDate] = useState('');
+  const [extendDeadlineReason, setExtendDeadlineReason] = useState('');
+  const [extendingDeadline, setExtendingDeadline] = useState(false);
+  const [extendDeadlineSuccess, setExtendDeadlineSuccess] = useState('');
+  const [extendDeadlineError, setExtendDeadlineError] = useState('');
 
   // Two-Tier Leaderboard Modal State
   const [leaderboardModalTestId, setLeaderboardModalTestId] = useState(null);
@@ -84,6 +93,12 @@ export default function TestsView({ user, onStartTest, onSelectTest, onOpenAuth 
     assigned_user_ids: ['*'], // '*' means all
   });
 
+  const toLocalISO = (d) => {
+    if (!d || isNaN(d.getTime())) return '';
+    const pad = (n) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  };
+
   // Calculate default dates for create form
   useEffect(() => {
     const now = new Date();
@@ -92,11 +107,6 @@ export default function TestsView({ user, onStartTest, onSelectTest, onOpenAuth 
 
     const deadline = new Date(tomorrow.getTime() + 48 * 60 * 60 * 1000);
     deadline.setHours(23, 59, 0, 0);
-
-    const toLocalISO = (d) => {
-      const pad = (n) => String(n).padStart(2, '0');
-      return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
-    };
 
     setCreateForm((prev) => ({
       ...prev,
@@ -187,6 +197,108 @@ export default function TestsView({ user, onStartTest, onSelectTest, onOpenAuth 
         setLeaderboardModalTestId(null);
       })
       .finally(() => setLoadingLeaderboard(false));
+  };
+
+  const openExtendDeadline = (test) => {
+    if (!test) return;
+    try { sound?.click?.(); } catch (_) {}
+    setExtendDeadlineTest(test);
+    setExtendDeadlineReason('');
+    setExtendDeadlineError('');
+    setExtendDeadlineSuccess('');
+
+    const currentDlDate = parseDate(test.deadline_time);
+    const baseTime = currentDlDate && currentDlDate.getTime() > Date.now()
+      ? currentDlDate.getTime()
+      : Date.now();
+    const defaultNewDate = new Date(baseTime + 24 * 60 * 60 * 1000);
+    setExtendDeadlineNewDate(toLocalISO(defaultNewDate));
+  };
+
+  const applyDeadlinePreset = (hours) => {
+    if (!extendDeadlineTest) return;
+    try { sound?.click?.(); } catch (_) {}
+    const currentDlDate = parseDate(extendDeadlineTest.deadline_time);
+    const baseTime = currentDlDate && currentDlDate.getTime() > Date.now()
+      ? currentDlDate.getTime()
+      : Date.now();
+    const targetDate = new Date(baseTime + hours * 3600 * 1000);
+    setExtendDeadlineNewDate(toLocalISO(targetDate));
+    setExtendDeadlineError('');
+  };
+
+  const handleExtendDeadlineSubmit = async (e) => {
+    if (e) e.preventDefault();
+    if (!extendDeadlineTest || !extendDeadlineNewDate) return;
+    try { sound?.click?.(); } catch (_) {}
+    setExtendingDeadline(true);
+    setExtendDeadlineError('');
+
+    try {
+      const chosenDate = new Date(extendDeadlineNewDate);
+      if (isNaN(chosenDate.getTime())) {
+        throw new Error('Please select a valid date and time.');
+      }
+      if (chosenDate.getTime() <= Date.now()) {
+        throw new Error('New deadline must be set in the future.');
+      }
+
+      const isoString = chosenDate.toISOString();
+      const res = await api.scheduledTests.extendDeadline(extendDeadlineTest.id, {
+        new_deadline: isoString,
+        reason: extendDeadlineReason.trim()
+      });
+
+      try { sound?.levelUp?.(); } catch (_) {}
+      setExtendDeadlineSuccess(res.message || 'Deadline successfully extended!');
+
+      // Update tests catalog locally immediately
+      setCatalog((prev) => {
+        const updateItem = (item) => {
+          if (item.id === extendDeadlineTest.id) {
+            return {
+              ...item,
+              deadline_time: isoString,
+              is_past_deadline: false,
+              is_active_window: (new Date() >= (parseDate(item.scheduled_start_time) || new Date(0))) && (new Date() <= chosenDate)
+            };
+          }
+          return item;
+        };
+        return {
+          ...prev,
+          all: (prev.all || []).map(updateItem),
+          active: (prev.active || []).map(updateItem),
+          pending: (prev.pending || []).map(updateItem),
+          completed: (prev.completed || []).map(updateItem),
+          upcoming: (prev.upcoming || []).map(updateItem)
+        };
+      });
+
+      // Update leaderboard data if modal is currently open for this test
+      setLeaderboardData((prev) => {
+        if (!prev || prev.test?.id !== extendDeadlineTest.id) return prev;
+        return {
+          ...prev,
+          test: {
+            ...prev.test,
+            deadline_time: isoString,
+            is_past_deadline: false
+          }
+        };
+      });
+
+      fetchCatalog();
+
+      setTimeout(() => {
+        setExtendDeadlineTest(null);
+        setExtendDeadlineSuccess('');
+      }, 1200);
+    } catch (err) {
+      setExtendDeadlineError(err.message || 'Failed to extend deadline.');
+    } finally {
+      setExtendingDeadline(false);
+    }
   };
 
   const openCreateModal = () => {
@@ -519,7 +631,7 @@ export default function TestsView({ user, onStartTest, onSelectTest, onOpenAuth 
             const isUpcoming = test.is_upcoming;
             const isCbtExpired = test.is_past_deadline && !isCompleted;
             const isActiveWindow = test.is_active_window && !isCompleted;
-            const isCreator = user && String(test.created_by_user_id) === String(user.id);
+            const isCreator = user && (String(test.created_by_user_id) === String(user.id) || Boolean(user.is_admin));
 
             return (
               <ConicBorder
@@ -653,9 +765,25 @@ export default function TestsView({ user, onStartTest, onSelectTest, onOpenAuth 
                       <span className="text-slate-500 flex items-center gap-1">
                         <Clock className="w-3 h-3" /> Deadline:
                       </span>
-                      <span className="font-semibold text-slate-300">
-                        {formatIST(test.deadline_time)}
-                      </span>
+                      <div className="flex items-center gap-1.5">
+                        <span className="font-semibold text-slate-300">
+                          {formatIST(test.deadline_time)}
+                        </span>
+                        {isCreator && (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              openExtendDeadline(test);
+                            }}
+                            title="Extend examination deadline"
+                            className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border border-amber-500/30 transition flex items-center gap-1 cursor-pointer"
+                          >
+                            <CalendarPlus className="w-2.5 h-2.5" />
+                            <span>Extend</span>
+                          </button>
+                        )}
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -672,6 +800,17 @@ export default function TestsView({ user, onStartTest, onSelectTest, onOpenAuth 
                     </button>
 
                     {/* Unschedule (Creator before release) or Delete / Remove (Account) */}
+                    {isCreator && (
+                      <button
+                        type="button"
+                        onClick={() => openExtendDeadline(test)}
+                        title="Extend examination deadline"
+                        className="px-2.5 py-1.5 rounded-xl bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 hover:text-amber-200 border border-amber-500/30 text-xs font-bold transition flex items-center gap-1.5 cursor-pointer"
+                      >
+                        <CalendarPlus className="w-3.5 h-3.5 text-amber-400" />
+                        <span className="hidden sm:inline">Extend</span>
+                      </button>
+                    )}
                     {isCreator && isUpcoming ? (
                       <button
                         onClick={() => setDeleteConfirmTest(test)}
@@ -760,8 +899,19 @@ export default function TestsView({ user, onStartTest, onSelectTest, onOpenAuth 
                   <Trophy className="w-5 h-5 text-amber-400" />
                   {leaderboardData?.test?.title || 'Contest Standings'}
                 </h3>
-                <div className="text-xs text-slate-400 mt-0.5">
-                  Deadline: {leaderboardData?.test?.deadline_time ? formatIST(leaderboardData.test.deadline_time) : 'N/A'}
+                <div className="text-xs text-slate-400 mt-0.5 flex items-center gap-2">
+                  <span>Deadline: {leaderboardData?.test?.deadline_time ? formatIST(leaderboardData.test.deadline_time) : 'N/A'}</span>
+                  {user && (String(leaderboardData?.test?.created_by_user_id) === String(user.id) || Boolean(user.is_admin)) && (
+                    <button
+                      type="button"
+                      onClick={() => openExtendDeadline(leaderboardData.test)}
+                      className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border border-amber-500/30 transition flex items-center gap-1 cursor-pointer"
+                      title="Extend examination deadline"
+                    >
+                      <CalendarPlus className="w-2.5 h-2.5" />
+                      <span>Extend Deadline</span>
+                    </button>
+                  )}
                 </div>
               </div>
               <div className="flex items-center gap-2">
@@ -915,6 +1065,170 @@ export default function TestsView({ user, onStartTest, onSelectTest, onOpenAuth 
                 </div>
               )}
             </div>
+          </div>
+        </div>,
+        document.body
+      )}
+
+      {/* EXTEND DEADLINE MODAL (PORTAL TO DOCUMENT.BODY) */}
+      {extendDeadlineTest && typeof document !== 'undefined' && createPortal(
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-fadeIn">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-lg w-full max-h-[92vh] flex flex-col overflow-hidden shadow-2xl">
+            {/* Header */}
+            <div className="p-5 border-b border-slate-800 flex items-center justify-between">
+              <div>
+                <h3 className="text-lg font-black text-white flex items-center gap-2">
+                  <CalendarPlus className="w-5 h-5 text-amber-400" />
+                  Extend Examination Deadline
+                </h3>
+                <p className="text-xs text-slate-400 mt-0.5 truncate max-w-sm">
+                  {extendDeadlineTest.title}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setExtendDeadlineTest(null)}
+                className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <form onSubmit={handleExtendDeadlineSubmit} className="p-5 overflow-y-auto space-y-4">
+              {/* Current Deadline Display */}
+              <div className="p-3 rounded-xl bg-slate-950/60 border border-slate-800 text-xs flex items-center justify-between">
+                <span className="text-slate-400 flex items-center gap-1.5">
+                  <Clock className="w-4 h-4 text-slate-500" /> Current Deadline:
+                </span>
+                <span className="font-bold text-slate-200">
+                  {formatIST(extendDeadlineTest.deadline_time)}
+                </span>
+              </div>
+
+              {/* Quick Presets */}
+              <div>
+                <label className="block text-xs font-bold text-slate-400 mb-2">
+                  Quick Extensions (from now / current deadline):
+                </label>
+                <div className="grid grid-cols-3 gap-2">
+                  {[
+                    { label: '+6 Hours', hours: 6 },
+                    { label: '+12 Hours', hours: 12 },
+                    { label: '+1 Day', hours: 24 },
+                    { label: '+2 Days', hours: 48 },
+                    { label: '+3 Days', hours: 72 },
+                    { label: '+1 Week', hours: 168 },
+                  ].map((preset) => (
+                    <button
+                      key={preset.label}
+                      type="button"
+                      onClick={() => applyDeadlinePreset(preset.hours)}
+                      className="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-amber-600/20 text-slate-300 hover:text-amber-300 border border-slate-700 hover:border-amber-500/40 text-xs font-semibold transition cursor-pointer"
+                    >
+                      {preset.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Datetime input */}
+              <div>
+                <label className="block text-xs font-bold text-slate-400 mb-1.5">
+                  Select New Deadline:
+                </label>
+                <input
+                  type="datetime-local"
+                  required
+                  value={extendDeadlineNewDate}
+                  min={toLocalISO(new Date())}
+                  onChange={(e) => {
+                    setExtendDeadlineNewDate(e.target.value);
+                    setExtendDeadlineError('');
+                  }}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-amber-500 font-mono"
+                />
+                {extendDeadlineNewDate && (
+                  <div className="mt-1.5 text-[11px] text-amber-400/90 font-medium flex items-center gap-1">
+                    <Clock className="w-3 h-3" />
+                    <span>New Deadline in IST: {formatIST(extendDeadlineNewDate)}</span>
+                  </div>
+                )}
+              </div>
+
+              {/* Optional Reason / Note */}
+              <div>
+                <label className="block text-xs font-bold text-slate-400 mb-1.5">
+                  Announcement Note / Reason (Optional):
+                </label>
+                <input
+                  type="text"
+                  placeholder="e.g. Extended by 24h due to holiday weekend"
+                  value={extendDeadlineReason}
+                  onChange={(e) => setExtendDeadlineReason(e.target.value)}
+                  maxLength={160}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-xs text-white focus:outline-none focus:border-amber-500"
+                />
+                <p className="text-[10px] text-slate-500 mt-1">
+                  Enrolled students will receive an in-app notification with this extension note.
+                </p>
+              </div>
+
+              {/* System Notice Box */}
+              <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/20 text-[11px] text-amber-300 space-y-1">
+                <div className="font-bold flex items-center gap-1 text-amber-400">
+                  <Sparkles className="w-3.5 h-3.5" /> What happens when extended:
+                </div>
+                <ul className="list-disc list-inside space-y-0.5 text-amber-200/80">
+                  <li>CBT testing window re-opens for any candidate who hasn't submitted.</li>
+                  <li>Any submissions previously logged as "Late Attempts" before the new deadline are restored to Official Standings.</li>
+                  <li>Question paper PDF download remains sealed until the new extended deadline.</li>
+                </ul>
+              </div>
+
+              {/* Error & Success Messages */}
+              {extendDeadlineError && (
+                <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-400 text-xs flex items-center gap-2">
+                  <AlertTriangle className="w-4 h-4 shrink-0" />
+                  <span>{extendDeadlineError}</span>
+                </div>
+              )}
+              {extendDeadlineSuccess && (
+                <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs flex items-center gap-2">
+                  <Check className="w-4 h-4 shrink-0" />
+                  <span>{extendDeadlineSuccess}</span>
+                </div>
+              )}
+
+              {/* Actions */}
+              <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-800">
+                <button
+                  type="button"
+                  disabled={extendingDeadline}
+                  onClick={() => setExtendDeadlineTest(null)}
+                  className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-bold text-slate-300 transition cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={extendingDeadline || !extendDeadlineNewDate}
+                  className="px-5 py-2 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-xs font-black text-slate-950 transition flex items-center gap-1.5 shadow-lg shadow-amber-500/20 cursor-pointer disabled:opacity-50"
+                >
+                  {extendingDeadline ? (
+                    <>
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                      <span>Extending...</span>
+                    </>
+                  ) : (
+                    <>
+                      <CalendarPlus className="w-3.5 h-3.5" />
+                      <span>Confirm & Extend</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </form>
           </div>
         </div>,
         document.body
