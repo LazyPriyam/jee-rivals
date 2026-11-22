@@ -8,6 +8,11 @@ export default defineConfig({
     react(),
     tailwindcss(),
   ],
+  resolve: {
+    alias: {
+      html2canvas: 'html2canvas-pro'
+    }
+  },
   server: {
     port: 3000,
     proxy: {

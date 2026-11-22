@@ -75,9 +75,11 @@ export default function QuestionPaperModal({ testId, testTitle, paperData: direc
     setDownloadProgress('Preparing...');
 
     try {
-      setDownloadProgress('Loading PDF engine...');
-      const html2pdfModule = await import('html2pdf.js');
-      const html2pdf = html2pdfModule.default || html2pdfModule;
+      setDownloadProgress('Loading engine...');
+      const [{ default: html2canvas }, { jsPDF }] = await Promise.all([
+        import('html2canvas-pro'),
+        import('jspdf')
+      ]);
 
       setDownloadProgress('Formatting document...');
       const element = paperRef.current;
@@ -86,29 +88,90 @@ export default function QuestionPaperModal({ testId, testTitle, paperData: direc
         .replace(/_+/g, '_');
       const filename = `JEE_${examType}_${safeTitle}.pdf`;
 
-      setDownloadProgress('Generating PDF pages...');
-      const opt = {
-        margin: [10, 10, 10, 10],
-        filename: filename,
-        image: { type: 'jpeg', quality: 0.98 },
-        html2canvas: {
-          scale: 2,
-          useCORS: true,
-          logging: false,
-          scrollY: 0,
-          windowWidth: 1024
-        },
-        jsPDF: {
-          unit: 'mm',
-          format: 'a4',
-          orientation: 'portrait'
-        },
-        pagebreak: {
-          mode: ['avoid-all', 'css', 'legacy']
-        }
-      };
+      setDownloadProgress('Rendering KaTeX math & graphics...');
 
-      await html2pdf().set(opt).from(element).save();
+      // Render high-res canvas with html2canvas-pro (native oklch & modern CSS support)
+      const canvas = await html2canvas(element, {
+        scale: 2,
+        useCORS: true,
+        logging: false,
+        backgroundColor: '#ffffff',
+        windowWidth: 1024
+      });
+
+      setDownloadProgress('Compiling A4 pages...');
+
+      // Standard A4 dimensions in mm
+      const pdf = new jsPDF('p', 'mm', 'a4');
+      const pdfWidth = 210;
+      const pdfHeight = 297;
+      const margin = 10;
+      const contentWidth = pdfWidth - margin * 2; // 190mm
+      const contentHeight = pdfHeight - margin * 2; // 277mm
+
+      const canvasWidth = canvas.width;
+      const canvasHeight = canvas.height;
+      const pxPerMm = canvasWidth / contentWidth;
+      const defaultPageHeightPx = Math.floor(contentHeight * pxPerMm);
+
+      // Find question cards to avoid breaking questions in half
+      const containerRect = element.getBoundingClientRect();
+      const scale = canvasWidth / element.offsetWidth;
+      const cardNodes = Array.from(element.querySelectorAll('.print-avoid-break, .question-card-item'));
+      const cardBoundaries = cardNodes.map((card) => {
+        const r = card.getBoundingClientRect();
+        return {
+          top: (r.top - containerRect.top) * scale,
+          bottom: (r.bottom - containerRect.top) * scale
+        };
+      });
+
+      let currentY = 0;
+      let pageIndex = 0;
+
+      while (currentY < canvasHeight) {
+        if (pageIndex > 0) {
+          pdf.addPage();
+        }
+
+        let sliceHeight = Math.min(defaultPageHeightPx, canvasHeight - currentY);
+
+        // If not the last page, check if a question card is cut in half
+        if (currentY + sliceHeight < canvasHeight) {
+          const splitCard = cardBoundaries.find(
+            (b) => b.top < currentY + sliceHeight && b.bottom > currentY + sliceHeight
+          );
+          // Only adjust if the card started after currentY + some padding (so page isn't left empty)
+          if (splitCard && splitCard.top > currentY + 120 * scale) {
+            sliceHeight = Math.floor(splitCard.top - currentY);
+          }
+        }
+
+        // Create page canvas slice
+        const pageCanvas = document.createElement('canvas');
+        pageCanvas.width = canvasWidth;
+        pageCanvas.height = sliceHeight;
+        const ctx = pageCanvas.getContext('2d');
+        if (ctx) {
+          ctx.fillStyle = '#ffffff';
+          ctx.fillRect(0, 0, canvasWidth, sliceHeight);
+          ctx.drawImage(
+            canvas,
+            0, currentY, canvasWidth, sliceHeight,
+            0, 0, canvasWidth, sliceHeight
+          );
+
+          const imgData = pageCanvas.toDataURL('image/jpeg', 0.98);
+          const imgHeightMm = sliceHeight / pxPerMm;
+          pdf.addImage(imgData, 'JPEG', margin, margin, contentWidth, imgHeightMm);
+        }
+
+        currentY += sliceHeight;
+        pageIndex++;
+      }
+
+      setDownloadProgress('Saving...');
+      pdf.save(filename);
     } catch (err) {
       console.error('Failed to generate PDF download:', err);
       alert('Custom PDF download encountered an issue: ' + (err.message || 'Error') + '. You can use Print / Browser PDF or Download HTML.');
