@@ -167,7 +167,7 @@ export default function Navbar({
         </div>
 
         {/* Middle: Navigation Items List */}
-        <nav className="flex-1 overflow-y-auto overflow-x-hidden p-3 space-y-1.5 scrollbar-thin">
+        <nav className={`flex-1 overflow-y-auto overflow-x-hidden space-y-1.5 no-scrollbar ${isCollapsed ? 'px-2 py-3' : 'p-3'}`}>
           {navItems.map((item) => {
             const Icon = item.icon;
             const isActive = activeTab === item.id;

@@ -10,12 +10,17 @@
 }
 
 /* Custom Scrollbar */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #333a4c transparent;
+}
+
 ::-webkit-scrollbar {
-  width: 7px;
-  height: 7px;
+  width: 6px;
+  height: 6px;
 }
 ::-webkit-scrollbar-track {
-  background: #181d28;
+  background: transparent;
 }
 ::-webkit-scrollbar-thumb {
   background: #333a4c;
@@ -23,6 +28,14 @@
 }
 ::-webkit-scrollbar-thumb:hover {
   background: #ea580c;
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
 }
 
 /* KaTeX custom tweaks & high-contrast visibility */

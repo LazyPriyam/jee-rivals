@@ -34,8 +34,10 @@ export default function ConicBorder({
 }) {
   if (!active) {
     return (
-      <div className={`border border-white/10 ${rounded} ${className}`} onClick={onClick}>
-        {children}
+      <div className={`relative ${rounded} ${className}`} onClick={onClick}>
+        <div className={`relative h-full w-full ${rounded} ${innerClassName}`}>
+          {children}
+        </div>
       </div>
     );
   }
