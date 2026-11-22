@@ -2,6 +2,8 @@ import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { api } from '../utils/api';
 import MathRenderer from './MathRenderer';
+import html2canvas from 'html2canvas-pro';
+import { jsPDF } from 'jspdf';
 import {
   FileText,
   Printer,
@@ -75,12 +77,6 @@ export default function QuestionPaperModal({ testId, testTitle, paperData: direc
     setDownloadProgress('Preparing...');
 
     try {
-      setDownloadProgress('Loading engine...');
-      const [{ default: html2canvas }, { jsPDF }] = await Promise.all([
-        import('html2canvas-pro'),
-        import('jspdf')
-      ]);
-
       setDownloadProgress('Formatting document...');
       const element = paperRef.current;
       const safeTitle = (paperData?.title || testTitle || 'Question_Paper')
@@ -174,6 +170,12 @@ export default function QuestionPaperModal({ testId, testTitle, paperData: direc
       pdf.save(filename);
     } catch (err) {
       console.error('Failed to generate PDF download:', err);
+      if (err.message && (err.message.includes('dynamically imported module') || err.message.includes('Loading chunk'))) {
+        if (confirm('A newer version of the examination system has just been deployed. Would you like to refresh now to use it?')) {
+          window.location.reload();
+          return;
+        }
+      }
       alert('Custom PDF download encountered an issue: ' + (err.message || 'Error') + '. You can use Print / Browser PDF or Download HTML.');
     } finally {
       setIsDownloading(false);
