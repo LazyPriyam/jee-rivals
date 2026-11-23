@@ -144,9 +144,7 @@ export default function ReportQuestionModal({
               )}
             </div>
             <h3 className="text-xl font-black text-white">
-              {isMultiplayer
-                ? 'Dispute Dispatched for Contender Voting!'
-                : wasSkipped
+              {wasSkipped
                 ? 'Reported & Replaced!'
                 : provisionalRefund > 0
                 ? 'Provisional Elo Restored!'
@@ -160,10 +158,8 @@ export default function ReportQuestionModal({
               </div>
             )}
             <p className="text-sm text-slate-400 max-w-xs leading-relaxed">
-              {isMultiplayer
-                ? 'Your report has been shared with fellow contenders in this room. Everyone who took this test can now vote to verify the defect in their test analysis.'
-                : provisionalRefund > 0
-                ? 'As an anti-frustration safeguard, your lost Elo has been provisionally credited back to your rating while moderators review the issue. Once verified defective, full bonus marks (+4 marks) are awarded under official NTA Dropped Question rules.'
+              {provisionalRefund > 0
+                ? 'As an anti-frustration safeguard, your lost Elo has been provisionally credited back to your rating while moderators review the issue. Once verified, full bonus marks (+4 marks) are awarded under official NTA Dropped Question rules.'
                 : wasSkipped
                 ? 'Your report was dispatched to the moderation hub. This question was skipped with zero Elo penalty, and a fresh question has been drawn.'
                 : 'Thank you for keeping the question bank accurate! Your report has been dispatched to the human moderation hub.'}
@@ -199,23 +195,12 @@ export default function ReportQuestionModal({
               </div>
             )}
 
-            {/* Multiplayer Contender Review Notice */}
-            {isMultiplayer && (
-              <div className="p-3 bg-purple-500/15 border border-purple-500/30 rounded-2xl text-[11px] text-purple-200 flex items-center gap-2.5">
-                <Users className="w-4 h-4 text-purple-400 shrink-0" />
-                <div className="leading-relaxed">
-                  <strong className="text-white block font-bold">Multiplayer Room Dispute:</strong>
-                  Because this test was taken with fellow contenders, reporting will initiate a contender consensus vote in room <span className="font-mono text-purple-300 font-bold">{roomCode}</span>.
-                </div>
-              </div>
-            )}
-
             {/* Provisional Elo & Marks Safeguard Feature Callout */}
             <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded-2xl text-[11px] text-amber-300 flex items-center gap-2.5">
               <Shield className="w-4 h-4 text-amber-400 shrink-0" />
               <div className="leading-relaxed">
                 <strong className="text-white block font-bold">Provisional Rating Safeguard Active:</strong>
-                Submitting flags this question for defect verification and immediately restores provisional Elo. When verified defective by room contenders or moderators, the official <span className="font-bold text-amber-200">NTA Dropped Question rule</span> applies (+4 bonus marks awarded, penalty removed).
+                Submitting flags this question for defect verification and immediately restores provisional Elo. When verified defective by moderators, the official <span className="font-bold text-amber-200">NTA Dropped Question rule</span> applies (+4 bonus marks awarded, penalty removed).
               </div>
             </div>
 

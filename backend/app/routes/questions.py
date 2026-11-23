@@ -406,48 +406,29 @@ def get_room_reports(room_code: str, user: Optional[dict] = Depends(get_optional
     rows = [dict(r) for r in c.fetchall()]
 
     result = {}
+    current_uid = str(user.get("id") or "") if user else ""
+    is_admin = bool(user and user.get("is_admin"))
+
     for r in rows:
         qid = r["question_id"]
-        raw_votes = r.get("votes") or "{}"
-        try:
-            votes = json.loads(raw_votes) if isinstance(raw_votes, str) else raw_votes
-        except Exception:
-            votes = {}
+        status_norm = (r.get("status") or "PENDING").upper()
+        is_my_report = bool(current_uid and str(r.get("reporter_id") or "") == current_uid)
 
-        raw_parts = r.get("participant_ids") or "[]"
-        try:
-            parts = json.loads(raw_parts) if isinstance(raw_parts, str) else raw_parts
-        except Exception:
-            parts = []
-
-        if not isinstance(votes, dict):
-            votes = {}
-        if not isinstance(parts, list):
-            parts = []
-
-        agree_cnt = sum(1 for v in votes.values() if (v.get("vote") if isinstance(v, dict) else v) == "AGREE")
-        disagree_cnt = sum(1 for v in votes.values() if (v.get("vote") if isinstance(v, dict) else v) == "DISAGREE")
-
-        user_vote = None
-        if user and user.get("id"):
-            u_entry = votes.get(user["id"])
-            if u_entry:
-                user_vote = u_entry.get("vote") if isinstance(u_entry, dict) else u_entry
+        # STRICT PRIVACY & NORMALCY:
+        # If a question report is NOT approved yet, other students must not see it at all (it stays completely normal for them).
+        # Only the student who filed the report can see their pending status.
+        # Once approved, all students see the approved status and bonus marks, but reporter identity is completely anonymous.
+        if status_norm not in ("APPROVED", "QUARANTINED") and not is_my_report and not is_admin:
+            continue
 
         result[qid] = {
             "id": r["id"],
             "question_id": qid,
-            "reporter_id": r.get("reporter_id"),
-            "reporter_username": r.get("reporter_username"),
+            "reporter_id": r.get("reporter_id") if (is_my_report or is_admin) else None,
+            "reporter_username": None, # Never expose reporter identity to other students
             "reason": r.get("reason"),
-            "notes": r.get("notes"),
+            "notes": r.get("notes") if (is_my_report or is_admin) else None,
             "status": r.get("status"),
-            "consensus_status": r.get("consensus_status") or "PENDING",
-            "votes": votes,
-            "agree_count": agree_cnt,
-            "disagree_count": disagree_cnt,
-            "total_participants": len(parts) if parts else max(2, len(votes)),
-            "user_vote": user_vote,
             "created_at": r.get("created_at")
         }
 
@@ -1083,36 +1064,7 @@ def report_question(question_id: str, report_data: QuestionReportRequest, user: 
                 """, (auth_marks, int(bonus_marks_awarded), json.dumps(p_answers), rp_dict["room_id"], uid))
 
     votes = {}
-    consensus_status = "CONSENSUS_AGREED" if is_already_defective else "PENDING"
-    if is_multiplayer and not is_already_defective:
-        # Reporter's vote is recorded as AGREE
-        votes[reporter_id] = {
-            "vote": "AGREE",
-            "username": reporter_name,
-            "voted_at": now
-        }
-        consensus_status = "VOTING_IN_PROGRESS"
-
-        # Dispatch vote request notification to all other contenders
-        reason_clean = "Out of Syllabus for this Test" if report_data.reason in ("OUT_OF_TEST_SYLLABUS", "WRONG_CHAPTER") else report_data.reason.replace("_", " ").title()
-        for other_uid in participant_ids:
-            if other_uid != reporter_id:
-                notif_id = f"notif_{uuid.uuid4().hex[:12]}"
-                notif_title = f"🗳️ Question Dispute Vote: Room #{room_code}"
-                notif_msg = (
-                    f"{reporter_name} reported Question #{question_id[:8]} as Out of Syllabus for this test in Room #{room_code}. "
-                    f"As a fellow contender, your vote is required in Test Analysis to confirm whether this question belongs to this test's syllabus."
-                )
-                details_json = json.dumps({
-                    "report_id": report_id,
-                    "question_id": question_id,
-                    "room_code": room_code,
-                    "action": "ROOM_REPORT_VOTE"
-                })
-                c.execute("""
-                    INSERT INTO user_notifications (id, user_id, type, title, message, details, is_read, created_at)
-                    VALUES (?, ?, 'ROOM_REPORT_VOTE_REQUEST', ?, ?, ?, 0, ?)
-                """, (notif_id, other_uid, notif_title, notif_msg, details_json, now))
+    consensus_status = "PENDING"
 
     # Send Notification to Reporter
     if user and user.get("id"):
@@ -1177,12 +1129,10 @@ def report_question(question_id: str, report_data: QuestionReportRequest, user: 
 
     if bonus_marks_awarded > 0:
         success_msg = f"Defect verified! Under NTA Dropped Question rules, +{bonus_marks_awarded:.0f} bonus marks have been awarded to your scorecard."
-    elif is_multiplayer:
-        success_msg = f"Report submitted for Contender Review in Room #{room_code}. Other test participants have been requested to cast their vote."
     elif provisional_elo > 0:
         success_msg = f"Report submitted. +{provisional_elo:.1f} Elo provisionally restored pending review."
     else:
-        success_msg = "Report submitted successfully."
+        success_msg = "Report submitted successfully for review."
 
     return {
         "success": True,

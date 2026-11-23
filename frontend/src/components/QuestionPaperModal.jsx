@@ -86,13 +86,57 @@ export default function QuestionPaperModal({ testId, testTitle, paperData: direc
 
       setDownloadProgress('Rendering KaTeX math & graphics...');
 
-      // Render high-res canvas with html2canvas-pro (native oklch & modern CSS support)
+      // Render high-res canvas with html2canvas-pro and sanitize any modern oklch CSS color tokens
       const canvas = await html2canvas(element, {
         scale: 2,
         useCORS: true,
         logging: false,
         backgroundColor: '#ffffff',
-        windowWidth: 1024
+        windowWidth: 1024,
+        onclone: (clonedDoc, clonedEl) => {
+          try {
+            // An offscreen canvas context to convert ANY modern CSS color (oklch, oklab, color-mix) to standard sRGB hex
+            const canvas2d = clonedDoc.createElement('canvas');
+            const ctx2d = canvas2d.getContext('2d');
+            const toRgb = (col) => {
+              if (!ctx2d) return '#0f172a';
+              try {
+                ctx2d.fillStyle = '#000000';
+                ctx2d.fillStyle = col;
+                return ctx2d.fillStyle;
+              } catch (_) {
+                return '#0f172a';
+              }
+            };
+
+            // Sanitize all <style> elements in the cloned document
+            const styleNodes = clonedDoc.querySelectorAll('style');
+            styleNodes.forEach((s) => {
+              if (s.textContent && (s.textContent.includes('oklch') || s.textContent.includes('oklab'))) {
+                s.textContent = s.textContent
+                  .replace(/oklch\([^)]+\)/gi, (m) => toRgb(m))
+                  .replace(/oklab\([^)]+\)/gi, (m) => toRgb(m));
+              }
+            });
+
+            // Sanitize all inline styles on cloned elements
+            if (clonedEl) {
+              const allNodes = clonedEl.querySelectorAll('*');
+              allNodes.forEach((node) => {
+                if (node.style) {
+                  ['color', 'backgroundColor', 'borderColor', 'fill', 'stroke'].forEach((prop) => {
+                    const val = node.style[prop];
+                    if (val && typeof val === 'string' && (val.includes('oklch') || val.includes('oklab'))) {
+                      node.style[prop] = toRgb(val);
+                    }
+                  });
+                }
+              });
+            }
+          } catch (sanitizeErr) {
+            console.warn('[PDF Export] Style sanitize note:', sanitizeErr);
+          }
+        }
       });
 
       setDownloadProgress('Compiling A4 pages...');
