@@ -2273,6 +2273,27 @@ def get_room_results(code: str, user: Optional[dict] = Depends(get_optional_user
                         except Exception:
                             qd = None
 
+                    if not qd:
+                        # Historic test question preservation:
+                        # If a question was archived or retired from the active bank after the examination concluded,
+                        # preserve its position, user responses, and test integrity rather than shortening the test paper.
+                        qd = {
+                            "id": str(q_id),
+                            "subject": "General",
+                            "unit": "General",
+                            "chapter": "Archived Question",
+                            "question_type": "SINGLE_CHOICE",
+                            "text": "[This question was archived or retired from the active question bank after the examination concluded.]",
+                            "options": "[]",
+                            "has_diagram": 0,
+                            "diagram_urls": "[]",
+                            "correct_answer": "",
+                            "solution_text": "This question was retired from the live bank after the test session ended.",
+                            "difficulty_tier": "MEDIUM",
+                            "validation_status": "ARCHIVED",
+                            "validation_flags": "[]"
+                        }
+
                     if qd:
                         raw_formulas = qd.get("key_formulas")
                         try:

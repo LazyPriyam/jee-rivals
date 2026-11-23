@@ -448,10 +448,50 @@ def delete_questions_batch(
     cleaned_diagrams = 0
 
     try:
+        # Referential integrity safeguard:
+        # Never delete questions that are actively referenced in any past or active exams (rooms or scheduled_tests).
+        # This prevents historic test scorecards, papers, and answer keys from losing questions or corrupting marks!
+        safe_delete_ids = list(payload.question_ids)
+        try:
+            c.execute("SELECT question_ids FROM rooms")
+            used_qids = set()
+            for r_row in c.fetchall():
+                raw_qids = r_row[0]
+                if raw_qids:
+                    try:
+                        q_parsed = json.loads(raw_qids) if isinstance(raw_qids, str) else raw_qids
+                        if isinstance(q_parsed, list):
+                            for qid_val in q_parsed:
+                                used_qids.add(str(qid_val))
+                    except Exception:
+                        pass
+            
+            c.execute("SELECT question_ids FROM scheduled_tests")
+            for st_row in c.fetchall():
+                raw_st = st_row[0]
+                if raw_st:
+                    try:
+                        st_parsed = json.loads(raw_st) if isinstance(raw_st, str) else raw_st
+                        if isinstance(st_parsed, list):
+                            for qid_val in st_parsed:
+                                used_qids.add(str(qid_val))
+                    except Exception:
+                        pass
+
+            protected_count = sum(1 for qid in safe_delete_ids if str(qid) in used_qids)
+            if protected_count > 0:
+                print(f"[SYNC] Safeguard preserved {protected_count} question(s) referenced in candidate test history.")
+                safe_delete_ids = [qid for qid in safe_delete_ids if str(qid) not in used_qids]
+        except Exception as guard_err:
+            print(f"[SYNC] Protected question scan note: {guard_err}")
+
+        if not safe_delete_ids:
+            return {"success": True, "deleted_count": 0, "cleaned_diagrams": 0, "note": "All requested questions preserved by exam history safeguard."}
+
         diagram_filenames_to_check = set()
         if payload.clean_diagrams:
-            for i in range(0, len(payload.question_ids), 100):
-                chunk_q = payload.question_ids[i:i + 100]
+            for i in range(0, len(safe_delete_ids), 100):
+                chunk_q = safe_delete_ids[i:i + 100]
                 placeholders = ",".join(["?"] * len(chunk_q))
                 c.execute(f"SELECT diagram_urls FROM questions WHERE id IN ({placeholders}) AND has_diagram = 1", chunk_q)
                 for r in c.fetchall():
@@ -466,8 +506,8 @@ def delete_questions_batch(
                         except Exception:
                             pass
 
-        for i in range(0, len(payload.question_ids), 200):
-            chunk = payload.question_ids[i:i + 200]
+        for i in range(0, len(safe_delete_ids), 200):
+            chunk = safe_delete_ids[i:i + 200]
             placeholders = ",".join(["?"] * len(chunk))
             c.execute(f"DELETE FROM questions WHERE id IN ({placeholders})", chunk)
             deleted_count += getattr(c, "rowcount", len(chunk))

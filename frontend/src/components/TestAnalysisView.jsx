@@ -519,7 +519,7 @@ export default function TestAnalysisView({
 
     const examType = data.exam_type || (data.mode?.includes('ADVANCED') ? 'ADVANCED' : 'MAIN');
     const isAdvanced = examType === 'ADVANCED';
-    const totalQuestions = data.questions.length;
+    const totalQuestions = data.total_questions || data.questions.length;
     const durationMinutes = data.duration_minutes || 180;
     const totalMarks = data.max_marks || totalQuestions * 4;
 
@@ -663,7 +663,7 @@ export default function TestAnalysisView({
   const isMultiplayer = (data.participants || []).length > 1;
   const userAnswers = myParticipant.answers || {};
   const questionsList = data.questions || [];
-  const totalQuestions = questionsList.length;
+  const totalQuestions = data.total_questions || (data.max_marks ? Math.round(Number(data.max_marks) / 4) : questionsList.length);
 
   // Process all questions into uniform diagnostic structure
   let correctCount = 0;
@@ -892,7 +892,7 @@ export default function TestAnalysisView({
     myParticipant.marks = totalMarks;
   }
   const droppedCount = processedQuestions.filter((pq) => pq.isDropped).length;
-  const maxPossibleMarks = totalQuestions * 4;
+  const maxPossibleMarks = Number(data.max_marks) || (totalQuestions * 4);
   const scorePercent = maxPossibleMarks > 0 ? Math.round((totalMarks / maxPossibleMarks) * 100) : 0;
 
   // Negative marking impact (5-mark swing!)
@@ -913,8 +913,8 @@ export default function TestAnalysisView({
     const prevTotal = previousTest.max_marks || (previousTest.total_questions ? previousTest.total_questions * 4 : 300);
     const prevAcc = previousTest.accuracy || 0;
 
-    // Scale both current test and previous test to 300 standard marks for equitable comparison
-    const currentScaled300 = maxPossibleMarks > 0 ? Math.round((totalMarks / maxPossibleMarks) * 300 * 10) / 10 : 0;
+    // Scale both current test and previous test to 300 standard marks for equitable comparison (keep exact if already 300)
+    const currentScaled300 = maxPossibleMarks === 300 ? totalMarks : (maxPossibleMarks > 0 ? Math.round((totalMarks / maxPossibleMarks) * 300 * 10) / 10 : 0);
     const prevScaled300 = previousTest.scaled_marks_300 !== undefined
       ? Number(previousTest.scaled_marks_300)
       : (prevTotal > 0 ? Math.round((prevMarks / prevTotal) * 300 * 10) / 10 : 0);
