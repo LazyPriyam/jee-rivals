@@ -382,113 +382,101 @@ def vote_on_report(
 @router.get("/reports/room/{room_code}")
 def get_room_reports(room_code: str, user: Optional[dict] = Depends(get_optional_user)):
     """
-    Returns all reports and contender voting statuses for questions in a specific room.
+    Returns all reports for questions in a specific room with strict privacy and anonymity.
     """
     code = room_code.strip().upper()
-    conn = get_connection()
-    c = conn.cursor()
-
-    # Look up room question_ids to ensure reports filed with or without room_code are found
-    c.execute("SELECT id, question_ids FROM rooms WHERE code = ?", (code,))
-    r_row = c.fetchone()
-    q_ids = []
-    if r_row and r_row["question_ids"]:
-        try:
-            raw_qids = json.loads(r_row["question_ids"]) if isinstance(r_row["question_ids"], str) else r_row["question_ids"]
-            q_ids = [qid for qid in raw_qids if qid]
-        except Exception:
-            q_ids = []
-
-    # STRICT ROOM ISOLATION: Question reports filed in a room belong strictly to that room.
-    # Reports filed in other rooms or tests must NEVER leak into this room's results or derivations.
-    query = "SELECT * FROM question_reports WHERE room_code = ? ORDER BY created_at ASC"
-    c.execute(query, (code,))
-    rows = [dict(r) for r in c.fetchall()]
-
-    result = {}
-    current_uid = str(user.get("id") or "") if user else ""
-    is_admin = bool(user and user.get("is_admin"))
-
-    for r in rows:
-        qid = r["question_id"]
-        status_norm = (r.get("status") or "PENDING").upper()
-        is_my_report = bool(current_uid and str(r.get("reporter_id") or "") == current_uid)
-
-        # STRICT PRIVACY & NORMALCY:
-        # If a question report is NOT approved yet, other students must not see it at all (it stays completely normal for them).
-        # Only the student who filed the report can see their pending status.
-        # Once approved, all students see the approved status and bonus marks, but reporter identity is completely anonymous.
-        if status_norm not in ("APPROVED", "QUARANTINED") and not is_my_report and not is_admin:
-            continue
-
-        result[qid] = {
-            "id": r["id"],
-            "question_id": qid,
-            "reporter_id": r.get("reporter_id") if (is_my_report or is_admin) else None,
-            "reporter_username": None, # Never expose reporter identity to other students
-            "reason": r.get("reason"),
-            "notes": r.get("notes") if (is_my_report or is_admin) else None,
-            "status": r.get("status"),
-            "created_at": r.get("created_at")
-        }
-
-    # Automatically identify quarantined/defective questions in this room
+    conn = None
     try:
-        c.execute("SELECT question_ids FROM rooms WHERE code = ?", (code,))
+        conn = get_connection()
+        c = conn.cursor()
+
+        # Look up room question_ids to ensure reports filed with or without room_code are found
+        c.execute("SELECT id, question_ids FROM rooms WHERE code = ?", (code,))
         r_row = c.fetchone()
-        if r_row:
-            raw_qids = r_row[0] if isinstance(r_row, (list, tuple)) else r_row["question_ids"]
-            room_qids = json.loads(raw_qids) if isinstance(raw_qids, str) else (raw_qids or [])
-            room_qids_str = [str(x) for x in room_qids if x]
-            if room_qids_str:
-                placeholders = ",".join("?" for _ in room_qids_str)
-                c.execute(f"SELECT id FROM questions WHERE id IN ({placeholders}) AND validation_status = 'QUARANTINED'", tuple(room_qids_str))
+        q_ids = []
+        if r_row and r_row["question_ids"]:
+            try:
+                raw_qids = json.loads(r_row["question_ids"]) if isinstance(r_row["question_ids"], str) else r_row["question_ids"]
+                q_ids = [str(qid) for qid in raw_qids if qid]
+            except Exception:
+                q_ids = []
+
+        # STRICT ROOM ISOLATION: Question reports filed in a room belong strictly to that room.
+        # Reports filed in other rooms or tests must NEVER leak into this room's results or derivations.
+        query = "SELECT * FROM question_reports WHERE room_code = ? ORDER BY created_at ASC"
+        c.execute(query, (code,))
+        rows = [dict(r) for r in c.fetchall()]
+
+        result = {}
+        current_uid = str(user.get("id") or "") if user else ""
+        is_admin = bool(user and user.get("is_admin"))
+
+        for r in rows:
+            qid = str(r["question_id"])
+            status_norm = (r.get("status") or "PENDING").upper()
+            is_my_report = bool(current_uid and str(r.get("reporter_id") or "") == current_uid)
+
+            # STRICT PRIVACY & NORMALCY:
+            # If a question report is NOT approved yet, other students must not see it at all (it stays completely normal for them).
+            # Only the student who filed the report can see their pending status.
+            # Once approved, all students see the approved status and bonus marks, but reporter identity is completely anonymous.
+            if status_norm not in ("APPROVED", "QUARANTINED") and not is_my_report and not is_admin:
+                continue
+
+            result[qid] = {
+                "id": r["id"],
+                "question_id": qid,
+                "reporter_id": r.get("reporter_id") if (is_my_report or is_admin) else None,
+                "reporter_username": None, # Never expose reporter identity to other students
+                "reason": r.get("reason"),
+                "notes": r.get("notes") if (is_my_report or is_admin) else None,
+                "status": r.get("status"),
+                "created_at": r.get("created_at")
+            }
+
+        # Automatically identify quarantined/defective questions in this room
+        try:
+            if q_ids:
+                q_set = set(q_ids)
+                c.execute("SELECT id FROM questions WHERE validation_status = 'QUARANTINED'")
                 for q_row in c.fetchall():
                     def_id = str(q_row[0] if isinstance(q_row, (list, tuple)) else q_row["id"])
-                    if def_id not in result:
+                    if def_id in q_set and def_id not in result:
                         result[def_id] = {
                             "id": f"quarantined_{def_id}",
                             "question_id": def_id,
-                            "reporter_id": "system",
-                            "reporter_username": "NTA Quality Safeguard",
+                            "reporter_id": None,
+                            "reporter_username": None,
                             "reason": "DEFECTIVE_QUESTION",
                             "notes": "Question confirmed defective and quarantined under official NTA Dropped Question guidelines.",
                             "status": "QUARANTINED",
-                            "consensus_status": "CONSENSUS_AGREED",
-                            "votes": {},
-                            "agree_count": 99,
-                            "disagree_count": 0,
-                            "total_participants": 1,
-                            "user_vote": "AGREE",
-                            "created_at": datetime.datetime.utcnow().isoformat()
+                            "created_at": datetime.datetime.now(datetime.timezone.utc).isoformat()
                         }
-            if "eff5b1bc-a730-4423-b9c3-34423a407bbc" in room_qids_str and "eff5b1bc-a730-4423-b9c3-34423a407bbc" not in result:
-                result["eff5b1bc-a730-4423-b9c3-34423a407bbc"] = {
-                    "id": "quarantined_eff5b1bc-a730-4423-b9c3-34423a407bbc",
-                    "question_id": "eff5b1bc-a730-4423-b9c3-34423a407bbc",
-                    "reporter_id": "system",
-                    "reporter_username": "NTA Quality Safeguard",
-                    "reason": "DEFECTIVE_QUESTION",
-                    "notes": "Question confirmed defective and quarantined under official NTA Dropped Question guidelines.",
-                    "status": "QUARANTINED",
-                    "consensus_status": "CONSENSUS_AGREED",
-                    "votes": {},
-                    "agree_count": 99,
-                    "disagree_count": 0,
-                    "total_participants": 1,
-                    "user_vote": "AGREE",
-                    "created_at": datetime.datetime.utcnow().isoformat()
-                }
-    except Exception as q_check_err:
-        logger.warning(f"[ROOM_REPORTS] Quarantined check note: {q_check_err}")
+                if "eff5b1bc-a730-4423-b9c3-34423a407bbc" in q_set and "eff5b1bc-a730-4423-b9c3-34423a407bbc" not in result:
+                    result["eff5b1bc-a730-4423-b9c3-34423a407bbc"] = {
+                        "id": "quarantined_eff5b1bc-a730-4423-b9c3-34423a407bbc",
+                        "question_id": "eff5b1bc-a730-4423-b9c3-34423a407bbc",
+                        "reporter_id": None,
+                        "reporter_username": None,
+                        "reason": "DEFECTIVE_QUESTION",
+                        "notes": "Question confirmed defective and quarantined under official NTA Dropped Question guidelines.",
+                        "status": "QUARANTINED",
+                        "created_at": datetime.datetime.now(datetime.timezone.utc).isoformat()
+                    }
+        except Exception as q_check_err:
+            logger.warning(f"[ROOM_REPORTS] Quarantined check note: {q_check_err}")
 
-    conn.close()
-
-    return {
-        "room_code": code,
-        "reports": result,
-        "reports_list": list(result.values())
-    }
+        return {
+            "room_code": code,
+            "reports": result,
+            "reports_list": list(result.values())
+        }
+    finally:
+        if conn:
+            try:
+                conn.close()
+            except Exception:
+                pass
 
 
 @router.get("/reports")
