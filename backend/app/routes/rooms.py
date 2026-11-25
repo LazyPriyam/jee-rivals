@@ -553,6 +553,7 @@ def create_room(req: RoomCreateRequest, user: dict = Depends(get_current_user)):
             user_ids=[user["id"]],
             cumulative_mode=req.cumulative_mode,
             cumulative_buckets=req.cumulative_buckets,
+            allowed_linked_chapters=req.allowed_linked_chapters,
         )
 
     if not q_rows:

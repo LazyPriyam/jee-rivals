@@ -38,6 +38,7 @@ class CreateScheduledTestRequest(BaseModel):
     total_questions: int = Field(default=25, ge=3, le=90)
     subjects: List[str] = Field(default=["Physics", "Chemistry", "Mathematics"])
     chapters: Optional[List[str]] = Field(default=[])
+    allowed_linked_chapters: Optional[List[str]] = Field(default=[])
     scheduled_start_time: str  # ISO timestamp
     deadline_time: str         # ISO timestamp
     assigned_user_ids: List[str] = Field(default=["*"])  # list of user IDs or ["*"] for all
@@ -124,7 +125,8 @@ def create_scheduled_test(
             target_exam=req.exam_type,
             difficulty_tier=strict_difficulty,
             mode="MOCK_TEST",
-            user_ids=target_user_ids
+            user_ids=target_user_ids,
+            allowed_linked_chapters=req.allowed_linked_chapters if req.allowed_linked_chapters else None,
         )
     except Exception as e:
         logger.error(f"Error sampling questions for scheduled test: {e}")

@@ -834,6 +834,7 @@ def select_mock_and_room_questions(
     exclude_room_id: Optional[str] = None,
     cumulative_mode: Optional[bool] = False,
     cumulative_buckets: Optional[Dict[str, List[str]]] = None,
+    allowed_linked_chapters: Optional[List[str]] = None,
 ) -> List[dict]:
     """
     Master question selector for Mock Tests and Battle Rooms:
@@ -921,6 +922,7 @@ def select_mock_and_room_questions(
     # Pre-group all non-quarantined questions by subject
     by_subject_raw: Dict[str, List[dict]] = {s: [] for s in active_subjects}
     norm_chapters_set = build_selected_chapters_set(norm_chapters or filter_chapters)
+    allowed_linked_set = build_selected_chapters_set(allowed_linked_chapters)
 
     for q in all_cached:
         if str(q.get("question_type") or "").strip().upper() == "SUBJECTIVE":
@@ -929,7 +931,9 @@ def select_mock_and_room_questions(
         if q_subj not in by_subject_raw:
             continue
         if norm_chapters_set:
-            if not question_matches_selected_chapters(q, norm_chapters_set):
+            if not question_matches_selected_chapters(
+                q, norm_chapters_set, allowed_linked_chapters_set=allowed_linked_set
+            ):
                 continue
         by_subject_raw[q_subj].append(q)
 

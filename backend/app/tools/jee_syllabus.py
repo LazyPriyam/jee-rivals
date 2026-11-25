@@ -516,14 +516,15 @@ def build_selected_chapters_set(chapters: Optional[Any]) -> Set[str]:
 def question_matches_selected_chapters(
     question: dict,
     selected_chapters_set: Optional[Set[str]],
-    raw_chapter: Optional[str] = None
+    raw_chapter: Optional[str] = None,
+    allowed_linked_chapters_set: Optional[Set[str]] = None
 ) -> bool:
     """
     Evaluates whether a question is eligible given a user's selected chapters for a custom test.
     Rule:
     If selected_chapters_set is provided and non-empty:
-      Both the main chapter AND all linked chapters must belong to the selected chapters.
-      {main_chapter} U {linked_chapters} subset of selected_chapters.
+      1. Main chapter must belong to selected_chapters_set.
+      2. All linked chapters must belong to (selected_chapters_set | allowed_linked_chapters_set).
     If selected_chapters_set is None or empty:
       Full-syllabus / unconstrained test -> returns True.
     """
@@ -538,12 +539,17 @@ def question_matches_selected_chapters(
     if ch_main_norm not in selected_chapters_set and ch_main_raw not in selected_chapters_set:
         return False
 
-    # 2. All linked chapters must also be in selected chapters
+    # 2. All linked chapters must be in selected chapters or explicitly allowed linked chapters
+    allowed_for_linked = (
+        selected_chapters_set | allowed_linked_chapters_set
+        if allowed_linked_chapters_set
+        else selected_chapters_set
+    )
     linked = parse_linked_chapters(question.get("linked_chapters"))
     for lk in linked:
         lk_norm = normalize_chapter_name(lk).lower()
         lk_raw = str(lk).strip().lower()
-        if lk_norm not in selected_chapters_set and lk_raw not in selected_chapters_set:
+        if lk_norm not in allowed_for_linked and lk_raw not in allowed_for_linked:
             return False
 
     return True

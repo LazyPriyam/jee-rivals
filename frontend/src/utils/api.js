@@ -407,6 +407,11 @@ export const api = {
       }),
     getRoomReports: (roomCode) =>
       request(`/api/questions/reports/room/${encodeURIComponent(roomCode)}`),
+    getLinkedSuggestions: (chapters) =>
+      request("/api/questions/linked-suggestions", {
+        method: "POST",
+        body: JSON.stringify({ chapters: chapters || [] }),
+      }),
     getReports: (params = {}) => {
       let q = "";
       if (typeof params === "string") {

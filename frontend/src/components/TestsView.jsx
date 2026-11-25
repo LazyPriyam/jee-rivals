@@ -5,6 +5,7 @@ import { sound } from '../utils/sound';
 import { formatIST, formatISTDate, parseDate } from '../utils/dateUtils';
 import ConicBorder from './animations/ConicBorder';
 import QuestionPaperModal from './QuestionPaperModal';
+import AllowedLinkedChaptersPicker from './AllowedLinkedChaptersPicker';
 import {
   FileText,
   Clock,
@@ -75,6 +76,7 @@ export default function TestsView({ user, onStartTest, onSelectTest, onOpenAuth 
   const [selectedSubjects, setSelectedSubjects] = useState(['Physics', 'Chemistry', 'Mathematics']);
   const [chaptersMap, setChaptersMap] = useState({});
   const [selectedChapters, setSelectedChapters] = useState([]);
+  const [allowedLinkedChapters, setAllowedLinkedChapters] = useState([]);
   const [activeSubjectTab, setActiveSubjectTab] = useState('Physics');
   const [chapterSearch, setChapterSearch] = useState('');
   const [loadingChapters, setLoadingChapters] = useState(false);
@@ -463,11 +465,13 @@ export default function TestsView({ user, onStartTest, onSelectTest, onOpenAuth 
         ? (activeCustomSubjects.length > 0 ? activeCustomSubjects : selectedSubjects)
         : selectedSubjects;
       const effChapters = syllabusScope === 'CUSTOM' ? selectedChapters : [];
+      const effAllowedLinked = syllabusScope === 'CUSTOM' ? allowedLinkedChapters : [];
 
       const payload = {
         ...createForm,
         subjects: effSubjects,
         chapters: effChapters,
+        allowed_linked_chapters: effAllowedLinked,
         scheduled_start_time: new Date(createForm.scheduled_start_time).toISOString(),
         deadline_time: new Date(createForm.deadline_time).toISOString(),
       };
@@ -475,6 +479,7 @@ export default function TestsView({ user, onStartTest, onSelectTest, onOpenAuth 
       try { sound?.play?.('correct') || sound?.click?.(); } catch (_) {}
       setShowCreateModal(false);
       setSelectedChapters([]);
+      setAllowedLinkedChapters([]);
       setSyllabusScope('FULL');
       fetchCatalog();
       alert('Scheduled test successfully generated and assigned!');
@@ -1646,6 +1651,15 @@ export default function TestsView({ user, onStartTest, onSelectTest, onOpenAuth 
                         ))}
                       </div>
                     )}
+
+                    {/* Allowed Linked Chapters (Prerequisites) Picker */}
+                    <AllowedLinkedChaptersPicker
+                      selectedChapters={selectedChapters}
+                      allowedLinkedChapters={allowedLinkedChapters}
+                      onChange={setAllowedLinkedChapters}
+                      chaptersMap={chaptersMap}
+                      accentColor="indigo"
+                    />
                   </div>
                 )}
               </div>

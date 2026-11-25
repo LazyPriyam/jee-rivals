@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { api } from '../utils/api';
 import { sound } from '../utils/sound';
+import AllowedLinkedChaptersPicker from './AllowedLinkedChaptersPicker';
 import {
   BookOpen,
   Clock,
@@ -34,6 +35,7 @@ export default function MocksCenterView({ user, onRoomCreated, onJoinRoomCode, o
   const [syllabusScope, setSyllabusScope] = useState('FULL'); // 'FULL' or 'CUSTOM'
   const [chaptersMap, setChaptersMap] = useState({});
   const [selectedChapters, setSelectedChapters] = useState([]);
+  const [allowedLinkedChapters, setAllowedLinkedChapters] = useState([]);
   const [activeSubjectTab, setActiveSubjectTab] = useState('Physics');
   const [chapterSearch, setChapterSearch] = useState('');
   const [loadingChapters, setLoadingChapters] = useState(false);
@@ -229,6 +231,7 @@ export default function MocksCenterView({ user, onRoomCreated, onJoinRoomCode, o
         preset_name: title,
         subjects: effectiveSubjects,
         chapters: isCustom ? selectedChapters : null,
+        allowed_linked_chapters: isCustom && allowedLinkedChapters.length > 0 ? allowedLinkedChapters : null,
         difficulty_tier: targetExam === 'ADVANCED' ? 'HARD' : 'MIXED',
         target_exam: targetExam,
         question_type_filter: questionTypeFilter,
@@ -811,6 +814,15 @@ export default function MocksCenterView({ user, onRoomCreated, onJoinRoomCode, o
                     ))}
                   </div>
                 )}
+
+                {/* Allowed Linked Chapters (Prerequisites) Picker */}
+                <AllowedLinkedChaptersPicker
+                  selectedChapters={selectedChapters}
+                  allowedLinkedChapters={allowedLinkedChapters}
+                  onChange={setAllowedLinkedChapters}
+                  chaptersMap={chaptersMap}
+                  accentColor="orange"
+                />
               </div>
             )}
           </div>

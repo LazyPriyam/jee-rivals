@@ -179,6 +179,7 @@ class RoomCreateRequest(BaseModel):
     subjects: Optional[List[str]] = None
     chapter: Optional[str] = None
     chapters: Optional[List[str]] = None
+    allowed_linked_chapters: Optional[List[str]] = None
     difficulty_tier: Optional[str] = "MIXED"
     target_exam: Optional[str] = "MIXED"  # "MAIN", "ADVANCED", "MIXED"
     question_type_filter: Optional[str] = "ALL"  # "ALL", "MCQ", "NUMERICAL"

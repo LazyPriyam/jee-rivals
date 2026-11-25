@@ -4,6 +4,7 @@ import random
 import uuid
 import logging
 from typing import List, Optional
+from pydantic import BaseModel
 from fastapi import APIRouter, HTTPException, Query, Depends, Header, status
 
 logger = logging.getLogger(__name__)
@@ -173,6 +174,71 @@ def get_master_syllabus():
             result[subj].append(u_obj)
 
     return result
+
+
+class LinkedSuggestionsRequest(BaseModel):
+    chapters: List[str] = []
+
+
+@router.post("/linked-suggestions")
+def get_linked_chapter_suggestions(req: LinkedSuggestionsRequest):
+    """
+    Given a list of primary chapters, returns linked prerequisite chapters that appear
+    in multi-concept questions of those primary chapters, along with question counts.
+    """
+    if not req.chapters:
+        return {"suggestions": []}
+
+    from backend.app.tools.question_cache import get_all_questions_cached
+    from backend.app.tools.jee_syllabus import (
+        build_selected_chapters_set,
+        normalize_chapter_name,
+        parse_linked_chapters,
+        JEE_SYLLABUS,
+    )
+
+    selected_set = build_selected_chapters_set(req.chapters)
+    if not selected_set:
+        return {"suggestions": []}
+
+    # Build chapter -> subject lookup
+    chap_to_subj = {}
+    for subj, units in JEE_SYLLABUS.items():
+        for u in units:
+            for ch in u.get("chapters", []):
+                chap_to_subj[normalize_chapter_name(ch).lower()] = subj
+
+    linked_counts = {}
+    for q in get_all_questions_cached():
+        if str(q.get("question_type") or "").strip().upper() == "SUBJECTIVE":
+            continue
+        ch_main = q.get("chapter") or ""
+        ch_norm_lower = normalize_chapter_name(ch_main).lower()
+        ch_raw_lower = str(ch_main).strip().lower()
+        if ch_norm_lower not in selected_set and ch_raw_lower not in selected_set:
+            continue
+
+        seen_in_q = set()
+        for lk in parse_linked_chapters(q.get("linked_chapters")):
+            lk_norm = normalize_chapter_name(lk)
+            lk_lower = lk_norm.lower()
+            lk_raw_lower = str(lk).strip().lower()
+            if lk_lower in selected_set or lk_raw_lower in selected_set:
+                continue
+            if lk_lower not in seen_in_q:
+                seen_in_q.add(lk_lower)
+                linked_counts[lk_norm] = linked_counts.get(lk_norm, 0) + 1
+
+    suggestions = [
+        {
+            "chapter": ch,
+            "subject": chap_to_subj.get(ch.lower(), "General"),
+            "count": cnt,
+        }
+        for ch, cnt in linked_counts.items()
+    ]
+    suggestions.sort(key=lambda x: (-x["count"], x["chapter"]))
+    return {"suggestions": suggestions}
 
 
 from backend.app.tools.question_verifier import audit_and_heal_question

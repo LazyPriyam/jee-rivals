@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { api } from '../utils/api';
 import { sound } from '../utils/sound';
+import AllowedLinkedChaptersPicker from './AllowedLinkedChaptersPicker';
 import {
   Sliders,
   Clock,
@@ -50,6 +51,7 @@ export default function CustomGeneratorView({ user, onRoomCreated, onOpenAuth })
   const [selectedSubjects, setSelectedSubjects] = useState(['Physics', 'Chemistry', 'Mathematics']);
   const [activeSubjectTab, setActiveSubjectTab] = useState('Physics');
   const [selectedChapters, setSelectedChapters] = useState([]);
+  const [allowedLinkedChapters, setAllowedLinkedChapters] = useState([]);
   const [chapterSearch, setChapterSearch] = useState('');
 
   // Cumulative 3-Bucket Retention Mode
@@ -321,6 +323,7 @@ export default function CustomGeneratorView({ user, onRoomCreated, onOpenAuth })
         preset_name: roomTitle.trim() || defaultTitle,
         subjects: effectiveSubjects.length > 0 ? effectiveSubjects : selectedSubjects,
         chapters: selectedChapters.length > 0 ? selectedChapters : null,
+        allowed_linked_chapters: selectedChapters.length > 0 && allowedLinkedChapters.length > 0 ? allowedLinkedChapters : null,
         difficulty_tier: difficulty,
         target_exam: targetExam,
         question_type_filter: selectedQuestionTypes.length === 1 ? selectedQuestionTypes[0] : (selectedQuestionTypes.length === 5 ? 'ALL' : 'MIXED'),
@@ -1339,6 +1342,17 @@ export default function CustomGeneratorView({ user, onRoomCreated, onOpenAuth })
                 )}
               </div>
             </div>
+
+            {/* Allowed Linked Chapters (Prerequisites) Picker */}
+            {selectedChapters.length > 0 && (
+              <AllowedLinkedChaptersPicker
+                selectedChapters={selectedChapters}
+                allowedLinkedChapters={allowedLinkedChapters}
+                onChange={setAllowedLinkedChapters}
+                chaptersMap={chaptersMap}
+                accentColor="orange"
+              />
+            )}
 
             {/* Floating Selection Summary Drawer */}
             <div className="mt-6 pt-4 border-t border-white/10 flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-[#1e2433] p-4 rounded-2xl">
