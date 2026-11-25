@@ -371,16 +371,42 @@ def purge_user_account(user_id_or_username: str, reason: str = "administrative_p
         del_row = c.fetchone()
         conn.close()
         if del_row:
+            del_uid = del_row["id"]
+            del_uname = del_row["username"]
+            try:
+                from backend.app.auth import invalidate_user_cache, invalidate_tombstones_cache
+                invalidate_tombstones_cache()
+                invalidate_user_cache(user_id=del_uid, username=del_uname)
+            except Exception:
+                pass
+            try:
+                from backend.app.routes.leaderboards import invalidate_leaderboard_caches
+                invalidate_leaderboard_caches(del_uname)
+            except Exception:
+                pass
+            try:
+                from backend.app.database import purge_user_from_vaults
+                purge_user_from_vaults(del_uid, del_uname)
+            except Exception:
+                pass
             return {
                 "success": True,
                 "message": f"Account '{target}' was already purged.",
-                "user_id": del_row["id"],
-                "username": del_row["username"]
+                "user_id": del_uid,
+                "username": del_uname
             }
         raise ValueError(f"User '{target}' not found.")
 
     uid = user_row["id"]
     uname = user_row["username"]
+
+    # Disconnect user presence from active multiplayer rooms if any
+    try:
+        from backend.app.websockets.room_hub import room_hub
+        for r_code in list(room_hub.rooms.keys()):
+            room_hub.disconnect(r_code, uid)
+    except Exception:
+        pass
 
     try:
         # 1. Activity logs and sessions
@@ -405,6 +431,11 @@ def purge_user_account(user_id_or_username: str, reason: str = "administrative_p
         # 5. Notifications and update tracking
         c.execute("DELETE FROM user_notifications WHERE user_id = ?", (uid,))
         c.execute("DELETE FROM user_update_reads WHERE user_id = ?", (uid,))
+        for extra_tbl in ("user_deleted_tests", "user_daily_goals"):
+            try:
+                c.execute(f"DELETE FROM {extra_tbl} WHERE user_id = ?", (uid,))
+            except Exception:
+                pass
 
         # 6. Primary user record
         c.execute("DELETE FROM users WHERE id = ?", (uid,))

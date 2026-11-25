@@ -12,7 +12,8 @@ from backend.app.models import (
 from backend.app.database import get_connection, get_user_by_username, get_user_by_id
 from backend.app.auth import (
     hash_pin, verify_pin, create_access_token, get_current_user,
-    invalidate_user_cache, invalidate_tombstones_cache, get_cached_tombstones
+    invalidate_user_cache, invalidate_tombstones_cache, get_cached_tombstones,
+    is_account_tombstoned
 )
 from backend.app.websockets.room_hub import room_hub
 import time
@@ -295,8 +296,7 @@ def register(req: UserRegisterRequest):
         )
 
     # Check tombstones: permanently retired accounts cannot be re-registered
-    tombstones = get_cached_tombstones()
-    if username.lower() in tombstones:
+    if is_account_tombstoned(None, username):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Callsign '{username}' was permanently deleted and cannot be re-registered. Please choose another nickname."
@@ -354,17 +354,20 @@ def register(req: UserRegisterRequest):
         backup_all_users()
     except Exception:
         pass
+    try:
+        from backend.app.routes.leaderboards import invalidate_leaderboard_caches
+        invalidate_leaderboard_caches(username)
+    except Exception:
+        pass
     return AuthResponse(token=token, user=format_user_profile(user))
 
 
 @router.post("/login", response_model=AuthResponse)
 def login(req: UserLoginRequest, background_tasks: BackgroundTasks):
     username = req.username.strip()
-    username_lower = username.lower()
 
-    # Fast in-memory tombstone barrier (0.001ms - zero network round trips)
-    tombstones = get_cached_tombstones()
-    if username_lower in tombstones:
+    # Tombstone barrier (checks both cache and SQLite deleted_accounts)
+    if is_account_tombstoned(None, username):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=f"Account '{username}' was permanently deleted and cannot be accessed."
@@ -774,73 +777,8 @@ def delete_account(req: DeleteAccountRequest, user: dict = Depends(get_current_u
             detail="Security PIN is incorrect. Account deletion rejected."
         )
 
-    user_id = user["id"]
-
-    # Disconnect user presence from active multiplayer rooms if any
-    try:
-        from backend.app.websockets.room_hub import room_hub
-        for r_code in list(room_hub.rooms.keys()):
-            room_hub.disconnect(r_code, user_id)
-    except Exception:
-        pass
-
-    conn = get_connection()
-    c = conn.cursor()
-
-    try:
-        # 1. Activity logs and sessions
-        c.execute("DELETE FROM activity_log WHERE user_id = ?", (user_id,))
-        c.execute("DELETE FROM adaptive_sessions WHERE user_id = ?", (user_id,))
-        c.execute("DELETE FROM user_rank_history WHERE user_id = ?", (user_id,))
-
-        # 2. Mastery and FSRS memory
-        c.execute("DELETE FROM user_chapter_elo WHERE user_id = ?", (user_id,))
-        c.execute("DELETE FROM user_fsrs_states WHERE user_id = ?", (user_id,))
-        c.execute("DELETE FROM question_bookmarks WHERE user_id = ?", (user_id,))
-
-        # 3. Multiplayer rooms & tournaments
-        c.execute("DELETE FROM room_participants WHERE user_id = ?", (user_id,))
-        c.execute("DELETE FROM tournament_participants WHERE user_id = ?", (user_id,))
-
-        # 4. Social graph: friendships, challenges, messages
-        c.execute("DELETE FROM friends WHERE user_id = ? OR friend_id = ?", (user_id, user_id))
-        c.execute("DELETE FROM direct_challenges WHERE sender_id = ? OR receiver_id = ?", (user_id, user_id))
-        c.execute("DELETE FROM direct_messages WHERE sender_id = ? OR receiver_id = ?", (user_id, user_id))
-
-        # 5. Notifications and update tracking
-        c.execute("DELETE FROM user_notifications WHERE user_id = ?", (user_id,))
-        c.execute("DELETE FROM user_update_reads WHERE user_id = ?", (user_id,))
-
-        # 6. Primary user record
-        c.execute("DELETE FROM users WHERE id = ?", (user_id,))
-
-        # 7. Record in deleted_accounts tombstone registry
-        now_iso = datetime.datetime.utcnow().isoformat()
-        c.execute("""
-            INSERT OR REPLACE INTO deleted_accounts (id, username, deleted_at, reason)
-            VALUES (?, ?, ?, 'user_pin_purge')
-        """, (user_id, user["username"], now_iso))
-
-        conn.commit()
-    finally:
-        conn.close()
-
-    # Clear all in-memory caches immediately
-    invalidate_tombstones_cache()
-    invalidate_user_cache(user_id, user["username"])
-    try:
-        from backend.app.routes.leaderboards import invalidate_leaderboard_caches
-        invalidate_leaderboard_caches(user["username"])
-    except Exception as e:
-        print(f"[DELETE] Note invalidating leaderboard caches: {e}")
-
-    # 8. Immediately purge from persistent JSON vaults
-    try:
-        from backend.app.database import purge_user_from_vaults, backup_all_users
-        purge_user_from_vaults(user_id, user["username"])
-        backup_all_users()
-    except Exception as e:
-        print(f"[DELETE] Note purging vaults: {e}")
+    from backend.app.tools.security_engine import purge_user_account
+    purge_user_account(user["id"], reason="user_pin_purge")
 
     return {
         "message": f"Aspirant account '{user['username']}' and all associated records have been permanently deleted.",

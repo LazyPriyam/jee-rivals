@@ -663,34 +663,6 @@ def upsert_admin_users(
     return {"success": True, "upserted_count": upserted}
 
 
-def _execute_admin_user_deletion(user_id: str, c):
-    # 1. Activity logs and sessions
-    c.execute("DELETE FROM activity_log WHERE user_id = ?", (user_id,))
-    c.execute("DELETE FROM adaptive_sessions WHERE user_id = ?", (user_id,))
-    c.execute("DELETE FROM user_rank_history WHERE user_id = ?", (user_id,))
-
-    # 2. Mastery and FSRS memory
-    c.execute("DELETE FROM user_chapter_elo WHERE user_id = ?", (user_id,))
-    c.execute("DELETE FROM user_fsrs_states WHERE user_id = ?", (user_id,))
-    c.execute("DELETE FROM question_bookmarks WHERE user_id = ?", (user_id,))
-
-    # 3. Multiplayer rooms & tournaments
-    c.execute("DELETE FROM room_participants WHERE user_id = ?", (user_id,))
-    c.execute("DELETE FROM tournament_participants WHERE user_id = ?", (user_id,))
-
-    # 4. Social graph: friendships, challenges, messages
-    c.execute("DELETE FROM friends WHERE user_id = ? OR friend_id = ?", (user_id, user_id))
-    c.execute("DELETE FROM direct_challenges WHERE sender_id = ? OR receiver_id = ?", (user_id, user_id))
-    c.execute("DELETE FROM direct_messages WHERE sender_id = ? OR receiver_id = ?", (user_id, user_id))
-
-    # 5. Notifications and update tracking
-    c.execute("DELETE FROM user_notifications WHERE user_id = ?", (user_id,))
-    c.execute("DELETE FROM user_update_reads WHERE user_id = ?", (user_id,))
-
-    # 6. Primary user record
-    c.execute("DELETE FROM users WHERE id = ?", (user_id,))
-
-
 @router.delete("/users/{user_id}")
 def admin_delete_user(user_id: str, x_sync_token: Optional[str] = Header(None, alias="X-Sync-Token")):
     if not x_sync_token or x_sync_token != ADMIN_SYNC_TOKEN:
@@ -699,32 +671,17 @@ def admin_delete_user(user_id: str, x_sync_token: Optional[str] = Header(None, a
             detail="Invalid or missing sync authentication token."
         )
 
-    conn = get_connection()
-    c = conn.cursor()
-    c.execute("SELECT id, username FROM users WHERE id = ?", (user_id,))
-    row = c.fetchone()
-    if not row:
-        conn.close()
-        raise HTTPException(status_code=404, detail=f"User with ID '{user_id}' not found.")
-
-    uname = row["username"]
+    from backend.app.tools.security_engine import purge_user_account
     try:
-        _execute_admin_user_deletion(user_id, c)
-        conn.commit()
-    finally:
-        conn.close()
-
-    try:
-        from backend.app.database import backup_all_users
-        backup_all_users()
-    except Exception:
-        pass
+        res = purge_user_account(user_id, reason="admin_gui_purge")
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
 
     return {
         "success": True,
-        "message": f"Account '{uname}' ({user_id}) and all associated records permanently purged by admin.",
-        "deleted_user_id": user_id,
-        "deleted_username": uname
+        "message": f"Account '{res['username']}' ({res['user_id']}) and all associated records permanently purged by admin.",
+        "deleted_user_id": res["user_id"],
+        "deleted_username": res["username"]
     }
 
 
@@ -736,40 +693,21 @@ def admin_delete_user_post(payload: AdminDeleteUserPayload, x_sync_token: Option
             detail="Invalid or missing sync authentication token."
         )
 
-    conn = get_connection()
-    c = conn.cursor()
-    if payload.user_id:
-        c.execute("SELECT id, username FROM users WHERE id = ?", (payload.user_id,))
-    elif payload.username:
-        c.execute("SELECT id, username FROM users WHERE username = ?", (payload.username,))
-    else:
-        conn.close()
+    target = payload.user_id or payload.username
+    if not target:
         raise HTTPException(status_code=400, detail="Must provide user_id or username.")
 
-    row = c.fetchone()
-    if not row:
-        conn.close()
-        raise HTTPException(status_code=404, detail="User not found.")
-
-    uid = row["id"]
-    uname = row["username"]
+    from backend.app.tools.security_engine import purge_user_account
     try:
-        _execute_admin_user_deletion(uid, c)
-        conn.commit()
-    finally:
-        conn.close()
-
-    try:
-        from backend.app.database import backup_all_users
-        backup_all_users()
-    except Exception:
-        pass
+        res = purge_user_account(target, reason="admin_gui_purge")
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
 
     return {
         "success": True,
-        "message": f"Account '{uname}' ({uid}) and all associated records permanently purged by admin.",
-        "deleted_user_id": uid,
-        "deleted_username": uname
+        "message": f"Account '{res['username']}' ({res['user_id']}) and all associated records permanently purged by admin.",
+        "deleted_user_id": res["user_id"],
+        "deleted_username": res["username"]
     }
 
 

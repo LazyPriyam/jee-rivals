@@ -54,65 +54,60 @@ def decode_token(token: str) -> Optional[dict]:
         pass
     return None
 
+def is_account_tombstoned(user_id: Optional[str] = None, username: Optional[str] = None) -> bool:
+    """
+    Checks both in-memory tombstone cache and SQLite deleted_accounts table
+    so deleted accounts are immediately rejected everywhere.
+    """
+    uid = str(user_id).strip() if user_id else ""
+    uname_lower = str(username).strip().lower() if username else ""
+    if not uid and not uname_lower:
+        return False
+
+    tombstones = get_cached_tombstones()
+    if (uid and uid in tombstones) or (uname_lower and uname_lower in tombstones):
+        return True
+
+    try:
+        conn = get_connection()
+        c = conn.cursor()
+        c.execute(
+            "SELECT 1 FROM deleted_accounts WHERE (id != '' AND id = ?) OR (username != '' AND LOWER(username) = ?)",
+            (uid, uname_lower),
+        )
+        found = c.fetchone() is not None
+        conn.close()
+        if found:
+            invalidate_tombstones_cache()
+        return found
+    except Exception:
+        return False
+
+
 def restore_user_from_token_payload(payload: dict) -> Optional[dict]:
     """
-    Safely self-heals/restores an authenticated user account into SQLite
+    Safely self-heals/restores an authenticated user account from persistent vaults
     if the cloud container underwent an ephemeral restart or storage wipe.
-    Strictly checks tombstone registry so deleted accounts are NEVER resurrected.
+    Strictly checks tombstone registry and NEVER creates a blank shell user for deleted accounts.
     """
     user_id = payload.get("sub")
     username = payload.get("username")
     if not user_id or not username:
         return None
 
-    # Tombstone barrier: strictly reject deleted accounts
+    if is_account_tombstoned(user_id, username):
+        return None
+
     try:
-        conn = get_connection()
-        c = conn.cursor()
-        c.execute("SELECT 1 FROM deleted_accounts WHERE id = ? OR LOWER(username) = LOWER(?)", (user_id, username))
-        if c.fetchone():
-            conn.close()
-            return None
-        conn.close()
+        from backend.app.database import restore_users_from_backup
+        restore_users_from_backup()
+        user = get_user_by_id(user_id) or get_user_by_username(username)
+        if user and not is_account_tombstoned(user.get("id"), user.get("username")):
+            return user
     except Exception:
         pass
 
-    try:
-        # Check persistent backup first to preserve complete progress
-        try:
-            from backend.app.database import restore_users_from_backup, backup_all_users
-            restore_users_from_backup()
-            user = get_user_by_id(user_id) or get_user_by_username(username)
-            if user:
-                return user
-        except Exception:
-            pass
-
-        conn = get_connection()
-        c = conn.cursor()
-        now = datetime.datetime.utcnow().isoformat()
-        phash = payload.get("pin_hash") or hash_pin("1234")
-        c.execute("""
-            INSERT OR IGNORE INTO users (
-                id, username, pin_hash, avatar_id, title,
-                overall_elo, physics_elo, chemistry_elo, math_elo,
-                current_division, weekly_rp, total_solved, total_correct,
-                gold_medals, silver_medals, bronze_medals,
-                chapter_stats, created_at, last_active
-            ) VALUES (?, ?, ?, 'flame', 'JEE Aspirant', 1200.0, 1200.0, 1200.0, 1200.0, 'BRONZE', 0, 0, 0, 0, 0, 0, '{}', ?, ?)
-        """, (user_id, username, phash, now, now))
-        conn.commit()
-        conn.close()
-        try:
-            backup_all_users()
-        except Exception:
-            pass
-        user = get_user_by_id(user_id)
-        if not user:
-            user = get_user_by_username(username)
-        return user
-    except Exception:
-        return None
+    return None
 
 # In-Memory High-Performance Caching Layer (Eliminates repeated network round-trips to Turso Cloud)
 _USER_CACHE: dict = {}        # user_id -> (timestamp, user_dict)
@@ -225,9 +220,8 @@ def get_current_user(credentials: Optional[HTTPAuthorizationCredentials] = Depen
     user_id = str(payload["sub"])
     username_lower = str(payload.get("username", "")).strip().lower()
 
-    # 1. Fast In-Memory Tombstone Barrier (0.001ms)
-    tombstones = get_cached_tombstones()
-    if user_id in tombstones or username_lower in tombstones:
+    # 1. Tombstone Barrier
+    if is_account_tombstoned(user_id, username_lower):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="This account has been permanently deleted. Please register a new account."
@@ -303,6 +297,9 @@ def get_optional_user(credentials: Optional[HTTPAuthorizationCredentials] = Depe
     if not payload or "sub" not in payload:
         return None
     uid = str(payload["sub"])
+    uname_lower = str(payload.get("username", "")).strip().lower()
+    if is_account_tombstoned(uid, uname_lower):
+        return None
     now = time.time()
     cached = _USER_CACHE.get(uid)
     if cached and (now - cached[0] < 300.0):

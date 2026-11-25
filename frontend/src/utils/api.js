@@ -186,7 +186,13 @@ export async function switchSavedAccount(username) {
       } catch (_) {}
       return me;
     } catch (err) {
-      if (err?.status === 404 || err?.message?.toLowerCase().includes("deleted") || err?.message?.includes("does not exist anymore")) {
+      const msgLower = (err?.message || "").toLowerCase();
+      if (
+        err?.status === 404 ||
+        msgLower.includes("deleted") ||
+        msgLower.includes("does not exist anymore") ||
+        msgLower.includes("account not found")
+      ) {
         removeSavedAccount(acc.username);
         throw err;
       }
@@ -258,11 +264,23 @@ async function request(path, options = {}) {
     }
     const err = new Error(errorDetail);
     err.status = res.status;
+    const detailLower = (errorDetail || "").toLowerCase();
     if (res.status === 404 && (errorDetail.includes("does not exist anymore") || errorDetail.includes("The requested application does not exist anymore"))) {
       purgeUserSessionArtifacts();
       if (typeof window !== "undefined") {
         window.dispatchEvent(new CustomEvent("jee:ghost_404", { detail: errorDetail }));
       }
+    } else if (
+      res.status === 401 &&
+      token &&
+      (detailLower.includes("permanently deleted") || detailLower.includes("user account not found"))
+    ) {
+      const staleUser = getCachedUser();
+      if (staleUser?.username) {
+        removeSavedAccount(staleUser.username);
+      }
+      setToken(null);
+      setCachedUser(null);
     }
     throw err;
   }
