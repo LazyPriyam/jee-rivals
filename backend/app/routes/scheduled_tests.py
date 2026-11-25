@@ -17,7 +17,7 @@ from pydantic import BaseModel, Field
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from backend.app.auth import get_current_user, get_optional_user
-from backend.app.database import get_connection
+from backend.app.database import get_connection, DUMMY_ACCOUNT_EXCLUSION_SQL
 from backend.app.routes.rooms import generate_room_code, get_room_state
 from backend.app.tools.mock_selector import select_mock_and_room_questions
 
@@ -66,9 +66,13 @@ def get_aspirants_roster(user: dict = Depends(get_current_user)):
     """Returns list of registered aspirants for target assignment."""
     conn = get_connection()
     c = conn.cursor()
-    c.execute("""
+    c.execute(f"""
         SELECT id, username, avatar_id, current_division, overall_elo, title
         FROM users
+        WHERE (is_banned IS NULL OR is_banned = 0)
+          AND id NOT IN (SELECT id FROM deleted_accounts)
+          AND LOWER(username) NOT IN (SELECT LOWER(username) FROM deleted_accounts)
+          AND {DUMMY_ACCOUNT_EXCLUSION_SQL}
         ORDER BY overall_elo DESC, username ASC
     """)
     rows = c.fetchall()

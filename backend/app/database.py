@@ -567,6 +567,48 @@ def purge_user_from_vaults(user_id: str, username: str):
         except Exception as e:
             print(f"[PURGE] Error updating master vault: {e}")
 
+DUMMY_ACCOUNT_MATCH_SQL = """
+    (
+        LOWER(username) LIKE 'test\\_%' ESCAPE '\\'
+        OR LOWER(username) LIKE 'new\\_%' ESCAPE '\\'
+        OR LOWER(username) IN (
+            'creatoruser', 'studentuser', 'adminuser', 'reporterstudent',
+            'extcreator', 'extotheruser', 'upgcreator', 'upgstudent', 'finishedstudent'
+        )
+    )
+"""
+
+DUMMY_ACCOUNT_EXCLUSION_SQL = f"NOT {DUMMY_ACCOUNT_MATCH_SQL}"
+
+
+def purge_dummy_accounts(conn: sqlite3.Connection) -> int:
+    """
+    Removes automated/dummy test accounts from `users` and records tombstones in `deleted_accounts`
+    so they cannot appear on leaderboards or be resurrected from older backups.
+    """
+    c = conn.cursor()
+    c.execute(f"SELECT id, username FROM users WHERE {DUMMY_ACCOUNT_MATCH_SQL}")
+    dummy_rows = c.fetchall()
+    if not dummy_rows:
+        return 0
+
+    now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    for row in dummy_rows:
+        uid = row["id"] if hasattr(row, "keys") else row[0]
+        uname = row["username"] if hasattr(row, "keys") else row[1]
+        c.execute(
+            """
+            INSERT OR REPLACE INTO deleted_accounts (id, username, deleted_at, reason)
+            VALUES (?, ?, ?, ?)
+            """,
+            (uid, uname, now_iso, "Purged dummy test account"),
+        )
+
+    c.execute(f"DELETE FROM users WHERE {DUMMY_ACCOUNT_MATCH_SQL}")
+    conn.commit()
+    return len(dummy_rows)
+
+
 def init_db():
     conn = get_connection()
     try:
@@ -589,6 +631,7 @@ def init_db():
         # Self-healing persistent accounts protection
         try:
             restore_users_from_backup(conn)
+            purge_dummy_accounts(conn)
             backup_all_users(conn)
         except Exception as e:
             print(f"[INIT_DB] Backup sync note: {e}")

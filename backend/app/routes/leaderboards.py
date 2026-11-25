@@ -4,7 +4,7 @@ import time
 from typing import List, Optional, Dict, Any, Tuple
 from fastapi import APIRouter, HTTPException, Query, Depends
 
-from backend.app.database import get_connection, get_user_by_username
+from backend.app.database import get_connection, get_user_by_username, DUMMY_ACCOUNT_EXCLUSION_SQL
 from backend.app.models import UserProfile, ProfileUpdateRequest
 from backend.app.auth import get_current_user, get_optional_user
 from backend.app.routes.auth import format_user_profile, invalidate_coverage_cache, is_safe_image_url
@@ -101,21 +101,23 @@ def get_my_division_details(current_user: dict = Depends(get_current_user)):
 
     conn = get_connection()
     c = conn.cursor()
-    c.execute("""
+    c.execute(f"""
         SELECT COUNT(*) as higher FROM users
         WHERE weekly_rp > ?
           AND (is_banned IS NULL OR is_banned = 0)
           AND id NOT IN (SELECT id FROM deleted_accounts)
           AND LOWER(username) NOT IN (SELECT LOWER(username) FROM deleted_accounts)
+          AND {DUMMY_ACCOUNT_EXCLUSION_SQL}
     """, (current_user.get("weekly_rp", 0),))
     higher_count = c.fetchone()["higher"]
     my_rank = higher_count + 1
 
-    c.execute("""
+    c.execute(f"""
         SELECT COUNT(*) as total FROM users
         WHERE (is_banned IS NULL OR is_banned = 0)
           AND id NOT IN (SELECT id FROM deleted_accounts)
           AND LOWER(username) NOT IN (SELECT LOWER(username) FROM deleted_accounts)
+          AND {DUMMY_ACCOUNT_EXCLUSION_SQL}
     """)
     total_users = c.fetchone()["total"]
     conn.close()
@@ -159,7 +161,7 @@ def get_weekly_leaderboard(limit: int = Query(50, ge=1, le=100)):
     conn = get_connection()
     c = conn.cursor()
 
-    c.execute("""
+    c.execute(f"""
         SELECT id, username, avatar_id, avatar_image_url, title, weekly_rp, total_solved, total_correct, overall_elo,
                physics_elo, chemistry_elo, math_elo, gold_medals, silver_medals, bronze_medals, current_streak,
                last_active
@@ -167,16 +169,18 @@ def get_weekly_leaderboard(limit: int = Query(50, ge=1, le=100)):
         WHERE (is_banned IS NULL OR is_banned = 0)
           AND id NOT IN (SELECT id FROM deleted_accounts)
           AND LOWER(username) NOT IN (SELECT LOWER(username) FROM deleted_accounts)
+          AND {DUMMY_ACCOUNT_EXCLUSION_SQL}
         ORDER BY weekly_rp DESC, overall_elo DESC
         LIMIT ?
     """, (limit,))
     rows = [dict(r) for r in c.fetchall()]
 
-    c.execute("""
+    c.execute(f"""
         SELECT COUNT(*) as total FROM users
         WHERE (is_banned IS NULL OR is_banned = 0)
           AND id NOT IN (SELECT id FROM deleted_accounts)
           AND LOWER(username) NOT IN (SELECT LOWER(username) FROM deleted_accounts)
+          AND {DUMMY_ACCOUNT_EXCLUSION_SQL}
     """)
     total_users = c.fetchone()["total"]
     conn.close()
@@ -266,6 +270,7 @@ def get_elo_leaderboard(subject: str = Query("overall"), limit: int = Query(50, 
         WHERE (is_banned IS NULL OR is_banned = 0)
           AND id NOT IN (SELECT id FROM deleted_accounts)
           AND LOWER(username) NOT IN (SELECT LOWER(username) FROM deleted_accounts)
+          AND {DUMMY_ACCOUNT_EXCLUSION_SQL}
         ORDER BY {elo_col} DESC
         LIMIT ?
     """, (limit,))
