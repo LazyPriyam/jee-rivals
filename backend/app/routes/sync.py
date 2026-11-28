@@ -1218,8 +1218,8 @@ def admin_restore_exact_scores(
     if r_4xwvz:
         r_id = r_4xwvz[0] if isinstance(r_4xwvz, (list, tuple)) else r_4xwvz["id"]
         c.execute("UPDATE room_participants SET score = 201, marks = 201.0 WHERE room_id = ? AND user_id = '0a90613a-bcb0-47fe-b4d7-5af41419316e'", (r_id,))
-        c.execute("UPDATE room_participants SET score = 168, marks = 186.0 WHERE room_id = ? AND user_id = '624ae0d6-9f48-4889-b0e2-409ce751c55a'", (r_id,))
-        c.execute("UPDATE room_participants SET score = 75, marks = 103.0 WHERE room_id = ? AND user_id = 'af56d6d2-991b-416d-9109-4f4c3d50df6f'", (r_id,))
+        c.execute("UPDATE room_participants SET score = 186, marks = 186.0 WHERE room_id = ? AND user_id = '624ae0d6-9f48-4889-b0e2-409ce751c55a'", (r_id,))
+        c.execute("UPDATE room_participants SET score = 103, marks = 103.0 WHERE room_id = ? AND user_id = 'af56d6d2-991b-416d-9109-4f4c3d50df6f'", (r_id,))
 
     # Room WGJWJ: LazyPriyam (score 3315, marks 147.0)
     c.execute("SELECT id FROM rooms WHERE code = 'WGJWJ'")
