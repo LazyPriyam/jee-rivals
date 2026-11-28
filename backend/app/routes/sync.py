@@ -906,3 +906,38 @@ def admin_audit_scheduled_test(
         "total_questions": len(q_ids),
         "questions": audit_items,
     }
+
+
+@router.post("/reports/revert-batch")
+def admin_revert_approved_reports(
+    since_iso: str = "2026-11-28T07:20:00",
+    x_sync_token: Optional[str] = Header(None, alias="X-Sync-Token")
+):
+    if not x_sync_token or x_sync_token != ADMIN_SYNC_TOKEN:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or missing sync authentication token."
+        )
+
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute("""
+        UPDATE question_reports
+        SET status = 'PENDING', resolved_at = NULL, resolved_by = NULL
+        WHERE status = 'APPROVED' AND resolved_by = 'Admin (GUI)' AND resolved_at >= ?
+    """, (since_iso,))
+    reverted_reports = c.rowcount
+
+    c.execute("""
+        DELETE FROM user_notifications
+        WHERE type = 'REPORT_APPROVED' AND created_at >= ?
+    """, (since_iso,))
+    deleted_notifs = c.rowcount
+
+    conn.commit()
+    conn.close()
+    return {
+        "success": True,
+        "reverted_reports": reverted_reports,
+        "deleted_notifications": deleted_notifs,
+    }
