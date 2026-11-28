@@ -941,3 +941,250 @@ def admin_revert_approved_reports(
         "reverted_reports": reverted_reports,
         "deleted_notifications": deleted_notifs,
     }
+
+
+@router.post("/reconcile-scores")
+def admin_reconcile_scores(
+    user_id: Optional[str] = None,
+    room_code: Optional[str] = None,
+    dry_run: bool = False,
+    x_sync_token: Optional[str] = Header(None, alias="X-Sync-Token")
+):
+    if not x_sync_token or x_sync_token != ADMIN_SYNC_TOKEN:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or missing sync authentication token."
+        )
+
+    from backend.app.routes.rooms import is_answer_correct
+
+    conn = get_connection()
+    c = conn.cursor()
+
+    # 1. Reset any lingering APPROVED reports on question_reports that would re-trigger dropped marks in get_room_results
+    cleared_reports = 0
+    if not dry_run:
+        c.execute("""
+            UPDATE question_reports
+            SET status = 'PENDING', resolved_at = NULL, resolved_by = NULL
+            WHERE status = 'APPROVED' AND resolved_by = 'Admin (GUI)'
+        """)
+        cleared_reports = c.rowcount
+
+    # 2. Select target rooms
+    if room_code:
+        c.execute("""
+            SELECT id, code, mode, base_correct_score, negative_marking, question_ids
+            FROM rooms
+            WHERE UPPER(code) = UPPER(?) AND status != 'DELETED'
+        """, (room_code.strip(),))
+    else:
+        c.execute("""
+            SELECT id, code, mode, base_correct_score, negative_marking, question_ids
+            FROM rooms
+            WHERE status != 'DELETED'
+        """)
+    rooms = [dict(r) for r in c.fetchall()]
+
+    reconciliation_results = []
+    total_participants_updated = 0
+
+    for rm in rooms:
+        rm_id = rm["id"]
+        rm_code = rm.get("code") or ""
+        base_score = float(rm.get("base_correct_score") or 100.0)
+        neg_penalty = float(rm.get("negative_marking") or -25.0)
+
+        raw_qids = rm.get("question_ids") or "[]"
+        try:
+            q_ids = json.loads(raw_qids) if isinstance(raw_qids, str) else raw_qids
+        except Exception:
+            q_ids = []
+
+        if not q_ids:
+            continue
+
+        # Batch load questions metadata
+        placeholders = ",".join("?" for _ in q_ids)
+        c.execute(f"""
+            SELECT id, correct_answer, question_type, validation_status
+            FROM questions
+            WHERE id IN ({placeholders})
+        """, tuple(str(x) for x in q_ids))
+        q_map = {str(row["id"]): dict(row) for row in c.fetchall()}
+
+        defective_qids = {
+            qid for qid, q in q_map.items()
+            if (q.get("validation_status") or "").upper() == "QUARANTINED"
+        }
+        if "eff5b1bc-a730-4423-b9c3-34423a407bbc" in [str(x) for x in q_ids]:
+            defective_qids.add("eff5b1bc-a730-4423-b9c3-34423a407bbc")
+
+        # Fetch participants
+        if user_id:
+            c.execute("""
+                SELECT user_id, answers, score, marks
+                FROM room_participants
+                WHERE room_id = ? AND user_id = ?
+            """, (rm_id, user_id))
+        else:
+            c.execute("""
+                SELECT user_id, answers, score, marks
+                FROM room_participants
+                WHERE room_id = ?
+            """, (rm_id,))
+        participants = [dict(p) for p in c.fetchall()]
+
+        for p in participants:
+            p_uid = p["user_id"]
+            raw_ans = p.get("answers") or "{}"
+            try:
+                ans_map = json.loads(raw_ans) if isinstance(raw_ans, str) else (raw_ans or {})
+            except Exception:
+                ans_map = {}
+
+            if not isinstance(ans_map, dict):
+                ans_map = {}
+
+            old_marks = float(p["marks"] if p.get("marks") is not None else 0.0)
+            old_score = float(p["score"] if p.get("score") is not None else 0.0)
+
+            new_marks = 0.0
+            new_score = 0
+            altered_items = []
+            modified_ans = dict(ans_map)
+
+            for qid in q_ids:
+                qid_str = str(qid)
+                q_info = q_map.get(qid_str)
+                if not q_info:
+                    continue
+
+                q_sub = modified_ans.get(qid_str)
+                if qid_str in defective_qids:
+                    # Legitimate quarantined defective question
+                    if isinstance(q_sub, dict):
+                        q_sub["correct"] = True
+                        q_sub["is_dropped"] = True
+                        q_sub["delta_marks"] = 4.0
+                        q_sub["delta_score"] = int(base_score)
+                    else:
+                        q_sub = {
+                            "selected": str(q_sub or "SKIPPED"),
+                            "correct": True,
+                            "is_dropped": True,
+                            "delta_marks": 4.0,
+                            "delta_score": int(base_score)
+                        }
+                    modified_ans[qid_str] = q_sub
+                    new_marks += 4.0
+                    new_score += int(base_score)
+                    continue
+
+                # Standard question: strip any illegitimate is_dropped flags
+                user_sel = None
+                was_att = False
+                time_spent = 0
+                if isinstance(q_sub, dict):
+                    user_sel = q_sub.get("selected")
+                    was_att = user_sel not in ("NONE", "SKIPPED", "", None) and q_sub.get("attempted") is not False
+                    time_spent = q_sub.get("time_spent") or q_sub.get("time_spent_seconds") or 0
+                    had_dropped = bool(q_sub.get("is_dropped"))
+                else:
+                    user_sel = str(q_sub or "")
+                    was_att = user_sel not in ("NONE", "SKIPPED", "", None)
+                    had_dropped = False
+
+                if not was_att:
+                    # Skipped question
+                    d_marks = 0.0
+                    d_score = 0
+                    is_corr = False
+                    user_entry = {
+                        "selected": "SKIPPED",
+                        "correct": False,
+                        "delta_marks": d_marks,
+                        "delta_score": d_score,
+                    }
+                    if time_spent:
+                        user_entry["time_spent"] = time_spent
+                        user_entry["time_spent_seconds"] = time_spent
+                    modified_ans[qid_str] = user_entry
+                else:
+                    # Attempted question: evaluate authentic key
+                    c_key = q_info.get("correct_answer") or ""
+                    q_type = q_info.get("question_type") or "MCQ"
+                    is_corr = is_answer_correct(str(user_sel), str(c_key), str(q_type))
+                    if is_corr:
+                        d_marks = 4.0
+                        d_score = int(base_score)
+                    else:
+                        d_marks = -1.0
+                        d_score = int(neg_penalty)
+
+                    user_entry = {
+                        "selected": user_sel,
+                        "correct": is_corr,
+                        "delta_marks": d_marks,
+                        "delta_score": d_score,
+                    }
+                    if time_spent:
+                        user_entry["time_spent"] = time_spent
+                        user_entry["time_spent_seconds"] = time_spent
+                    modified_ans[qid_str] = user_entry
+
+                if had_dropped:
+                    altered_items.append({
+                        "question_id": qid_str,
+                        "was_dropped": True,
+                        "now_correct": is_corr,
+                        "delta_marks": d_marks
+                    })
+
+                new_marks += d_marks
+                new_score += d_score
+
+            marks_diff = round(new_marks - old_marks, 2)
+            score_diff = round(new_score - old_score, 2)
+
+            if abs(marks_diff) > 0.01 or abs(score_diff) > 0.01 or altered_items:
+                reconciliation_results.append({
+                    "room_code": rm_code,
+                    "user_id": p_uid,
+                    "old_marks": old_marks,
+                    "new_marks": new_marks,
+                    "marks_diff": marks_diff,
+                    "old_score": old_score,
+                    "new_score": new_score,
+                    "score_diff": score_diff,
+                    "reverted_questions_count": len(altered_items),
+                })
+                if not dry_run:
+                    c.execute("""
+                        UPDATE room_participants
+                        SET marks = ?, score = ?, answers = ?
+                        WHERE room_id = ? AND user_id = ?
+                    """, (new_marks, new_score, json.dumps(modified_ans), rm_id, p_uid))
+                    total_participants_updated += 1
+
+    # Clean up spurious dropped notifications if not dry run
+    deleted_dropped_notifs = 0
+    if not dry_run:
+        c.execute("""
+            DELETE FROM user_notifications
+            WHERE type IN ('DROPPED_QUESTION_AWARD', 'REPORT_APPROVED')
+              AND created_at >= '2026-11-28T07:00:00'
+        """)
+        deleted_dropped_notifs = c.rowcount
+        conn.commit()
+
+    conn.close()
+
+    return {
+        "success": True,
+        "dry_run": dry_run,
+        "cleared_reports": cleared_reports,
+        "total_participants_updated": total_participants_updated,
+        "deleted_dropped_notifications": deleted_dropped_notifs,
+        "changes": reconciliation_results,
+    }
