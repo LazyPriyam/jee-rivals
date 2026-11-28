@@ -808,3 +808,101 @@ def admin_reconcile_room_marks(
     rows = [dict(r) for r in c.fetchall()]
     conn.close()
     return {"success": True, "room_code": code, "participants": rows, "results_participants": results.get("participants")}
+
+
+@router.get("/scheduled-tests/{test_id}/audit")
+def admin_audit_scheduled_test(
+    test_id: str,
+    x_sync_token: Optional[str] = Header(None, alias="X-Sync-Token")
+):
+    """
+    Spoiler-free metadata & formatting audit for a scheduled test's assigned questions.
+    Returns only structural/syllabus/formatting diagnostics without question text or answers.
+    """
+    if not x_sync_token or x_sync_token != ADMIN_SYNC_TOKEN:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or missing sync authentication token."
+        )
+
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute("SELECT id, title, room_id, subjects, chapters, total_questions FROM scheduled_tests WHERE id = ?", (test_id,))
+    st = c.fetchone()
+    if not st:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Scheduled test not found.")
+
+    st_dict = dict(st)
+    c.execute("SELECT question_ids FROM rooms WHERE id = ?", (st_dict["room_id"],))
+    rm = c.fetchone()
+    if not rm or not rm["question_ids"]:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Room question_ids not found.")
+
+    q_ids = json.loads(rm["question_ids"]) if isinstance(rm["question_ids"], str) else rm["question_ids"]
+    placeholders = ",".join("?" for _ in q_ids)
+    c.execute(f"SELECT * FROM questions WHERE id IN ({placeholders})", tuple(q_ids))
+    q_map = {r["id"]: dict(r) for r in c.fetchall()}
+    conn.close()
+
+    audit_items = []
+    for idx, qid in enumerate(q_ids, 1):
+        q = q_map.get(qid)
+        if not q:
+            audit_items.append({"index": idx, "id": qid, "missing_from_db": True})
+            continue
+
+        txt = str(q.get("text") or "")
+        opts_raw = q.get("options") or "[]"
+        try:
+            opts = json.loads(opts_raw) if isinstance(opts_raw, str) else opts_raw
+        except Exception:
+            opts = []
+        lk_raw = q.get("linked_chapters") or "[]"
+        try:
+            lk = json.loads(lk_raw) if isinstance(lk_raw, str) else lk_raw
+        except Exception:
+            lk = []
+        diag_raw = q.get("diagram_urls") or "[]"
+        try:
+            diags = json.loads(diag_raw) if isinstance(diag_raw, str) else diag_raw
+        except Exception:
+            diags = []
+
+        issues = []
+        if not txt.strip():
+            issues.append("empty_text")
+        if txt.count("$") % 2 != 0:
+            issues.append("unclosed_dollar_latex")
+        qtype = str(q.get("question_type") or "").upper()
+        if qtype != "NUMERICAL" and (not isinstance(opts, list) or len(opts) < 2):
+            issues.append("missing_or_insufficient_options")
+        if not str(q.get("correct_answer") or "").strip():
+            issues.append("missing_correct_answer")
+        if q.get("has_diagram") and (not isinstance(diags, list) or len(diags) == 0):
+            issues.append("missing_diagram_urls")
+        if str(q.get("validation_status") or "").upper() != "VALIDATED":
+            issues.append(f"status_{q.get('validation_status')}")
+
+        audit_items.append({
+            "index": idx,
+            "id": qid,
+            "subject": q.get("subject"),
+            "chapter": q.get("chapter"),
+            "linked_chapters": lk,
+            "question_type": qtype,
+            "validation_status": q.get("validation_status"),
+            "has_diagram": bool(q.get("has_diagram")),
+            "diagram_count": len(diags) if isinstance(diags, list) else 0,
+            "issues": issues,
+        })
+
+    return {
+        "test_id": st_dict["id"],
+        "title": st_dict["title"],
+        "subjects": json.loads(st_dict["subjects"]) if isinstance(st_dict["subjects"], str) else st_dict["subjects"],
+        "chapters": json.loads(st_dict["chapters"]) if isinstance(st_dict["chapters"], str) else st_dict["chapters"],
+        "total_questions": len(q_ids),
+        "questions": audit_items,
+    }
