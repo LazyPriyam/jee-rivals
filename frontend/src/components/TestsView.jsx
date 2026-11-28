@@ -382,6 +382,7 @@ export default function TestsView({ user, onStartTest, onSelectTest, onOpenAuth 
   const handleClearAllChapters = () => {
     try { sound?.click?.(); } catch (_) {}
     setSelectedChapters([]);
+    setAllowedLinkedChapters([]);
   };
 
   const unitsInActiveSubject = useMemo(() => {

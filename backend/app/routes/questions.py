@@ -178,16 +178,22 @@ def get_master_syllabus():
 
 class LinkedSuggestionsRequest(BaseModel):
     chapters: List[str] = []
+    include_tested: bool = True
 
 
 @router.post("/linked-suggestions")
 def get_linked_chapter_suggestions(req: LinkedSuggestionsRequest):
     """
     Given a list of primary chapters, returns linked prerequisite chapters that appear
-    in multi-concept questions of those primary chapters, along with question counts.
+    in multi-concept questions of those primary chapters, along with question counts,
+    previously tested chapters from past scheduled tests, and recommended auto-selection.
     """
     if not req.chapters:
-        return {"suggestions": []}
+        return {
+            "suggestions": [],
+            "tested_chapters": [],
+            "recommended_prerequisites": []
+        }
 
     from backend.app.tools.question_cache import get_all_questions_cached
     from backend.app.tools.jee_syllabus import (
@@ -199,7 +205,11 @@ def get_linked_chapter_suggestions(req: LinkedSuggestionsRequest):
 
     selected_set = build_selected_chapters_set(req.chapters)
     if not selected_set:
-        return {"suggestions": []}
+        return {
+            "suggestions": [],
+            "tested_chapters": [],
+            "recommended_prerequisites": []
+        }
 
     # Build chapter -> subject lookup
     chap_to_subj = {}
@@ -208,6 +218,7 @@ def get_linked_chapter_suggestions(req: LinkedSuggestionsRequest):
             for ch in u.get("chapters", []):
                 chap_to_subj[normalize_chapter_name(ch).lower()] = subj
 
+    # 1. Detect multi-concept linked chapters appearing in questions of selected primary chapters
     linked_counts = {}
     for q in get_all_questions_cached():
         if str(q.get("question_type") or "").strip().upper() == "SUBJECTIVE":
@@ -229,16 +240,80 @@ def get_linked_chapter_suggestions(req: LinkedSuggestionsRequest):
                 seen_in_q.add(lk_lower)
                 linked_counts[lk_norm] = linked_counts.get(lk_norm, 0) + 1
 
+    # 2. Extract previously tested chapters across all scheduled tests in the catalog
+    tested_chapters_set = set()
+    if req.include_tested:
+        try:
+            conn = get_connection()
+            c = conn.cursor()
+            c.execute("SELECT chapters FROM scheduled_tests WHERE status != 'DELETED'")
+            for row in c.fetchall():
+                raw_val = row[0] if isinstance(row, (tuple, list)) else row["chapters"]
+                if raw_val:
+                    try:
+                        chs = json.loads(raw_val) if isinstance(raw_val, str) else raw_val
+                        if isinstance(chs, list):
+                            for ch_item in chs:
+                                if ch_item and isinstance(ch_item, str) and ch_item.strip():
+                                    tested_chapters_set.add(normalize_chapter_name(ch_item.strip()))
+                    except Exception:
+                        pass
+            conn.close()
+        except Exception as e:
+            logger.warning(f"[LINKED_SUGGESTIONS] Error querying tested chapters: {e}")
+
+    # Build suggestions list (seen in question bank)
     suggestions = [
         {
             "chapter": ch,
             "subject": chap_to_subj.get(ch.lower(), "General"),
             "count": cnt,
+            "is_tested": bool(normalize_chapter_name(ch) in tested_chapters_set),
         }
         for ch, cnt in linked_counts.items()
     ]
     suggestions.sort(key=lambda x: (-x["count"], x["chapter"]))
-    return {"suggestions": suggestions}
+
+    # Build tested_chapters list (previously tested in tests, excluding primary chapters)
+    tested_list = []
+    for tch in sorted(tested_chapters_set):
+        tch_norm = normalize_chapter_name(tch)
+        tch_lower = tch_norm.lower()
+        if tch_lower in selected_set or tch.lower() in selected_set:
+            continue
+        tested_list.append({
+            "chapter": tch_norm,
+            "subject": chap_to_subj.get(tch_lower, "General"),
+            "linked_count": linked_counts.get(tch_norm, 0),
+            "is_seen_in_bank": bool(linked_counts.get(tch_norm, 0) > 0),
+        })
+
+    # Recommended prerequisites for automatic first-pass selection:
+    # Union of seen linked concepts in questions + previously tested chapters, excluding primary
+    recommended_prerequisites = []
+    seen_rec = set()
+
+    # Priority 1: Seen linked concepts in question bank
+    for s in suggestions:
+        c_norm = s["chapter"]
+        c_low = c_norm.lower()
+        if c_low not in seen_rec and c_low not in selected_set:
+            seen_rec.add(c_low)
+            recommended_prerequisites.append(c_norm)
+
+    # Priority 2: Tested chapters from prior exams
+    for t in tested_list:
+        c_norm = t["chapter"]
+        c_low = c_norm.lower()
+        if c_low not in seen_rec and c_low not in selected_set:
+            seen_rec.add(c_low)
+            recommended_prerequisites.append(c_norm)
+
+    return {
+        "suggestions": suggestions,
+        "tested_chapters": tested_list,
+        "recommended_prerequisites": recommended_prerequisites,
+    }
 
 
 from backend.app.tools.question_verifier import audit_and_heal_question
