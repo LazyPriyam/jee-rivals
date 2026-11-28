@@ -1188,3 +1188,74 @@ def admin_reconcile_scores(
         "deleted_dropped_notifications": deleted_dropped_notifs,
         "changes": reconciliation_results,
     }
+
+
+@router.post("/restore-exact-scores")
+def admin_restore_exact_scores(
+    x_sync_token: Optional[str] = Header(None, alias="X-Sync-Token")
+):
+    if not x_sync_token or x_sync_token != ADMIN_SYNC_TOKEN:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or missing sync authentication token."
+        )
+
+    conn = get_connection()
+    c = conn.cursor()
+
+    # 1. Reset any question_reports back to PENDING and clear resolved metadata
+    c.execute("""
+        UPDATE question_reports
+        SET status = 'PENDING', resolved_at = NULL, resolved_by = NULL
+        WHERE status = 'APPROVED'
+    """)
+    reports_reverted = c.rowcount
+
+    # 2. Restore exact authentic scores in room_participants for LazyPriyam (0a90613a-bcb0-47fe-b4d7-5af41419316e)
+    # Room 4XWVZ (Test #2): LazyPriyam (score 201, marks 201.0), Puranjay (score 168, marks 186.0), Koustav Ray (score 75, marks 103.0)
+    c.execute("SELECT id FROM rooms WHERE code = '4XWVZ'")
+    r_4xwvz = c.fetchone()
+    if r_4xwvz:
+        r_id = r_4xwvz[0] if isinstance(r_4xwvz, (list, tuple)) else r_4xwvz["id"]
+        c.execute("UPDATE room_participants SET score = 201, marks = 201.0 WHERE room_id = ? AND user_id = '0a90613a-bcb0-47fe-b4d7-5af41419316e'", (r_id,))
+        c.execute("UPDATE room_participants SET score = 168, marks = 186.0 WHERE room_id = ? AND user_id = '624ae0d6-9f48-4889-b0e2-409ce751c55a'", (r_id,))
+        c.execute("UPDATE room_participants SET score = 75, marks = 103.0 WHERE room_id = ? AND user_id = 'af56d6d2-991b-416d-9109-4f4c3d50df6f'", (r_id,))
+
+    # Room WGJWJ: LazyPriyam (score 3315, marks 147.0)
+    c.execute("SELECT id FROM rooms WHERE code = 'WGJWJ'")
+    r_wgjwj = c.fetchone()
+    if r_wgjwj:
+        r_id = r_wgjwj[0] if isinstance(r_wgjwj, (list, tuple)) else r_wgjwj["id"]
+        c.execute("UPDATE room_participants SET score = 3315, marks = 147.0 WHERE room_id = ? AND user_id = '0a90613a-bcb0-47fe-b4d7-5af41419316e'", (r_id,))
+
+    # Room QAAV4: LazyPriyam (score 2709, marks 104.0)
+    c.execute("SELECT id FROM rooms WHERE code = 'QAAV4'")
+    r_qaav4 = c.fetchone()
+    if r_qaav4:
+        r_id = r_qaav4[0] if isinstance(r_qaav4, (list, tuple)) else r_qaav4["id"]
+        c.execute("UPDATE room_participants SET score = 2709, marks = 104.0 WHERE room_id = ? AND user_id = '0a90613a-bcb0-47fe-b4d7-5af41419316e'", (r_id,))
+
+    # Room D9DKN: LazyPriyam (score 3341, marks 139.0)
+    c.execute("SELECT id FROM rooms WHERE code = 'D9DKN'")
+    r_d9dkn = c.fetchone()
+    if r_d9dkn:
+        r_id = r_d9dkn[0] if isinstance(r_d9dkn, (list, tuple)) else r_d9dkn["id"]
+        c.execute("UPDATE room_participants SET score = 3341, marks = 139.0 WHERE room_id = ? AND user_id = '0a90613a-bcb0-47fe-b4d7-5af41419316e'", (r_id,))
+
+    # 3. Clean up any spurious notifications
+    c.execute("""
+        DELETE FROM user_notifications
+        WHERE type IN ('DROPPED_QUESTION_AWARD', 'REPORT_APPROVED')
+          AND created_at >= '2026-11-28T07:00:00'
+    """)
+    deleted_notifs = c.rowcount
+
+    conn.commit()
+    conn.close()
+
+    return {
+        "success": True,
+        "reports_reverted": reports_reverted,
+        "deleted_notifications": deleted_notifs,
+        "restored_rooms": ["4XWVZ", "WGJWJ", "QAAV4", "D9DKN"]
+    }
